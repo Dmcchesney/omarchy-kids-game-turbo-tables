@@ -1,0 +1,229 @@
+{
+  "note": "The fixed schedule, the round-robin cursor, and the same cursor seen from four racers. The schedule order is transcribed from Go's canonicalPowerupSchedule; the rounds and the shared-cursor rows are this engine's output, pinned as a regression lock.",
+  "threshold": 12,
+  "handSize": 3,
+  "schedule": [
+    "nitro",
+    "oilSlick",
+    "wrench",
+    "pothole",
+    "rollCage",
+    "pileUp",
+    "turbo",
+    "towHook"
+  ],
+  "definitions": [
+    {
+      "card": "nitro",
+      "bellringerName": "FuelBoost",
+      "scope": "self",
+      "questionDelta": -4,
+      "tier": "common",
+      "stallMs": 0
+    },
+    {
+      "card": "oilSlick",
+      "bellringerName": "GravityWell",
+      "scope": "aoe",
+      "questionDelta": 3,
+      "tier": "common",
+      "stallMs": 0
+    },
+    {
+      "card": "wrench",
+      "bellringerName": "Lightning",
+      "scope": "targeted",
+      "questionDelta": 5,
+      "tier": "uncommon",
+      "stallMs": 3000
+    },
+    {
+      "card": "pothole",
+      "bellringerName": "BlackHole",
+      "scope": "targeted",
+      "questionDelta": 8,
+      "tier": "rare",
+      "stallMs": 2000
+    },
+    {
+      "card": "rollCage",
+      "bellringerName": "Shield",
+      "scope": "self",
+      "questionDelta": 0,
+      "tier": "uncommon",
+      "stallMs": 0
+    },
+    {
+      "card": "pileUp",
+      "bellringerName": "Supernova",
+      "scope": "targeted",
+      "questionDelta": 15,
+      "tier": "legendary",
+      "stallMs": 2000
+    },
+    {
+      "card": "turbo",
+      "bellringerName": "Turbo",
+      "scope": "self",
+      "questionDelta": -10,
+      "tier": "rare",
+      "stallMs": 0
+    },
+    {
+      "card": "towHook",
+      "bellringerName": "Wormhole",
+      "scope": "targeted",
+      "questionDelta": 0,
+      "tier": "legendary",
+      "stallMs": 0
+    }
+  ],
+  "rounds": [
+    {
+      "cursorBefore": 0,
+      "hand": [
+        "nitro",
+        "oilSlick",
+        "wrench"
+      ],
+      "cursorAfter": 3
+    },
+    {
+      "cursorBefore": 3,
+      "hand": [
+        "pothole",
+        "rollCage",
+        "pileUp"
+      ],
+      "cursorAfter": 6
+    },
+    {
+      "cursorBefore": 6,
+      "hand": [
+        "turbo",
+        "towHook",
+        "nitro"
+      ],
+      "cursorAfter": 9
+    },
+    {
+      "cursorBefore": 9,
+      "hand": [
+        "oilSlick",
+        "wrench",
+        "pothole"
+      ],
+      "cursorAfter": 12
+    },
+    {
+      "cursorBefore": 12,
+      "hand": [
+        "rollCage",
+        "pileUp",
+        "turbo"
+      ],
+      "cursorAfter": 15
+    },
+    {
+      "cursorBefore": 15,
+      "hand": [
+        "towHook",
+        "nitro",
+        "oilSlick"
+      ],
+      "cursorAfter": 18
+    },
+    {
+      "cursorBefore": 18,
+      "hand": [
+        "wrench",
+        "pothole",
+        "rollCage"
+      ],
+      "cursorAfter": 21
+    },
+    {
+      "cursorBefore": 21,
+      "hand": [
+        "pileUp",
+        "turbo",
+        "towHook"
+      ],
+      "cursorAfter": 24
+    },
+    {
+      "cursorBefore": 24,
+      "hand": [
+        "nitro",
+        "oilSlick",
+        "wrench"
+      ],
+      "cursorAfter": 27
+    },
+    {
+      "cursorBefore": 27,
+      "hand": [
+        "pothole",
+        "rollCage",
+        "pileUp"
+      ],
+      "cursorAfter": 30
+    },
+    {
+      "cursorBefore": 30,
+      "hand": [
+        "turbo",
+        "towHook",
+        "nitro"
+      ],
+      "cursorAfter": 33
+    },
+    {
+      "cursorBefore": 33,
+      "hand": [
+        "oilSlick",
+        "wrench",
+        "pothole"
+      ],
+      "cursorAfter": 36
+    }
+  ],
+  "sharedCursorAcrossRacers": [
+    {
+      "racerId": "you",
+      "hand": [
+        "nitro",
+        "oilSlick",
+        "wrench"
+      ],
+      "cursorAfter": 3
+    },
+    {
+      "racerId": "bolt",
+      "hand": [
+        "pothole",
+        "rollCage",
+        "pileUp"
+      ],
+      "cursorAfter": 6
+    },
+    {
+      "racerId": "piston",
+      "hand": [
+        "turbo",
+        "towHook",
+        "nitro"
+      ],
+      "cursorAfter": 9
+    },
+    {
+      "racerId": "gasket",
+      "hand": [
+        "oilSlick",
+        "wrench",
+        "pothole"
+      ],
+      "cursorAfter": 12
+    }
+  ]
+}
