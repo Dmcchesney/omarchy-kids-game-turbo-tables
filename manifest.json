@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.dmcchesney.turbo-tables-solo",
+  "name": "Turbo Tables",
+  "version": "0.1.0",
+  "author": "Don McChesney",
+  "description": "Times-table kart sprint. Solo, offline, ages 7 to 11.",
+  "license": "MIT",
+  "kinds": ["overlay", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "TurboTables.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Turbo Tables",
+    "description": "Opens the garage",
+    "category": "Kids",
+    "defaultSection": "right"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "omarchy-kids-game-turbo-tables",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "check:boundary": "node src/tools/check-boundary.ts",
+    "check:bundle": "node src/tools/verify-bundle.ts",
+    "scan": "node src/tools/scan.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}
