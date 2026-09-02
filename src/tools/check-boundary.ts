@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { access, lstat, readFile, readdir } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -47,6 +47,11 @@ async function walk(directory: string): Promise<void> {
     }
   }
 }
+
+try {
+  await access(join(root, "node_modules"));
+  failures.push("node_modules: must never exist inside the plugin checkout (its symlinks fail omarchy plugin validate); tools run through npx");
+} catch {}
 
 await walk(root);
 

@@ -1,11 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { test } from "node:test";
+import assert from "node:assert/strict";
 import { repositoryBootstrap } from "../src/engine/index.ts";
 
-describe("repository bootstrap", () => {
-  it("owns the settled plugin id", () => {
-    expect(repositoryBootstrap).toEqual({
-      pluginId: "io.github.dmcchesney.turbo-tables-solo",
-      schemaVersion: 1,
-    });
+test("repository bootstrap owns the settled plugin id", () => {
+  assert.deepEqual({ ...repositoryBootstrap }, {
+    pluginId: "io.github.dmcchesney.turbo-tables-solo",
+    schemaVersion: 1,
   });
 });

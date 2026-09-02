@@ -16,8 +16,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
       - run: npm test
+      - run: npm run check:types
       - run: npm run check:boundary
       - run: npm run check:bundle
+      - name: Marketplace security baseline
+        run: |
+          git clone --quiet https://github.com/omacom/omarchy-plugin-marketplace.git ../omarchy-plugin-marketplace
+          git -C ../omarchy-plugin-marketplace checkout --quiet 9c59dd37f4b203ba92dbdc69eeb98aa853579146
+          npm run scan

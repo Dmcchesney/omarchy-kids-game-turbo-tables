@@ -12,6 +12,10 @@ Last verified: 2026-09-02 11:00 EDT
 
 The marketplace checkout is the repository sibling expected by `npm run scan`.
 
+## Never install packages inside the plugin checkout
+
+The checkout is mounted into the VM at the plugin path, and `omarchy plugin validate` rejects any symlink inside the folder. A `node_modules` directory contains symlinks (`node_modules/.bin/*`), so `npm install` here breaks validation the moment it runs. The repository therefore has no `devDependencies`: `npm run build`, `check:types`, and `check:bundle` invoke pinned tools through `npx`, which caches them under `~/.npm`, and `npm test` uses Node's built-in runner with native TypeScript. A `preinstall` script refuses `npm install`, and `check:boundary` fails if `node_modules` exists. `check:types` type-checks the pure engine under `src/engine` only; the Node-side tools and tests are validated by running them, since Node type definitions are a package and packages are not installed here.
+
 ## Omarchy VM and SSH
 
 - UTM: 4.7.5
@@ -44,10 +48,17 @@ Then update `HostName` for `omarchy-turbo-tables` in `~/.ssh/config`.
 
 ## SSH smoke commands
 
-The non-graphical SSH session needs `OMARCHY_PATH` for `omarchy-shell`, and Quickshell needs `--any-display` when reading the live Wayland instance.
+The non-graphical SSH session needs `OMARCHY_PATH=/usr/share/omarchy` for both `omarchy-shell` and `omarchy plugin enable|list`; without it `omarchy plugin enable` prints "OMARCHY_PATH is not set" and changes nothing. Quickshell needs `--any-display` when reading the live Wayland instance.
+
+Two traps found on 2026-09-02, both now guarded:
+
+- `omarchy-shell shell toggle <id>` exits 0 even when the plugin is not enabled; the only sign is `summon: plugin not enabled, not summoning` in `qs log`. Always confirm `omarchy plugin list` shows `enabled` and `overlay,bar-widget` before trusting a toggle, and grep the log for `not summoning` after it.
+- Enabling a two-kind plugin wrote only the bar-widget layout entry at first; the overlay needs its own `{ "id": ... }` entry under `plugins` in `~/.config/omarchy/shell.json`. `OMARCHY_PATH=/usr/share/omarchy omarchy plugin enable <id>` writes it correctly. The overlay is enabled now and renders the bootstrap screen.
 
 ```sh
 ssh omarchy-turbo-tables 'cd ~/.config/omarchy/plugins/io.github.dmcchesney.turbo-tables-solo && omarchy plugin validate .'
+
+ssh omarchy-turbo-tables 'OMARCHY_PATH=/usr/share/omarchy omarchy plugin list | grep turbo-tables'
 
 ssh omarchy-turbo-tables 'qs log -p /usr/share/omarchy/shell --any-display --tail 100 --no-color'
 

@@ -3,8 +3,9 @@
     "target": "ES2016",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/engine/**/*.ts"]
 }

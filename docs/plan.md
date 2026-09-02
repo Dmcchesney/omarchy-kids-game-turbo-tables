@@ -55,8 +55,8 @@ omarchy-kids-game-turbo-tables/
 │   ├── MemoryStore.qml
 │   └── run.sh                   qml -I dev/imports dev/Harness.qml --screen Race --seed 42
 ├── tests/
-│   ├── engine/                  vitest specs per module
-│   ├── vectors.spec.ts          replays every vector through src and through engine.mjs
+│   ├── engine/                  node:test specs per module
+│   ├── vectors.test.ts          replays every vector through src and through engine.mjs
 │   ├── qml/                     qmltestrunner specs for ui/ parts
 │   └── entrypoint/              copy of Omarchy's manifest-entrypoints fixture (VM)
 ├── preview.png
@@ -73,7 +73,7 @@ QML imports ECMAScript modules directly: `import "../engine/engine.mjs" as Engin
 - **Target:** `es2016`, ES module output, no Node built-ins, no dependencies in the bundle. esbuild downlevels optional chaining and nullish coalescing; the engine avoids async, generators, and `BigInt`.
 - **Purity:** the engine is a reducer. `step(state, input, now) -> { state, events }`. No timers, no randomness except the seeded generator inside `state`, no I/O. QML owns the clock and calls `step` with elapsed milliseconds; rivals are advanced by the same call.
 - **Determinism:** `rng.ts` is a small xoshiro128** seeded from the race seed; every draw goes through it, including rival think times and rival decisions. Same seed, same history, same race, on Node and in QML.
-- **Bundle parity:** `tests/vectors.spec.ts` replays every vector through the TypeScript source and, separately, through `engine/engine.mjs` loaded as a module, and requires identical output. CI fails if `engine.mjs` is stale relative to `src/`.
+- **Bundle parity:** `tests/vectors.test.ts` replays every vector through the TypeScript source and, separately, through `engine/engine.mjs` loaded as a module, and requires identical output. CI fails if `engine.mjs` is stale relative to `src/`.
 - **Types the UI sees:** `RaceState`, `Racer`, `Lap`, `Hand`, `Card`, `Signal`, `RaceEvent` (a discriminated union: `correct`, `wrong`, `reveal`, `pitCrew`, `lapComplete`, `handDealt`, `cardUsed`, `hit`, `blocked`, `swap`, `passed`, `passedBy`, `finished`, `signal`), and `SaveFile`. Events drive every animation and sound so the UI never re-derives rules.
 
 ## Engine specification (layer 1)
@@ -126,24 +126,21 @@ Screens are plain Qt Quick. They read `Theme` for colors, fonts, and spacing, `S
 brew install qt node
 ```
 
-```bash
-npm install
-```
-
-Dev dependencies only: `typescript`, `esbuild`, `vitest`, `tsx`. Scripts:
+No `npm install`, ever, inside the checkout: the folder is mounted into the VM at the plugin path and `node_modules` symlinks fail `omarchy plugin validate`. Tools are pinned and invoked through `npx`, tests use Node's built-in runner with native TypeScript, and a `preinstall` guard refuses installs. Scripts:
 
 | Script | Does |
 | --- | --- |
-| `npm run build` | esbuild `src/engine/index.ts` → `engine/engine.mjs` (es2016, ESM, minify off so the scanner and reviewers can read it) |
-| `npm test` | vitest over `tests/engine` and `tests/vectors.spec.ts` |
+| `npm run build` | `npx esbuild` `src/engine/index.ts` → `engine/engine.mjs` (es2016, ESM, minify off so the scanner and reviewers can read it) |
+| `npm run check:types` | `npx tsc --noEmit` |
+| `npm test` | `node --test` over `tests/**/*.test.ts` (Node 24 runs TypeScript natively) |
 | `npm run vectors` | regenerate `vectors/` from the seed list |
-| `npm run check:boundary` | the import grep |
+| `npm run check:boundary` | the import grep, forbidden names, symlinks, executables, and a `node_modules` presence check |
 | `npm run check:bundle` | rebuild to a temp path and diff against the committed bundle |
 | `npm run scan` | runs the marketplace's security-baseline scripts against the repo and prints the outcome |
 | `npm run harness -- Race --seed 42` | `qml -I dev/imports dev/Harness.qml` with arguments |
 | `npm run shader` | `qsb --qt6 -o shaders/road.frag.qsb shaders/road.frag` |
 
-CI (`ci.yml`) runs build, test, both checks, and scan on every push, and fails if `engine.mjs` is stale.
+CI (`ci.yml`) runs test, types, boundary, bundle parity, and the marketplace scan (cloning the marketplace at a pinned commit) on every push, and fails if `engine.mjs` is stale.
 
 **VM (layer 3):** the UTM aarch64 Omarchy build. Mount the repo as a UTM shared folder at `~/.config/omarchy/plugins/io.github.<owner>.turbo-tables-solo` inside the VM (a mount, not a symlink). Then:
 
@@ -206,6 +203,7 @@ Each milestone ends with its gate met and CI green. Layers are noted so it is cl
 
 - **Spike, one day, first thing:** enable the plugin with both kinds and confirm the overlay entry is written to `shell.json`. If only the bar entry appears, switch to the bar-widget-hosts-panel structure and record it.
 - Focus: typing digits the moment the overlay opens, Escape closes and returns keys to the desktop, theme change retints the garage live.
+- Never trust a toggle's exit code: confirm `omarchy plugin list` shows the plugin `enabled` with both kinds, and grep `qs log` for `not summoning` after every toggle. Both `omarchy plugin` and `omarchy-shell` need `OMARCHY_PATH=/usr/share/omarchy` over SSH.
 
 **Gate:** `omarchy plugin validate` and `qmllint` clean; the entry-point fixture loads the overlay with mocks; a full Grand Prix played in the VM at 30 fps or better at the internal resolution; the save file survives a hot reload.
 
@@ -283,7 +281,7 @@ Every bar is named, fetchable from this Mac, and comparable side by side. The cr
 | **4 Race view** | `ui/Race.qml`, `TrackView.qml`, `Minimap.qml`, shader, fallback, sprites | the `oppenheimer-rick/omarchy-racer` plugin running in the harness at the same size; the design's race wireframe | side-by-side screenshots and 10-second recordings: reads as looking down the track, the fact is unmistakably primary, minimap legible, callouts and hit pull-back visible, fps counter at or above 60 on the Mac; reduced motion shows no shake | M4 |
 | **5 Flow** | Countdown, Picker, Results, Settings; keyboard flow across all screens | the keyboard flow of `com.columbiafoundry.loderunner` and the results copy rules in the design | a keyboard-only recording of Practice, Time trial, Ghost, and Grand Prix with no mouse; picker on keys 1 2 3; every settings reset asks once; results headline by place; facts to look at present | M3 |
 | **6 Package** | manifest, README, LICENSE, NOTICE, preview, layout, CI, `npm run scan` | the `com.columbiafoundry.loderunner` repository as listed and verified on plugins.omarchy.org | validate clean, scanner `passed` with no capabilities, README has all eight sections, no forbidden file names, no symlinks, bundle parity check green, boundary check green | M0, M6 |
-| **7 Shell** | `TurboTables.qml`, `BarWidget.qml`, `shell/` | the `omarchy.emojis` first-party overlay in the VM | in the VM over SSH: open from the bar button and from the toggle command, digits accepted immediately, Escape closes and the desktop gets keys back, hot reload keeps the save file, theme change retints live, a Grand Prix at or above 30 fps at the internal resolution, screenshots via `grim` | M5 |
+| **7 Shell** | `TurboTables.qml`, `BarWidget.qml`, `shell/` | the `omarchy.emojis` first-party overlay in the VM | in the VM over SSH: `omarchy plugin list` shows enabled with both kinds and the log never says `not summoning`; open from the bar button and from the toggle command, digits accepted immediately, Escape closes and the desktop gets keys back, hot reload keeps the save file, theme change retints live, a Grand Prix at or above 30 fps at the internal resolution, screenshots via `grim` | M5 |
 
 Pieces 1, 2, and 6 are judged largely by evidence the builder cannot argue with: parity output, statistics, scanner output. Pieces 3, 4, 5, and 7 are judged on screenshots and recordings, which is where a harsh critic earns its keep.
 
@@ -292,7 +290,7 @@ Pieces 1, 2, and 6 are judged largely by evidence the builder cannot argue with:
 The skill says to specify minimally and let the agent decide architecture. That holds for internals. These are not internals.
 
 - The design is settled. No new mechanics, no changed numbers, no fourth question form, no free text anywhere, no name field, no network code, no dates in the save file.
-- The boundary holds: nothing under `ui/` or `src/` imports Quickshell or `qs.*`; only the three shell files may.
+- The boundary holds: nothing under `ui/` or `src/` imports Quickshell or `qs.*`; only the three shell files may. Never run `npm install` in the checkout; `node_modules` breaks validation in the VM.
 - The scanner outcome is `passed` on every commit. No `scripts/`, `bin/`, `install*`, `setup*`, no executables, no `sudo` in prose except negated.
 - The committed bundle is rebuilt in the same commit as any engine change.
 - Kid testing is not something the agent does. It does not write anything about a real child anywhere.
