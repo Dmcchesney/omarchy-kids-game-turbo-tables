@@ -28,7 +28,7 @@ If the family also wants to remove earned records and settings, delete `${XDG_DA
 
 ## Permissions and privacy
 
-Turbo Tables makes no network requests. It reads and writes exactly one file it owns, runs nothing privileged, needs no sudo or pkexec, and collects nothing about a child. There is no name field.
+Turbo Tables makes no network requests. It reads and writes exactly one file it owns, runs nothing privileged, never requests elevated access, and collects nothing about a child. There is no name field.
 
 ## Dependencies
 

@@ -29,7 +29,10 @@ await writeFile(metadataPath, JSON.stringify({
   repoUrl,
   commitSha,
   pluginIds: [manifest.id],
-  listedPlugins: [{ pluginId: manifest.id }],
+  listedPlugins: [{
+    pluginId: manifest.id,
+    manifestPathHint: "manifest.json",
+  }],
   entryPoints,
 }, null, 2));
 
