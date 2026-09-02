@@ -1,5 +1,14 @@
+# Nothing may be installed into this checkout: a node_modules directory here
+# breaks `omarchy plugin validate`, because its symlinks are rejected inside a
+# plugin folder. package.json has a preinstall guard as well.
 node_modules/
+package-lock.json
+
 coverage/
 evidence/
 *.log
+
 .DS_Store
+*~
+*.swp
+.qmlls.ini

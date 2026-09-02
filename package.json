@@ -8,11 +8,14 @@
   },
   "scripts": {
     "preinstall": "node -e \"console.error('Do not install packages inside the plugin checkout: node_modules symlinks fail omarchy plugin validate. Tools run through npx; see docs/environment.md.'); process.exit(1)\"",
-    "build": "npx --yes esbuild@0.28.2 src/engine/index.ts --bundle --format=esm --platform=neutral --target=es2016 --outfile=engine/engine.mjs",
+    "build": "node esbuild.config.mjs",
     "check:types": "npx --yes --package=typescript@7.0.2 tsc --noEmit",
     "check:boundary": "node src/tools/check-boundary.ts",
     "check:bundle": "node src/tools/verify-bundle.ts",
+    "check:readme": "node src/tools/check-readme.ts",
     "scan": "node src/tools/scan.ts",
-    "test": "node --test \"tests/**/*.test.ts\""
+    "vectors": "node src/tools/vectors.ts",
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "check": "npm test && npm run check:types && npm run check:boundary && npm run check:bundle && npm run check:readme && npm run scan"
   }
 }

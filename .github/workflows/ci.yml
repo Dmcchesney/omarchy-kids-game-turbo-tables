@@ -7,21 +7,69 @@ on:
 permissions:
   contents: read
 
+env:
+  # scripts/security-baseline*.mjs are imported from this checkout by
+  # npm run scan. Pinned so a marketplace change can never silently alter what
+  # this repository is measured against; bump it deliberately.
+  MARKETPLACE_REPOSITORY: https://github.com/omacom/omarchy-plugin-marketplace.git
+  MARKETPLACE_COMMIT: 9c59dd37f4b203ba92dbdc69eeb98aa853579146
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      # actions/checkout v5.0.0
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      # actions/setup-node v4.4.0. No cache: caching would want a lockfile, and
+      # nothing may be installed into this checkout.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
-      - run: npm test
-      - run: npm run check:types
-      - run: npm run check:boundary
-      - run: npm run check:bundle
-      - name: Marketplace security baseline
+
+      - name: Pin the marketplace security baseline
         run: |
-          git clone --quiet https://github.com/omacom/omarchy-plugin-marketplace.git ../omarchy-plugin-marketplace
-          git -C ../omarchy-plugin-marketplace checkout --quiet 9c59dd37f4b203ba92dbdc69eeb98aa853579146
-          npm run scan
+          set -euo pipefail
+          git init --quiet "${{ runner.temp }}/omarchy-plugin-marketplace"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" remote add origin "$MARKETPLACE_REPOSITORY"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" fetch --quiet --depth 1 origin "$MARKETPLACE_COMMIT"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" checkout --quiet FETCH_HEAD
+          test "$(git -C "${{ runner.temp }}/omarchy-plugin-marketplace" rev-parse HEAD)" = "$MARKETPLACE_COMMIT"
+
+      - name: Engine rules
+        run: npm test
+
+      - name: Types
+        run: npm run check:types
+
+      - name: Boundary, hygiene and manifest
+        run: npm run check:boundary
+
+      # Fails when engine/engine.mjs is not the current build of src/engine, so
+      # a src/engine change cannot land without its rebuilt bundle.
+      - name: Committed bundle is not stale
+        run: npm run check:bundle
+
+      # Asserts the four safety invariants -- no network code, no process or
+      # shell execution, no free-text entry or name field, no stored dates --
+      # against every file in the repository except a printed allow-list, and
+      # against every .qml file with no exception. Then: README.md has to
+      # disclose each of them, may not claim the opposite of one, and each of
+      # its present-tense capability claims has to have code (not a comment)
+      # behind it. The README is the document a parent reads; this is the gate
+      # behind it, and src/tools/check-readme.ts states what it cannot check.
+      - name: Safety invariants, and README claims against the repository
+        run: npm run check:readme
+
+      - name: Marketplace security baseline
+        env:
+          TURBO_TABLES_MARKETPLACE: ${{ runner.temp }}/omarchy-plugin-marketplace
+        run: npm run scan
+
+      - name: Nothing was installed into the checkout
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e node_modules
+          test ! -e package-lock.json

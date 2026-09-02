@@ -1,8 +1,107 @@
 Turbo Tables
 Copyright (c) 2026 Don McChesney
 
-The repository-local Gauntlet Loop skill is adapted from
-https://github.com/robonuggets/gauntlet-loop and is licensed under
-Creative Commons Attribution 4.0 International.
+This product includes software developed by Don McChesney, licensed under the
+MIT License. See LICENSE for the full text.
 
-Game artwork and audio attributions will be recorded here as assets are added.
+--------------------------------------------------------------------------
+Third-party material included in this repository
+--------------------------------------------------------------------------
+
+.claude/skills/gauntlet-loop/
+    The repository-local "gauntlet loop" development skill is adapted from
+    https://github.com/robonuggets/gauntlet-loop and is licensed under the
+    Creative Commons Attribution 4.0 International licence, whose full text is
+    kept alongside it at .claude/skills/gauntlet-loop/LICENSE. It is a
+    development aid only: the shell never loads it and it is not part of the
+    running plugin.
+
+--------------------------------------------------------------------------
+Development material that ships with the plugin, on purpose
+--------------------------------------------------------------------------
+
+Two files in this repository are development material rather than game code,
+and a reviewer is right to ask why an installed plugin carries them. Both are
+kept deliberately, because docs/plan.md requires them in-tree under
+"Prerequisites before kicking it off", and both are revisited at milestone M6
+when the submission commit is tagged.
+
+.claude/skills/gauntlet-loop/   (about 8 KB)
+    Prerequisite 4: "The gauntlet-loop skill is copied into the repository at
+    .claude/skills/gauntlet-loop/." It describes the development workflow this
+    repository is built with. The Omarchy shell never loads it, it is not
+    referenced by manifest.json or by any QML file, and it is attributed above.
+    It is 8 KB of text on the installing machine and it changes nothing about
+    what the plugin does. Alternative considered and rejected for now: moving
+    the skill to a separate repository, which would break the prerequisite the
+    build plan states.
+
+The design mock             (1.78 MB)
+    Prerequisite 3: "these files are committed under docs/: design.md,
+    plan.md, garage-room-mock.png (Sol's Garage Room image), environment.md."
+    That is why the file travels with the design documents that cite it, and
+    docs/design.md:229 states that the invite code and the friend badges are
+    absent from the solo layout. It is the largest file in the repository.
+    The three sentences that describe it are fixed strings in
+    src/tools/check-readme.ts, and README.md carries them verbatim too:
+
+    `docs/garage-room-mock.png` is a design mock of the future multiplayer
+    lobby: an invite code, four named children, ready toggles and APPROVED
+    FRIEND / DEVICE VERIFIED badges, none of which exists in this plugin,
+    which is solo and offline. Only the kart stall on its left, the body,
+    paint and number pickers, is the reference the solo garage will be built
+    against. It is not a screenshot of this plugin and must never be used as
+    its preview.
+
+--------------------------------------------------------------------------
+Game assets
+--------------------------------------------------------------------------
+
+PLACEHOLDER. No game assets have been added yet, so there is nothing to
+attribute in this section. assets/karts/, assets/props/, assets/cards/ and
+assets/sfx/ are empty, and shaders/ holds no shader source. As artwork, sound
+and shaders land they are recorded here, one entry per source, giving the
+title, the author, the licence, and the URL it came from. The project's rule
+for accepting an asset is: original work, or CC0, or a licence at least as
+permissive as MIT, with attribution recorded here whether or not the licence
+demands it.
+
+--------------------------------------------------------------------------
+preview.png
+--------------------------------------------------------------------------
+
+PLACEHOLDER, and currently absent. The marketplace preview image is produced
+at milestone M6 from a real screen recording of the finished game on an
+Omarchy device. Until then this repository ships no preview image rather than
+a picture of something that does not exist. The design mock is not a
+substitute, in the same three fixed sentences used everywhere else:
+
+`docs/garage-room-mock.png` is a design mock of the future multiplayer lobby:
+an invite code, four named children, ready toggles and APPROVED FRIEND /
+DEVICE VERIFIED badges, none of which exists in this plugin, which is solo and
+offline. Only the kart stall on its left, the body, paint and number pickers,
+is the reference the solo garage will be built against. It is not a screenshot
+of this plugin and must never be used as its preview.
+
+--------------------------------------------------------------------------
+How strongly the README's claims are evidenced
+--------------------------------------------------------------------------
+
+Two kinds of claim in README.md rest on different evidence, and a reviewer
+should not have to guess which is which.
+
+Executed and reproducible: everything npm run check covers -- the engine
+rules and their vectors, the type check, the boundary, hygiene and manifest
+rules, the committed bundle's freshness, the README gate itself, and the
+marketplace security baseline. Each of those runs on this machine and in CI
+on every push.
+
+Read from source rather than executed: the Omarchy 4 command surface named in
+README.md -- omarchy plugin add/remove/disable, the omarchy plugin rm alias,
+the --yes flag, the o.bind() form for ~/.config/hypr/bindings.lua, and the
+one-entry-per-disable behaviour of ~/.config/omarchy/shell.json. These were
+read from Omarchy's own plugin scripts and from --help output on a
+development VM. A full add-then-remove cycle has deliberately not been run
+against this checkout, because the removal deletes the plugin folder and this
+checkout is the working tree. Running one on a throwaway clone is an M7 task,
+before submission. No check in this repository verifies any of it.

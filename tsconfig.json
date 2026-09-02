@@ -1,10 +1,16 @@
 {
+  "//": "Layer 1 only. src/engine is the code that ships inside the bundle and it may import nothing but the standard library, so it type-checks with no @types packages. src/tools and tests use Node APIs, which would need @types/node, and installing anything into this checkout breaks omarchy plugin validate; those files are executed by npm run check:* and npm test instead.",
   "compilerOptions": {
     "target": "ES2016",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "strict": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
     "noEmit": true
   },
   "include": ["src/engine/**/*.ts"]
