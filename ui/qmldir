@@ -1,0 +1,5 @@
+# Layer-2 singletons. Only the two adapters are declared: every other screen
+# in this directory is found by the implicit directory lookup, so pieces that
+# add Race.qml, Results.qml and the rest do not have to touch this file.
+singleton Theme 1.0 Theme.qml
+singleton Store 1.0 Store.qml

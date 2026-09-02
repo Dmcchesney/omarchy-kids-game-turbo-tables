@@ -1,0 +1,3 @@
+# The icon grids are a singleton so every part reads one copy. Everything else
+# in this directory is found by the implicit directory lookup.
+singleton Glyphs 1.0 Glyphs.qml
