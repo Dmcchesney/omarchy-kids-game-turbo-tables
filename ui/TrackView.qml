@@ -452,24 +452,24 @@ Item {
     shake = Math.min(1, shake + strength * 0.80)
   }
 
-  // Ground, light and shadow, from the design's Visual style section. Held
-  // here rather than in the shader so a themed desktop retints the track.
-  readonly property color groundTone: Theme.ground
-  readonly property color skyTone: Qt.rgba(Theme.ground.r * 0.62, Theme.ground.g * 0.62,
-                                           Theme.ground.b * 0.80, 1)
-  readonly property color fogTone: Qt.rgba(Theme.ground.r * 0.80 + Theme.tealDeep.r * 0.24,
-                                           Theme.ground.g * 0.80 + Theme.tealDeep.g * 0.24,
-                                           Theme.ground.b * 0.80 + Theme.tealDeep.b * 0.24, 1)
-  // The diagnostic grid is a hairline on a near-black floor, not a lit lattice:
-  // the design's ground is "near-black from the theme's darkest background" and
-  // the grid is a motif on it. Round one drew it at the full teal and the floor
-  // read as water.
-  readonly property color gridTone: Qt.rgba(Theme.ground.r * 0.5 + Theme.tealDeep.r * 0.42,
-                                            Theme.ground.g * 0.5 + Theme.tealDeep.g * 0.42,
-                                            Theme.ground.b * 0.5 + Theme.tealDeep.b * 0.42, 1)
-  readonly property color roadTone: Qt.rgba(0.113, 0.123, 0.142, 1)
-  readonly property color roadToneAlt: Qt.rgba(0.152, 0.165, 0.190, 1)
+  // GOLDEN-HOUR PROTOTYPE PALETTE. Sampled off the bar (see DIRECTION.md):
+  // near-black purple ground, neon magenta grid, purple-tinted tarmac, a
+  // dusk fog and the sun's pink-orange spill. Held here rather than in the
+  // shader so both renderers read one set of numbers. The design's themed
+  // ground (`Theme.ground`) is not used by the floor in this prototype.
+  readonly property color groundTone: "#3c1228"
+  readonly property color gridTone: "#ff4fa3"
+  readonly property color fogTone: "#3a1032"
+  readonly property color roadTone: "#221420"
+  readonly property color roadToneAlt: "#2c1a2a"
   readonly property color laneTone: Theme.cream
+  readonly property color sunTone: "#f0956e"
+  readonly property real sunU: 0.68
+  readonly property real gridAlpha: 0.35
+  // The road's far-centre offset in plane pixels, for the hills' parallax:
+  // `uAt` at the depth of the far road is 0.5 + curve z focal / (2 aspect),
+  // which at z = 18.3 on a 480-wide plane is 2963 * curve.
+  readonly property real lateralPlanePx: curve * 2963
 
   // --------------------------------------------------------- shader or not
   // Two ways the shader path is refused, and both have to be handled or the
@@ -517,17 +517,30 @@ Item {
     }
 
     // The layer is what makes the shader's fragment work an eighth of 1080p.
-    // With the canvas fallback the picture is already 480 x 270 and a layer
-    // would only add a copy, so it is switched off with the shader.
-    layer.enabled: view.shaderMode
+    // It stays on for the canvas fallback too, now that the plane is five
+    // items rather than one: composed at 480 x 270 and blitted once, the
+    // software renderer measures 63 fps at 1080p on this Mac; with each item
+    // scaled up on its own it measured 48. (Before the sky moved in here the
+    // layer was off in canvas mode, because one canvas needs no copy.)
+    layer.enabled: true
     layer.smooth: false
     layer.textureSize: Qt.size(480, 270)
+
+    // The sky, behind the floor. Inside the plane so it renders at 480 x 270
+    // and scales up with the same nearest-neighbour filter as the road.
+    SunsetSky {
+      anchors.fill: parent
+      horizon: view.horizon
+      lateral: view.lateralPlanePx
+      sunX: view.sunU
+    }
 
     ShaderEffect {
       id: roadShader
       anchors.fill: parent
       visible: view.shaderMode
-      blending: false
+      // Transparent above the horizon, where the sky item shows through.
+      blending: true
       fragmentShader: Qt.resolvedUrl("../shaders/road.frag.qsb")
 
       property real horizon: view.horizon
@@ -541,7 +554,11 @@ Item {
       property real stripe: view.stripe
       property real gridScale: view.gridScale
       property real fogDensity: 1.0
-      property real glowAmount: 0.09
+      property real glowAmount: 1.0
+      property real gridAlpha: view.gridAlpha
+      property real sunU: view.sunU
+      property real glowRx: 0.24
+      property real glowRy: 0.08
 
       property color roadColor: view.roadTone
       property color roadAlt: view.roadToneAlt
@@ -550,9 +567,9 @@ Item {
       property color laneColor: view.laneTone
       property color groundColor: view.groundTone
       property color gridColor: view.gridTone
-      property color skyColor: view.skyTone
+      property color skyColor: view.fogTone
       property color fogColor: view.fogTone
-      property color glowColor: Theme.amber
+      property color glowColor: view.sunTone
 
       onStatusChanged: view.noteShaderStatus(status)
     }
@@ -575,6 +592,12 @@ Item {
       drawDistance: view.drawDistance
       nearDistance: view.nearDistance
 
+      glowAmount: 1.0
+      gridAlpha: view.gridAlpha
+      sunU: view.sunU
+      glowRx: 0.24
+      glowRy: 0.08
+
       roadColor: view.roadTone
       roadAlt: view.roadToneAlt
       rumbleColor: Theme.hazard
@@ -582,9 +605,9 @@ Item {
       laneColor: view.laneTone
       groundColor: view.groundTone
       gridColor: view.gridTone
-      skyColor: view.skyTone
+      skyColor: view.fogTone
       fogColor: view.fogTone
-      glowColor: Theme.amber
+      glowColor: view.sunTone
 
       // Under reduced motion nothing calls advance(), so the plane repaints
       // only when the camera itself changes -- which is the static plane the
@@ -597,97 +620,9 @@ Item {
   }
 
   // ------------------------------------------------------------ the backdrop
-  // The far wall of the garage, standing on the horizon: bays of dark steel
-  // with lit windows and a hazard rail along the top.
-  //
-  // Without it the road ran into an empty void, which is what a road renderer
-  // looks like when nobody has decided what is behind it. The design's circuit
-  // is indoors -- "a garage at night, seen from the driver's seat" -- so what
-  // is behind the vanishing point is a wall, and putting one there is the
-  // difference between a plane with a stripe on it and a place.
-  //
-  // It parallaxes with the curve, which is what makes a bend read as a bend
-  // before the road's own edges have moved far enough to say so, and it is
-  // drawn as items rather than in the shader so the fallback gets it too.
-  Item {
-    id: backdrop
-    width: parent.width
-    height: Math.round(view.height * 0.062)
-    y: Math.round(view.horizon * view.height) - height + view.shakeY
-    clip: true
-    z: 1
-
-    readonly property real bayWidth: Math.max(28, view.width / 16)
-    readonly property int bays: Math.ceil(view.width / bayWidth) + 2
-    // A far wall moves a fraction of what the road does. The curve term is the
-    // parallax; the travel term is the slow drift of a wall that is a long way
-    // off but not infinitely far.
-    // Modulo one bay, not the whole row: the row is one bay wider than the
-    // screen and slides within that, so it covers the width at every offset.
-    // Taking the modulo over the whole row was the round-two bug that left the
-    // wall standing off the side of the screen.
-    readonly property real shift: {
-      // `heading` is the integral of the curve along the track -- which way
-      // the car is pointing -- and a wall a long way off moves with the
-      // heading, not with the road's own lateral offset. Round one multiplied
-      // `curve` by 62000 directly; with an authored circuit that is twenty
-      // times the amplitude it was tuned for, and the wall would have whipped.
-      var s = -view.heading - view.travel * 0.55
-      var m = s % bayWidth
-      return m < 0 ? m + bayWidth : m
-    }
-
-    Repeater {
-      model: backdrop.bays
-
-      Item {
-        width: backdrop.bayWidth
-        height: backdrop.height
-        x: (index - 1) * backdrop.bayWidth + backdrop.shift
-
-        Rectangle {
-          anchors.fill: parent
-          color: Qt.rgba(view.groundTone.r * 1.10 + 0.010,
-                         view.groundTone.g * 1.10 + 0.011,
-                         view.groundTone.b * 1.25 + 0.014, 1)
-        }
-        // the pillar between two bays
-        Rectangle {
-          width: Math.max(1, backdrop.bayWidth * 0.10)
-          height: parent.height
-          color: Qt.rgba(0, 0, 0, 0.62)
-        }
-        // A lit window. Two bays in five are dark and one in five is a cold
-        // teal, so the wall is a building with people in some of it rather
-        // than a repeating pattern.
-        Rectangle {
-          visible: (index % 5) !== 1 && (index % 7) !== 3
-          x: backdrop.bayWidth * 0.34
-          y: backdrop.height * 0.34
-          width: backdrop.bayWidth * 0.30
-          height: Math.max(2, backdrop.height * 0.22)
-          color: (index % 5) === 2 ? Qt.rgba(Theme.teal.r, Theme.teal.g, Theme.teal.b, 0.28)
-                                   : Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.34)
-        }
-      }
-    }
-
-    // the hazard rail along the top of the wall, and the shadow it casts down
-    Rectangle {
-      width: parent.width
-      height: Math.max(1, backdrop.height * 0.055)
-      color: Qt.rgba(Theme.hazard.r, Theme.hazard.g, Theme.hazard.b, 0.26)
-    }
-    Rectangle {
-      width: parent.width
-      height: backdrop.height * 0.34
-      anchors.bottom: parent.bottom
-      gradient: Gradient {
-        GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.0) }
-        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.55) }
-      }
-    }
-  }
+  // Was the far wall of the garage. In this prototype the far end of the road
+  // is the sunset: SunsetSky, drawn inside the plane above, with the hills
+  // standing on the horizon and parallaxing with the curve.
 
   // ------------------------------------------------------------- streaks
   // Design, Accessibility: "Reduced motion removes all shake, lurch, and
@@ -743,12 +678,20 @@ Item {
   // are ever visible and the rest are culled before they reach the scene
   // graph. Each is drawn once into its own canvas at startup and only ever
   // moved and scaled after that.
-  readonly property var sectorLandmark: ["tireWall", "sign", "workLight", "drum",
-                                         "rollerDoor", "tireWall", "cone", "sign",
-                                         "workLight", "rollerDoor", "drum", "tireWall"]
-  readonly property var sectorFiller: ["cone", "workLight", "drum", "cone",
-                                       "workLight", "sign"]
-  readonly property real propSpacing: 12.0
+  //
+  // GOLDEN-HOUR PROTOTYPE. The grey lamp posts and the teal diagnostic signs
+  // are gone; the roadside is the genre's: sponsor banners, tyre walls, a
+  // timing board, the checkered start gantry in sector 0, and the design's
+  // roller doors in sectors 4 and 9.
+  readonly property var sectorLandmark: ["gantry", "banner", "tireWall", "timingBoard",
+                                         "rollerDoor", "tireWall", "banner", "drum",
+                                         "timingBoard", "rollerDoor", "banner", "tireWall"]
+  readonly property var sectorFiller: ["cone", "banner", "drum", "tireWall",
+                                       "banner", "cone"]
+  readonly property var bannerLabels: ["TURBO", "PIT", "BOLT", "PISTON", "GASKET"]
+  // Eight units, not twelve: at twelve the roadside read as two thin rows of
+  // specks. About twenty-four are visible at once; each is one textured quad.
+  readonly property real propSpacing: 8.0
   readonly property int propCount: Math.round(circuitLength / propSpacing)
   readonly property real propLoop: circuitLength
 
@@ -764,8 +707,11 @@ Item {
 
     Item {
       readonly property string myKind: view.propKind(index)
-      readonly property bool arch: myKind === "rollerDoor"
-      readonly property real worldWidth: arch ? 9.4 : (myKind === "tireWall" ? 2.6 : 1.35)
+      readonly property bool arch: myKind === "rollerDoor" || myKind === "gantry"
+      readonly property real worldWidth: arch ? 9.4
+                                         : (myKind === "tireWall" ? 3.0
+                                            : (myKind === "banner" ? 3.2
+                                               : (myKind === "timingBoard" ? 2.0 : 1.35)))
       readonly property real zed: {
         var raw = (index * view.propSpacing - view.travel) % view.propLoop
         return (raw < 0 ? raw + view.propLoop : raw) + view.nearDistance
@@ -790,6 +736,7 @@ Item {
       TrackSprite {
         id: furniture
         kind: parent.myKind
+        label: parent.myKind === "gantry" ? "TURBO" : view.bannerLabels[index % view.bannerLabels.length]
         // Three steps of distance dimming, quantised on purpose: `dim` is the
         // one sprite property that repaints the canvas, so it must not be a
         // continuous function of a position that changes every frame.
@@ -848,6 +795,49 @@ Item {
         x: -sheetW / 2
         y: -sheetH
         scale: slot.sc
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- the dust
+  // A few warm particles kicked up behind the child's kart on a surge. Eight
+  // items, created once; each is a small warm square whose position is a
+  // binding on `travel` and `lurch`, so a surge costs no allocation and no
+  // repaint -- only the scene graph moving eight quads. Gone under reduced
+  // motion, with the lurch that drives it.
+  Item {
+    id: dust
+    anchors.fill: parent
+    visible: !view.reducedMotion && view.lurch > 0.03
+    opacity: Math.min(1, view.lurch * 1.6)
+    // In front of the child's kart: dust kicked up behind it is between the
+    // kart and the camera.
+    z: 1000 - view.playerZ + 0.003
+
+    readonly property real heroX: view.uAt(view.heroLane, view.playerZ) * view.width + view.shakeX
+    readonly property real heroY: view.vAt(view.playerZ) * view.height + view.shakeY
+    readonly property real span: view.kartSheetPixels(view.playerZ)
+
+    Repeater {
+      model: 8
+
+      Rectangle {
+        readonly property real phase: {
+          var p = (view.travel * 0.19 + index * 0.137) % 1
+          return p < 0 ? p + 1 : p
+        }
+        readonly property real side: (index % 2 === 0 ? -1 : 1) * (0.30 + (index % 4) * 0.10)
+        readonly property real size: Math.max(4, Math.round(dust.span * (0.022 + (index % 3) * 0.009) * (1 + phase)))
+        width: size
+        height: size
+        color: index % 3 === 0 ? "#f0b07a" : "#d75d6b"
+        opacity: Math.min(1, (1 - phase) * 1.1)
+        antialiasing: false
+        // Out from the kart's flanks and up, then falling back and spreading
+        // toward the camera as `phase` runs 0..1.
+        x: dust.heroX + dust.span * side * (0.45 + phase * 0.8) - width / 2
+        y: dust.heroY - dust.span * (0.06 + Math.sin(phase * Math.PI) * (0.14 + (index % 3) * 0.05))
+           + phase * dust.span * 0.10
       }
     }
   }

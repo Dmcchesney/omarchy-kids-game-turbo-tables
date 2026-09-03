@@ -14,7 +14,9 @@ Item {
   property string label: ""
   property string value: ""
   property color tone: Theme.cream
-  property color faceColor: Theme.panelSunken
+  // GOLDEN-HOUR PROTOTYPE: the face is a purple-black rather than the theme's
+  // sunken panel, so the gauges sit in the same dusk as the road behind them.
+  property color faceColor: Qt.rgba(0.11, 0.045, 0.10, 0.92)
   property int labelSize: 13
   property int valueSize: 34
   property real valueSpacing: 2

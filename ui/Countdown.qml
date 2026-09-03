@@ -2,6 +2,10 @@ import QtQuick
 import "parts"
 import "../engine/engine.mjs" as Engine
 
+// PROTOTYPE (proto/golden-hour): the readout below is now a start-line scene
+// -- see THE FRAME further down. The four beats, the type-ahead and Escape
+// are the design's and are unchanged; the comment that follows describes them.
+//
 // The start of a race: four beats on the terminal readout, and the first fact
 // already on screen behind them.
 //
@@ -151,43 +155,59 @@ FocusScope {
     }
   }
 
-  Rectangle {
+  // ============================================================ THE FRAME
+  //
+  // PROTOTYPE (proto/golden-hour). Everything below this line is the visual
+  // proposal; everything above it is the countdown the design specifies and
+  // is unchanged: four beats, `finished()`, Escape, the GO-beat type-ahead.
+  //
+  // The composition is the bar's: the child's kart on the start line, seen
+  // from behind-right and low; the sun huge behind it, straddling the horizon;
+  // hills; the neon grid floor; a checkered gantry ahead. The number is
+  // enormous and cream, over the sky. On GO the word steps up and the first
+  // fact stands where the number stood, over the sun, readable -- which is
+  // what the design's sentence asks for.
+  //
+  // The kart is the one the garage settings describe, so the kart on the line
+  // is the kart the child just built.
+  readonly property int kartBody: Store.setting("kartBody")
+  readonly property int kartPaint: Store.setting("kartPaint")
+  readonly property int kartNumber: Store.setting("kartNumber")
+
+  // Where the kart stands, as fractions of the frame; the scene lays the long
+  // shadow from the same numbers.
+  readonly property real kartFootX: 0.44
+  readonly property real kartFootY: 0.905
+  readonly property real kartSheetW: Math.round(countdown.width * 0.42)
+
+  CountdownScene {
+    id: scene
     anchors.fill: parent
-    color: Theme.ground
+    kartFootX: countdown.kartFootX
+    kartFootY: countdown.kartFootY
+    kartFootW: 0.27
   }
 
-  // The diagnostic grid the garage floor carries, faint, so the countdown
-  // stands in the same room as the screen before it.
-  Item {
-    anchors.fill: parent
-    opacity: 0.16
-
-    Repeater {
-      model: Math.max(1, Math.floor(countdown.height / Math.max(1, countdown.px(48))))
-      Rectangle {
-        y: index * countdown.px(48)
-        width: countdown.width
-        height: 1
-        color: Theme.teal
-      }
-    }
-    Repeater {
-      model: Math.max(1, Math.floor(countdown.width / Math.max(1, countdown.px(48))))
-      Rectangle {
-        x: index * countdown.px(48)
-        width: 1
-        height: countdown.height
-        color: Theme.teal
-      }
-    }
+  CountdownKart {
+    id: hero
+    width: countdown.kartSheetW
+    height: Math.round(countdown.kartSheetW * 0.5)
+    x: Math.round(countdown.width * countdown.kartFootX - width / 2)
+    y: Math.round(countdown.height * countdown.kartFootY - footY)
+    body: countdown.kartBody
+    paintColor: Theme.paint(countdown.kartPaint)
+    number: countdown.kartNumber
+    z: 1
   }
 
   // ------------------------------------------------------------ the header
+  // Where it was: the lap and the table, top left.
   Row {
     id: header
     x: countdown.px(48)
     y: countdown.px(40)
     spacing: countdown.px(18)
+    z: 5
 
     Text {
       textFormat: Text.PlainText
@@ -209,119 +229,103 @@ FocusScope {
     }
   }
 
+  // ------------------------------------------------------------- the type
+  //
+  // Cream over a sky that is pink and a sun that is cream: without a shadow
+  // the `1` would vanish into the disc on the beat it matters most. So every
+  // big word here carries the long shadow the rest of the frame carries --
+  // the same near-black purple, thrown down and left, the way the kart's is.
+  readonly property color inkShadow: Qt.rgba(0.235, 0.07, 0.157, 0.82)
+
+  // The counted beats: 3, 2, 1, enormous, over the sky. On GO the word steps
+  // up to the top third and shrinks to make room for the fact.
+  Item {
+    id: beatGlyph
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: countdown.go ? Math.round(countdown.height * 0.04)
+                    : Math.round(countdown.height * 0.10)
+    width: beatFace.implicitWidth
+    height: beatFace.implicitHeight
+    z: 4
+
+    Text {
+      textFormat: Text.PlainText
+      text: countdown.beatWord
+      color: countdown.inkShadow
+      font: beatFace.font
+      x: -countdown.px(countdown.go ? 8 : 16)
+      y: countdown.px(countdown.go ? 8 : 16)
+    }
+    Text {
+      id: beatFace
+      textFormat: Text.PlainText
+      text: countdown.beatWord
+      color: Theme.cream
+      font.family: Theme.mono
+      font.bold: true
+      font.pixelSize: countdown.go ? Math.round(countdown.height * 0.24)
+                                   : Math.round(countdown.height * 0.58)
+      font.letterSpacing: countdown.go ? countdown.px(20) : 0
+    }
+
+    // One pulse per beat, and nothing at all under reduced motion, which the
+    // design's accessibility section asks for by name.
+    transformOrigin: Item.Center
+    scale: 1.0
+    SequentialAnimation on scale {
+      running: countdown.visible && !countdown.reducedMotion
+      loops: Animation.Infinite
+      NumberAnimation { from: 1.10; to: 1.0; duration: 260; easing.type: Easing.OutCubic }
+      PauseAnimation { duration: Math.max(0, countdown.beatMs - 260) }
+    }
+  }
+
   // -------------------------------------------------------- the first fact
   //
-  // Drawn at the size the race draws it, in the middle of the screen, from the
-  // very first beat. The design's type rule is that "the fact is never smaller
-  // than a tenth of the screen height"; this is a fifth of it, because during
-  // the countdown there is nothing else on screen competing for the space.
-  Text {
+  // Drawn at the size the race draws it, over the sun, from the GO beat. The
+  // design's type rule is that "the fact is never smaller than a tenth of the
+  // screen height"; this is nearly a fifth.
+  Item {
     id: factText
-    anchors.centerIn: parent
-    textFormat: Text.PlainText
-    text: countdown.factText
-    color: Theme.cream
-    font.family: Theme.mono
-    font.bold: true
-    font.pixelSize: Math.round(countdown.height * 0.19)
-    font.letterSpacing: countdown.px(8)
-    z: 2
-    // The readout owns the frame for the three counted beats; the fact takes it
-    // over on GO, which is the beat the design says it has to be readable on.
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: Math.round(countdown.height * 0.31)
+    width: factFace.implicitWidth
+    height: factFace.implicitHeight
+    z: 3
     opacity: countdown.go ? 1.0 : 0.0
     Behavior on opacity {
       enabled: !countdown.reducedMotion
       NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
     }
-  }
-
-  // ---------------------------------------------------- the terminal readout
-  //
-  // The gauge the beats are counted on. It is sized around the fact rather than
-  // to a fixed box, so `12 x 11` never hangs out of its own bezel, and it thins
-  // out to almost nothing on GO.
-  //
-  // On the last beat the word GO steps up out of the readout to the rail above
-  // it and the fact is left alone inside the frame at full strength. That is
-  // what "the first fact readable behind GO" has to mean in practice: at the
-  // GO beat the child reads both, and a lime GO stamped across the middle of
-  // `1 x 6` would leave them reading neither. It was drawn that way first and a
-  // screenshot settled it.
-  Item {
-    id: terminal
-    anchors.centerIn: parent
-    width: Math.min(countdown.width - countdown.px(96),
-                    factText.implicitWidth + countdown.px(140))
-    height: Math.min(countdown.height - countdown.px(300),
-                     factText.implicitHeight + countdown.px(90))
-
-    Rectangle {
-      id: bezel
-      anchors.fill: parent
-      radius: Theme.cornerRadius
-      color: Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b,
-                     countdown.go ? 0.18 : 0.93)
-      border.width: 2
-      border.color: countdown.go ? Theme.lime : Theme.amberDeep
-
-      Behavior on color {
-        enabled: !countdown.reducedMotion
-        ColorAnimation { duration: 200 }
-      }
-    }
-
-    // Rivets, the design's gauge motif.
-    Repeater {
-      model: 4
-      Rectangle {
-        width: countdown.px(7)
-        height: width
-        radius: width / 2
-        color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.30)
-        x: (index % 2 === 0) ? countdown.px(12) : terminal.width - countdown.px(12) - width
-        y: (index < 2) ? countdown.px(12) : terminal.height - countdown.px(12) - height
-      }
-    }
 
     Text {
-      id: beatGlyph
-      anchors.horizontalCenter: parent.horizontalCenter
-      y: countdown.go ? -(height + countdown.px(26))
-                      : Math.round((terminal.height - height) / 2)
-      z: 3
       textFormat: Text.PlainText
-      text: countdown.beatWord
-      color: countdown.go ? Theme.lime : Theme.amber
+      text: countdown.factText
+      color: countdown.inkShadow
+      font: factFace.font
+      x: -countdown.px(8)
+      y: countdown.px(8)
+    }
+    Text {
+      id: factFace
+      textFormat: Text.PlainText
+      text: countdown.factText
+      color: Theme.cream
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: countdown.go ? countdown.fs(104)
-                                   : Math.round(terminal.height * 0.74)
-      font.letterSpacing: countdown.go ? countdown.px(14) : 0
-
-      // One pulse per beat, and nothing at all under reduced motion, which the
-      // design's accessibility section asks for by name.
-      scale: 1.0
-      SequentialAnimation on scale {
-        // Off while the screen is not on screen: an infinite animation on a
-        // hidden item is a repaint the game is paying for and nobody is
-        // watching.
-        running: countdown.visible && !countdown.reducedMotion
-        loops: Animation.Infinite
-        NumberAnimation { from: 1.14; to: 1.0; duration: 260; easing.type: Easing.OutCubic }
-        PauseAnimation { duration: Math.max(0, countdown.beatMs - 260) }
-      }
+      font.pixelSize: Math.round(countdown.height * 0.19)
+      font.letterSpacing: countdown.px(8)
     }
   }
 
   // ------------------------------------------------ the type-ahead readout
   //
-  // What the child has typed on the GO beat, drawn where the race will draw the
-  // answer field, so the keys visibly land instead of vanishing. Empty until
-  // something is pressed, so a child who waits sees nothing new.
+  // What the child has typed on the GO beat, under the fact, so the keys
+  // visibly land instead of vanishing. Empty until something is pressed.
   Row {
     id: aheadRow
     anchors.horizontalCenter: parent.horizontalCenter
-    y: Math.round(countdown.height * 0.68)
+    y: Math.round(countdown.height * 0.60)
     spacing: countdown.px(10)
     visible: countdown.go && countdown.typedAhead.length > 0
     z: 4
@@ -333,9 +337,9 @@ FocusScope {
         width: countdown.px(52)
         height: countdown.px(70)
         radius: Theme.cornerRadiusSmall
-        color: Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.94)
+        color: Qt.rgba(0.157, 0.055, 0.153, 0.94)
         border.width: 2
-        border.color: Theme.lime
+        border.color: Theme.cream
 
         Text {
           anchors.centerIn: parent
@@ -351,16 +355,19 @@ FocusScope {
   }
 
   // ------------------------------------------------------------ the footer
+  // Where it was. The prompt warms to cream on GO instead of lime: lime is the
+  // garage's, and there is no lime in this light.
   Text {
     anchors.horizontalCenter: parent.horizontalCenter
     y: countdown.height - countdown.px(96)
     textFormat: Text.PlainText
     text: countdown.go ? "TYPE THE ANSWER" : "GET READY"
-    color: countdown.go ? Theme.lime : Theme.textLabel
+    color: countdown.go ? Theme.cream : Qt.rgba(Theme.cream.r, Theme.cream.g, Theme.cream.b, 0.70)
     font.family: Theme.mono
     font.bold: true
     font.pixelSize: countdown.fs(24)
     font.letterSpacing: countdown.px(4)
+    z: 5
   }
 
   Text {
@@ -368,9 +375,10 @@ FocusScope {
     y: countdown.height - countdown.px(56)
     textFormat: Text.PlainText
     text: "ESC  BACK TO THE GARAGE"
-    color: Theme.textLabel
+    color: Qt.rgba(Theme.cream.r, Theme.cream.g, Theme.cream.b, 0.55)
     font.family: Theme.mono
     font.pixelSize: countdown.fs(16)
     font.letterSpacing: countdown.px(2)
+    z: 5
   }
 }

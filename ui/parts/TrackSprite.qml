@@ -2,7 +2,7 @@ import QtQuick
 import "../"
 
 // One thing standing on the track: a kart seen from behind, or a piece of
-// garage furniture at the roadside.
+// roadside furniture.
 //
 // WHY THIS IS A SPRITE AND NOT A LIVE RENDERER
 //
@@ -17,28 +17,35 @@ import "../"
 // it with `scale` and moves it with `x` and `y`. Neither of those touches the
 // canvas, so a kart that crosses the whole screen and grows from a speck to
 // half its height costs one textured blit per frame and no drawing at all.
-// That is exactly what the design means by "pre-rendered sprite sheets"; the
-// sheet here happens to be drawn in code so the paint can be any of the eight
-// swatches, which a bitmap sheet cannot follow without eight copies.
 //
 // `smooth: false` keeps the enlargement nearest-neighbour, which is the pixel
-// look the garage wants and is also the cheapest filter there is.
+// look the game wants and is also the cheapest filter there is.
 //
-// THE ANCHOR is the bottom centre of the sheet, and every kind is drawn
+// THE ANCHOR is the bottom centre of the ITEM, and every kind is drawn
 // standing on that point, so the track view positions a sprite by where it
-// touches the ground and never has to know how tall it is.
+// touches the ground and never has to know how tall it is. The canvas is
+// taller than the item by `shadowRoom`: the long shadow toward the camera is
+// drawn BELOW the contact point, and the item does not clip it.
+//
+// GOLDEN-HOUR PROTOTYPE. One key light, the sun, low and ahead-right of every
+// object, so the face a driver sees -- the tail -- is in shadow, the body is
+// a cool purple ramp, the sun-side silhouette carries one warm rim, and a
+// long soft shadow runs toward the camera. Flat-shaded low-poly is the
+// medium: nothing here adds detail, it adds light.
 //
 // Placeholder art. The design's shipping karts are eight angles and three
-// scales; this is the one angle the track needs, drawn to match the garage's
-// palette, its one-light shading and its contact shadow.
+// scales; this is the one angle the track needs.
 Item {
   id: sprite
 
-  // "kart", or one of the six roadside kinds below.
+  // "kart", or one of the roadside kinds below: tireWall, banner, timingBoard,
+  // gantry, rollerDoor, drum, cone.
   property string kind: "kart"
   property color paintColor: Theme.paint(0)
   property int number: 7
   property int body: 0
+  // What a banner or a board says.
+  property string label: "TURBO"
   // A ghost is the same kart in the design's dark teal, and translucent.
   property bool ghost: false
   property bool showNumber: true
@@ -46,10 +53,13 @@ Item {
   property real dim: 1.0
 
   readonly property bool isKart: kind === "kart"
+  readonly property bool isArch: kind === "rollerDoor" || kind === "gantry"
 
-  // The sheet. Karts are wide, roadside furniture is tall.
-  readonly property int sheetW: isKart ? 192 : (kind === "rollerDoor" ? 320 : 128)
-  readonly property int sheetH: isKart ? 128 : (kind === "rollerDoor" ? 200 : 176)
+  // The sheet. Karts are wide, roadside furniture is tall, arches span the road.
+  readonly property int sheetW: isKart ? 192 : (isArch ? 320 : 128)
+  readonly property int sheetH: isKart ? 128 : (isArch ? 200 : 176)
+  // Extra canvas below the contact point, for the shadow toward the camera.
+  readonly property int shadowRoom: isKart ? 44 : (isArch ? 0 : 34)
 
   width: sheetW
   height: sheetH
@@ -61,8 +71,7 @@ Item {
   // Model axes: +x to the right, +y up, +z from the tail toward the nose and
   // away from the camera. The camera sits behind and above the kart and is
   // yawed a few degrees off its centre line, so the visible faces are the
-  // tail, the top, and a sliver of the right flank. That is the view a driver
-  // has of the kart in front, which is the whole point of the screen.
+  // tail, the top, and a sliver of the right flank.
   readonly property real yawDeg: 7
   readonly property real pitchDeg: 15
   readonly property real focal: 210
@@ -118,7 +127,8 @@ Item {
 
   Canvas {
     id: surface
-    anchors.fill: parent
+    width: sprite.sheetW
+    height: sprite.sheetH + sprite.shadowRoom
     renderStrategy: Canvas.Immediate
     renderTarget: Canvas.Image
     smooth: false
@@ -134,18 +144,19 @@ Item {
         paintProp(ctx)
     }
 
-    // ------------------------------------------------------- shared light
-    // The same light vector the garage stall uses, so a kart on the track and
-    // the same kart on the turntable are lit by the same lamp.
-    // Pointing down the track from behind the camera, so the face a driver
-    // actually sees -- the tail -- is the lit one. Round one lit the roof and
-    // left every tail two thirds dark, and four karts of eight different
-    // paints all came out the same olive.
-    readonly property real lx: 0.37
-    readonly property real ly: 0.66
-    readonly property real lz: -0.66
-    readonly property color warm: Qt.rgba(1.0, 0.84, 0.58, 1)
-    readonly property color cool: Qt.rgba(0.07, 0.20, 0.24, 1)
+    // ------------------------------------------------------- the one light
+    // The sun, expressed in the space of the face normals `normalOf` below
+    // computes. It is ahead of every kart, to the right, and low: so the
+    // tail is in shadow, the roof catches a little, the right flank catches
+    // more, and the rim -- a hidden, sun-facing face leaking round its
+    // silhouette edge -- lands on the upper right.
+    readonly property real lx: -0.42
+    readonly property real ly: -0.26
+    readonly property real lz: 0.87
+    readonly property color warm: "#f0b07a"
+    readonly property color cool: "#5f255e"
+    readonly property color rim: "#f0b07a"
+    readonly property color shade0: Qt.rgba(0.16, 0.04, 0.16, 1)
 
     function mix(a, b, t) {
       return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
@@ -156,13 +167,41 @@ Item {
       return Qt.rgba(Math.min(1, c.r * k * d), Math.min(1, c.g * k * d),
                      Math.min(1, c.b * k * d), 1)
     }
+    function lambert(n) {
+      return Math.max(0, n[0] * lx + n[1] * ly + n[2] * lz)
+    }
+    // The body ramp: the paint at a third of its strength in shadow, pulled
+    // toward the cool purple; the paint nearly full where the sun reaches,
+    // pulled toward the warm rim.
     function shade(base, n) {
-      var lam = Math.max(0, n[0] * lx + n[1] * ly + n[2] * lz)
-      var sky = Math.max(0, n[1]) * 0.20
-      var c = gain(base, 0.38 + 0.66 * lam + sky)
-      c = mix(c, warm, 0.16 * lam)
-      c = mix(c, cool, 0.34 * (1 - lam))
+      var lam = lambert(n)
+      var c = gain(base, 0.46 + 0.54 * lam)
+      c = mix(c, warm, 0.22 * lam)
+      c = mix(c, cool, 0.26 * (1 - lam))
       return c
+    }
+    function rimColor(strength) {
+      var d = sprite.dim
+      return Qt.rgba(rim.r * d, rim.g * d, rim.b * d, Math.min(1, strength))
+    }
+
+    // ------------------------------------------------------ the shadow
+    // Long, soft, toward the camera -- which on the sheet is down and, with
+    // the sun off to the right, a little to the left. A gradient so it
+    // fades out rather than ending at a line.
+    function longShadow(ctx, x0, x1, yBase, len, lean) {
+      var g = ctx.createLinearGradient(0, yBase, 0, yBase + len)
+      g.addColorStop(0.0, Qt.rgba(0.08, 0.02, 0.09, 0.52))
+      g.addColorStop(0.55, Qt.rgba(0.08, 0.02, 0.09, 0.30))
+      g.addColorStop(1.0, Qt.rgba(0.08, 0.02, 0.09, 0.0))
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.moveTo(x0, yBase)
+      ctx.lineTo(x1, yBase)
+      ctx.lineTo(x1 - lean + (x1 - x0) * 0.12, yBase + len)
+      ctx.lineTo(x0 - lean - (x1 - x0) * 0.12, yBase + len)
+      ctx.closePath()
+      ctx.fill()
     }
 
     // ------------------------------------------------------- the kart
@@ -180,54 +219,88 @@ Item {
         return len <= 0 ? null : [nx / len, ny / len, nz / len]
       }
 
-      // The camera's forward direction in model space. A face whose outward
-      // normal agrees with it points away and is dropped before it is ever
+      // The camera's forward direction in model space. A face whose normal
+      // agrees with it points away and is dropped before it is ever
       // projected, so the queue only ever holds faces that can be seen.
       var Wx = sprite.sy * sprite.cp
       var Wy = sprite.sp
       var Wz = sprite.cy * sprite.cp
 
-      function face(pts3, base, bias) {
+      function faceOf(pts3, base, bias) {
         var n = normalOf(pts3)
         if (!n)
-          return
-        if (n[0] * Wx + n[1] * Wy + n[2] * Wz > -0.0001)
-          return
+          return null
+        var hidden = n[0] * Wx + n[1] * Wy + n[2] * Wz > -0.0001
         var flat = []
         var d = 0
         for (var i = 0; i < pts3.length; i++) {
           flat.push(sprite.project(pts3[i][0], pts3[i][1], pts3[i][2]))
           d += sprite.depthAt(pts3[i][0], pts3[i][2])
         }
-        queue.push({ pts: flat, fill: shade(base, n), depth: d / pts3.length + (bias || 0) })
+        return { pts3: pts3, pts: flat, n: n, hidden: hidden,
+                 fill: shade(base, n), depth: d / pts3.length + (bias || 0) }
       }
 
-      // A box, as its six faces, wound so every outward normal points out.
+      function same(a, b) {
+        return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
+      }
+
+      // A box, as its six faces. The visible ones go on the queue; then
+      // every edge shared between a visible face and a hidden one is a
+      // silhouette edge, and if the hidden face is the one facing the sun,
+      // the light leaks round it: that is the rim, and it goes on the queue
+      // just in front of its own face so nearer bodywork still covers it.
       function box(x0, x1, y0, y1, z0, z1, base, bias) {
-        face([[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], base, bias)   // top
-        face([[x0,y0,z1],[x1,y0,z1],[x1,y0,z0],[x0,y0,z0]], base, bias)   // bottom
-        face([[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]], base, bias)   // tail
-        face([[x1,y0,z1],[x0,y0,z1],[x0,y1,z1],[x1,y1,z1]], base, bias)   // nose
-        face([[x1,y0,z0],[x1,y0,z1],[x1,y1,z1],[x1,y1,z0]], base, bias)   // right
-        face([[x0,y0,z1],[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]], base, bias)   // left
+        var faces = [
+          faceOf([[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], base, bias),   // top
+          faceOf([[x0,y0,z1],[x1,y0,z1],[x1,y0,z0],[x0,y0,z0]], base, bias),   // bottom
+          faceOf([[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]], base, bias),   // tail
+          faceOf([[x1,y0,z1],[x0,y0,z1],[x0,y1,z1],[x1,y1,z1]], base, bias),   // nose
+          faceOf([[x1,y0,z0],[x1,y0,z1],[x1,y1,z1],[x1,y1,z0]], base, bias),   // right
+          faceOf([[x0,y0,z1],[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]], base, bias)    // left
+        ]
+        for (var f = 0; f < faces.length; f++)
+          if (faces[f] && !faces[f].hidden)
+            queue.push(faces[f])
+        for (var a = 0; a < faces.length; a++) {
+          var A = faces[a]
+          if (!A || A.hidden)
+            continue
+          for (var b = 0; b < faces.length; b++) {
+            var B = faces[b]
+            if (!B || !B.hidden)
+              continue
+            var strength = lambert(B.n)
+            if (strength < 0.15)
+              continue
+            // the two vertices A and B share, if any
+            var shared = []
+            for (var i = 0; i < 4; i++)
+              for (var j = 0; j < 4; j++)
+                if (same(A.pts3[i], B.pts3[j]))
+                  shared.push(A.pts[i])
+            if (shared.length === 2)
+              queue.push({ line: shared, rim: strength, depth: A.depth - 0.4 })
+          }
+        }
       }
 
       var paint = sprite.skin
-      var tyre = Qt.rgba(0.10, 0.11, 0.13, 1)
-      var dark = Qt.rgba(0.14, 0.16, 0.19, 1)
-      var glass = Theme.tealDeep
+      var tyre = Qt.rgba(0.10, 0.06, 0.10, 1)
+      var dark = Qt.rgba(0.15, 0.09, 0.15, 1)
+      var glass = Qt.rgba(0.24, 0.10, 0.28, 1)
 
       var hw = g.halfW
       var noseZ = g.noseZ
 
-      // Contact shadow, on the ground, before anything else.
-      //
-      // Two parts. A soft ellipse spread wider than the kart, which is what
-      // actually reads as ground contact at a distance -- round one drew only
-      // the tight quad below, and against dark tarmac it was invisible, so the
-      // hero kart looked like a sticker while every roadside prop had an
-      // ellipse under it. Then the tight quad, which gives the hard edge.
-      ctx.fillStyle = Qt.rgba(0, 0, 0, 0.30)
+      // The shadow first: a long one toward the camera, then the contact
+      // shadow that gives it a hard edge under the wheels.
+      var footL = sprite.project(-hw - 3, 0, 4)
+      var footR = sprite.project(hw + 3, 0, 4)
+      longShadow(ctx, footL[0] + 2, footR[0] - 2, footL[1] - 3,
+                 sprite.shadowRoom + 16, 22)
+
+      ctx.fillStyle = Qt.rgba(0.05, 0.01, 0.06, 0.34)
       ctx.beginPath()
       ctx.ellipse(sprite.sheetW * 0.155, sprite.sheetH - 20,
                   sprite.sheetW * 0.69, 20)
@@ -242,7 +315,7 @@ Item {
       for (var si = 1; si < sh.length; si++)
         ctx.lineTo(sh[si][0], sh[si][1])
       ctx.closePath()
-      ctx.fillStyle = Qt.rgba(0, 0, 0, 0.38)
+      ctx.fillStyle = Qt.rgba(0.05, 0.01, 0.06, 0.42)
       ctx.fill()
 
       // wheels
@@ -281,13 +354,24 @@ Item {
         box(-hw - 1.5, hw + 1.5, g.wingH, g.wingH + 2.2, 1.0, 7.5, paint, 0)
       }
 
-      // tail lamps, two warm squares that read at any size
+      // tail lamps, two warm squares that read at any size -- the one thing
+      // on the shadow side that is lit, because it lights itself
       box(-hw + 4.0, -hw + 7.0, 6.0, 8.5, 2.6, 3.2, Theme.amber, 0.6)
       box(hw - 7.0, hw - 4.0, 6.0, 8.5, 2.6, 3.2, Theme.amber, 0.6)
 
       queue.sort(function (a, b) { return b.depth - a.depth })
+      ctx.lineCap = "round"
       for (var q = 0; q < queue.length; q++) {
         var f = queue[q]
+        if (f.line) {
+          ctx.strokeStyle = rimColor(0.55 + f.rim * 0.5)
+          ctx.lineWidth = 1.6
+          ctx.beginPath()
+          ctx.moveTo(f.line[0][0], f.line[0][1])
+          ctx.lineTo(f.line[1][0], f.line[1][1])
+          ctx.stroke()
+          continue
+        }
         ctx.beginPath()
         ctx.moveTo(f.pts[0][0], f.pts[0][1])
         for (var p = 1; p < f.pts.length; p++)
@@ -297,8 +381,9 @@ Item {
         ctx.fill()
       }
 
-      // The number, on a white plate across the tail. Drawn after the faces
-      // because it is a decal on one of them, not a solid of its own.
+      // The number, on a plate across the tail. Drawn after the faces because
+      // it is a decal on one of them, not a solid of its own. Cream rather
+      // than white: the tail is in shadow and a white plate would glow.
       if (sprite.showNumber && !sprite.ghost) {
         var a = sprite.project(-hw + 2.4, 6.2, 2.9)
         var b = sprite.project(hw - 2.4, 6.2, 2.9)
@@ -306,9 +391,9 @@ Item {
         var pw = b[0] - a[0]
         var ph = a[1] - t[1]
         if (pw > 6 && ph > 5) {
-          ctx.fillStyle = Qt.rgba(0.93, 0.93, 0.90, 1)
+          ctx.fillStyle = gain(Qt.rgba(0.88, 0.80, 0.70, 1), 1.0)
           ctx.fillRect(a[0] + pw * 0.26, t[1] + ph * 0.10, pw * 0.48, ph * 0.80)
-          ctx.fillStyle = Qt.rgba(0.06, 0.06, 0.07, 1)
+          ctx.fillStyle = Qt.rgba(0.10, 0.04, 0.10, 1)
           ctx.font = "bold " + Math.max(7, Math.round(ph * 0.72)) + "px sans-serif"
           ctx.textAlign = "center"
           ctx.textBaseline = "middle"
@@ -319,23 +404,42 @@ Item {
 
     // ------------------------------------------------- roadside furniture
     // Billboards: the camera looks at these nearly face on, so they are drawn
-    // flat, with the same warm-over-cool palette as everything else.
+    // flat -- silhouettes in the cool purple, with one warm rim along the
+    // sun side, upper right, and a long shadow toward the camera.
     function paintProp(ctx) {
       var w = width
-      var h = height
+      var h = sprite.sheetH
       var d = sprite.dim
       function tint(c, k) {
         return Qt.rgba(Math.min(1, c.r * k * d), Math.min(1, c.g * k * d),
                        Math.min(1, c.b * k * d), 1)
       }
-      var steel = Qt.rgba(0.30, 0.33, 0.37, 1)
-      var steelDark = Qt.rgba(0.16, 0.18, 0.21, 1)
-      var rubber = Qt.rgba(0.09, 0.10, 0.12, 1)
+      var ink = Qt.rgba(0.16, 0.055, 0.15, 1)      // #280e27, the bar's signage
+      var post = Qt.rgba(0.22, 0.09, 0.22, 1)
+      var rubber = Qt.rgba(0.11, 0.05, 0.11, 1)
+      var magenta = Qt.rgba(1.0, 0.31, 0.64, 1)   // #ff4fa3
+      var cream = Theme.cream
+      var rimW = 1.5
 
-      // a contact shadow under everything except the arch, which the road
-      // runs through rather than past
-      if (sprite.kind !== "rollerDoor") {
-        ctx.fillStyle = Qt.rgba(0, 0, 0, 0.34)
+      // a block with its warm rim on the top and right edges
+      function block(x, y, bw, bh, col, rimTop, rimRight) {
+        ctx.fillStyle = col
+        ctx.fillRect(x, y, bw, bh)
+        ctx.fillStyle = rimColor(0.95)
+        if (rimTop !== false)
+          ctx.fillRect(x, y, bw, rimW)
+        if (rimRight !== false)
+          ctx.fillRect(x + bw - rimW, y, rimW, bh)
+      }
+      function mono(px) {
+        return "bold " + px + "px " + Theme.mono
+      }
+
+      // the shadow under everything except an arch, which the road runs
+      // through rather than past
+      if (!sprite.isArch) {
+        longShadow(ctx, w * 0.30, w * 0.70, h - 16, sprite.shadowRoom + 12, 16)
+        ctx.fillStyle = Qt.rgba(0.05, 0.01, 0.06, 0.36)
         ctx.beginPath()
         ctx.ellipse(w * 0.16, h - 14, w * 0.68, 13)
         ctx.fill()
@@ -351,12 +455,11 @@ Item {
             var offset = (r % 2) * tw * 0.5
             var x = c * tw + offset - tw * 0.25
             var y = h - 18 - (r + 1) * th
-            ctx.fillStyle = tint(rubber, 1 + r * 0.10)
-            ctx.fillRect(x, y, tw * 0.92, th * 0.92)
-            ctx.fillStyle = tint(steelDark, 1.6)
+            block(x, y, tw * 0.92, th * 0.92, tint(rubber, 1 + r * 0.10), true, true)
+            ctx.fillStyle = tint(post, 1.3)
             ctx.fillRect(x + tw * 0.30, y + th * 0.28, tw * 0.32, th * 0.36)
           }
-          ctx.fillStyle = tint(r % 2 === 0 ? Theme.amber : Theme.cream, 0.9)
+          ctx.fillStyle = tint(r % 2 === 0 ? Theme.amberDeep : cream, 0.7)
           ctx.fillRect(0, h - 18 - (r + 1) * th - 3, w, 3)
         }
         return
@@ -367,15 +470,12 @@ Item {
         var dx = (w - dw) / 2
         var dh = h * 0.62
         var dy = h - 16 - dh
-        ctx.fillStyle = tint(Theme.amberDeep, 1.0)
-        ctx.fillRect(dx, dy, dw, dh)
-        ctx.fillStyle = tint(Theme.amber, 1.0)
-        ctx.fillRect(dx, dy, dw * 0.30, dh)
-        ctx.fillStyle = tint(steelDark, 1.0)
+        block(dx, dy, dw, dh, tint(Theme.amberDeep, 0.62), true, true)
+        ctx.fillStyle = tint(Theme.amberDeep, 0.85)
+        ctx.fillRect(dx + dw * 0.62, dy + rimW, dw * 0.38 - rimW, dh - rimW)
+        ctx.fillStyle = tint(post, 1.0)
         ctx.fillRect(dx, dy + dh * 0.20, dw, dh * 0.08)
         ctx.fillRect(dx, dy + dh * 0.68, dw, dh * 0.08)
-        ctx.fillStyle = tint(Theme.amberGlow, 1.0)
-        ctx.fillRect(dx, dy, dw, dh * 0.06)
         return
       }
 
@@ -383,100 +483,131 @@ Item {
         var bx = w * 0.5
         var by = h - 16
         var ch = h * 0.52
-        ctx.fillStyle = tint(Theme.amber, 1.0)
+        ctx.fillStyle = tint(Theme.amberDeep, 0.72)
         ctx.beginPath()
         ctx.moveTo(bx, by - ch)
         ctx.lineTo(bx + w * 0.24, by)
         ctx.lineTo(bx - w * 0.24, by)
         ctx.closePath()
         ctx.fill()
-        ctx.fillStyle = tint(Theme.cream, 1.0)
+        // the rim: the sun-side slope of the cone
+        ctx.strokeStyle = rimColor(0.95)
+        ctx.lineWidth = rimW
+        ctx.beginPath()
+        ctx.moveTo(bx, by - ch)
+        ctx.lineTo(bx + w * 0.24, by)
+        ctx.stroke()
+        ctx.fillStyle = tint(cream, 0.72)
         ctx.fillRect(bx - w * 0.155, by - ch * 0.52, w * 0.31, ch * 0.16)
-        ctx.fillStyle = tint(steelDark, 1.0)
+        ctx.fillStyle = tint(post, 1.0)
         ctx.fillRect(bx - w * 0.30, by - 6, w * 0.60, 6)
         return
       }
 
-      if (sprite.kind === "workLight") {
-        // A tall stand with a small hooded head and a cone of amber under it.
-        // The head is small on purpose: a wide shade at this scale reads as a
-        // table lamp, and the garage's lights hang off poles. The cone fades
-        // out downward, because a flat-filled polygon at any alpha reads as a
-        // solid object rather than as light.
-        var px = w * 0.5
-        ctx.fillStyle = tint(steelDark, 1.0)
-        ctx.fillRect(px - w * 0.17, h - 18, w * 0.34, 6)
-        ctx.fillStyle = tint(steel, 1.0)
-        ctx.fillRect(px - w * 0.028, h * 0.10, w * 0.056, h * 0.80)
-        ctx.fillStyle = tint(steelDark, 1.25)
-        ctx.beginPath()
-        ctx.moveTo(px - w * 0.15, h * 0.115)
-        ctx.lineTo(px + w * 0.15, h * 0.115)
-        ctx.lineTo(px + w * 0.085, h * 0.035)
-        ctx.lineTo(px - w * 0.085, h * 0.035)
-        ctx.closePath()
-        ctx.fill()
-        ctx.fillStyle = tint(Theme.amberGlow, 1.0)
-        ctx.fillRect(px - w * 0.13, h * 0.108, w * 0.26, h * 0.020)
-        var beam = ctx.createLinearGradient(0, h * 0.13, 0, h * 0.66)
-        beam.addColorStop(0, Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.26))
-        beam.addColorStop(1, Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0))
-        ctx.fillStyle = beam
-        ctx.beginPath()
-        ctx.moveTo(px - w * 0.13, h * 0.13)
-        ctx.lineTo(px + w * 0.13, h * 0.13)
-        ctx.lineTo(px + w * 0.40, h * 0.66)
-        ctx.lineTo(px - w * 0.40, h * 0.66)
-        ctx.closePath()
-        ctx.fill()
+      if (sprite.kind === "banner") {
+        // A period sponsor banner: mono type, near-black on magenta, strung
+        // between two posts, with the sun catching its top edge.
+        var bw = w * 0.92
+        var bx0 = (w - bw) / 2
+        var by0 = h * 0.16
+        var bh = h * 0.30
+        ctx.fillStyle = tint(post, 1.0)
+        ctx.fillRect(bx0 + 3, by0 + bh * 0.5, 4, h - 16 - by0 - bh * 0.5)
+        ctx.fillRect(bx0 + bw - 7, by0 + bh * 0.5, 4, h - 16 - by0 - bh * 0.5)
+        block(bx0, by0, bw, bh, tint(ink, 1.0), true, true)
+        ctx.fillStyle = tint(magenta, 0.62)
+        ctx.fillRect(bx0 + 3, by0 + 3, bw - 6, 2)
+        ctx.fillRect(bx0 + 3, by0 + bh - 5, bw - 6, 2)
+        ctx.fillStyle = tint(magenta, 0.95)
+        ctx.font = mono(Math.round(bh * 0.52))
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.fillText(sprite.label, w / 2, by0 + bh * 0.52)
+        return
+      }
+
+      if (sprite.kind === "timingBoard") {
+        // A timing board on one post: three rows of lit digits on a dark
+        // face, the top edge rimmed by the sun.
+        var tbw = w * 0.80
+        var tbx = (w - tbw) / 2
+        var tby = h * 0.05
+        var tbh = h * 0.50
+        ctx.fillStyle = tint(post, 1.0)
+        ctx.fillRect(w * 0.47, tby + tbh, w * 0.06, h - 16 - tby - tbh)
+        block(tbx, tby, tbw, tbh, tint(ink, 1.0), true, true)
+        ctx.fillStyle = tint(magenta, 0.62)
+        ctx.fillRect(tbx + 3, tby + 3, tbw - 6, 1.5)
+        ctx.font = mono(Math.round(tbh * 0.22))
+        ctx.textAlign = "left"
+        ctx.textBaseline = "middle"
+        var rowsText = ["1  21", "2  34", "3  55"]
+        for (var rt = 0; rt < rowsText.length; rt++) {
+          ctx.fillStyle = tint(rt === 0 ? Theme.amberGlow : cream, 0.85)
+          ctx.fillText(rowsText[rt], tbx + tbw * 0.12, tby + tbh * (0.24 + rt * 0.26))
+        }
+        return
+      }
+
+      if (sprite.kind === "gantry") {
+        // The start gantry: two posts, a beam with a checkered band and the
+        // name of the race across it, the sun on its top edge.
+        // The beam sits low -- a third of the way down the sheet -- so it
+        // crosses the road below the answer field rather than through it.
+        var gTop = h * 0.30
+        var gJamb = w * 0.06
+        var gBeam = h * 0.20
+        var gFloor = h - 12
+        block(0, gTop, w, gBeam, tint(ink, 1.0), true, true)
+        block(0, gTop + gBeam, gJamb, gFloor - gTop - gBeam, tint(post, 1.0), false, true)
+        block(w - gJamb, gTop + gBeam, gJamb, gFloor - gTop - gBeam, tint(post, 1.0), false, true)
+        var sq = h * 0.045
+        for (var gc = 0; gc < Math.ceil(w / sq); gc++)
+          for (var gr = 0; gr < 2; gr++) {
+            ctx.fillStyle = tint((gc + gr) % 2 === 0 ? cream : ink, 0.9)
+            ctx.fillRect(gc * sq, gTop + gBeam - sq * 2 - 2 + gr * sq, sq, sq)
+          }
+        ctx.fillStyle = tint(magenta, 0.95)
+        ctx.font = mono(Math.round(gBeam * 0.46))
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.fillText(sprite.label, w / 2, gTop + (gBeam - sq * 2) * 0.52)
+        // magenta stripes on the posts
+        ctx.fillStyle = tint(magenta, 0.7)
+        for (var gs = 0; gs < 6; gs++) {
+          var gy = gTop + gBeam + 20 + gs * ((gFloor - gTop - gBeam - 20) / 6)
+          ctx.fillRect(0, gy, gJamb, 4)
+          ctx.fillRect(w - gJamb, gy + 3, gJamb, 4)
+        }
         return
       }
 
       if (sprite.kind === "rollerDoor") {
         // The sector landmark the design names: "the sevens run under the
         // roller door". So the curtain is rolled up and the opening is clear,
-        // because the track goes through it. A closed door would be a wall
-        // across the road.
-        var doorTop = h * 0.06
+        // because the track goes through it.
+        var doorTop = h * 0.30
         var jamb = w * 0.075
-        var head = h * 0.30
+        var head = h * 0.46
         var floorY = h - 12
-        ctx.fillStyle = tint(steelDark, 1.0)
-        ctx.fillRect(0, doorTop, w, head - doorTop)                       // lintel
-        ctx.fillRect(0, head, jamb, floorY - head)                        // left jamb
-        ctx.fillRect(w - jamb, head, jamb, floorY - head)                 // right jamb
+        block(0, doorTop, w, head - doorTop, tint(ink, 1.0), true, true)      // lintel
+        block(0, head, jamb, floorY - head, tint(post, 1.0), false, true)     // left jamb
+        block(w - jamb, head, jamb, floorY - head, tint(post, 1.0), false, true)
         // the rolled-up curtain, hanging out of the lintel
-        var slats = 5
-        for (var s = 0; s < slats; s++) {
-          ctx.fillStyle = tint(steel, s % 2 === 0 ? 1.0 : 0.78)
-          ctx.fillRect(jamb, head + s * 5, w - jamb * 2, 4)
+        for (var s = 0; s < 4; s++) {
+          ctx.fillStyle = tint(post, s % 2 === 0 ? 1.4 : 1.1)
+          ctx.fillRect(jamb, head + s * 4, w - jamb * 2, 3)
         }
-        // hazard chevrons on the jambs, and a lit header
-        ctx.fillStyle = tint(Theme.hazard, 1.0)
+        ctx.fillStyle = tint(magenta, 0.7)
         for (var c2 = 0; c2 < 7; c2++) {
           var cy2 = head + 30 + c2 * ((floorY - head - 30) / 7)
           ctx.fillRect(0, cy2, jamb, 6)
           ctx.fillRect(w - jamb, cy2 + 4, jamb, 6)
         }
-        ctx.fillStyle = tint(Theme.amberGlow, 1.0)
-        ctx.fillRect(w * 0.16, doorTop + (head - doorTop) * 0.62, w * 0.68, 5)
+        ctx.fillStyle = tint(magenta, 0.8)
+        ctx.fillRect(w * 0.16, doorTop + (head - doorTop) * 0.62, w * 0.68, 3)
         return
       }
-
-      // "sign": a diagnostic board on a post
-      var sw = w * 0.86
-      var sx = (w - sw) / 2
-      var shh = h * 0.42
-      ctx.fillStyle = tint(steel, 0.8)
-      ctx.fillRect(w * 0.46, h * 0.40, w * 0.08, h * 0.52)
-      ctx.fillStyle = tint(Theme.tealDeep, 1.0)
-      ctx.fillRect(sx, h * 0.06, sw, shh)
-      ctx.strokeStyle = tint(Theme.teal, 1.0)
-      ctx.lineWidth = 2
-      ctx.strokeRect(sx + 1, h * 0.06 + 1, sw - 2, shh - 2)
-      ctx.fillStyle = tint(Theme.teal, 1.0)
-      for (var b = 0; b < 3; b++)
-        ctx.fillRect(sx + sw * 0.12, h * 0.06 + shh * (0.22 + b * 0.24), sw * (0.72 - b * 0.18), shh * 0.11)
     }
   }
 
@@ -484,6 +615,7 @@ Item {
   onPaintColorChanged: surface.requestPaint()
   onNumberChanged: surface.requestPaint()
   onBodyChanged: surface.requestPaint()
+  onLabelChanged: surface.requestPaint()
   onGhostChanged: surface.requestPaint()
   onShowNumberChanged: surface.requestPaint()
   onDimChanged: surface.requestPaint()
