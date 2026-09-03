@@ -254,6 +254,10 @@ FocusScope {
   function apply(result) {
     race.state = result.state
     handleEvents(result.events)
+    // Every claim the keyboard holds over the field is checked against the
+    // field the engine just handed back. This is the one funnel every input
+    // goes through, so no key handler can leave a stale claim behind.
+    race.reconcileClaims()
   }
 
   function send(input) {
@@ -480,9 +484,9 @@ FocusScope {
     track.humanProgress = race.viewProgress
     // The engine's order, not the drawn order. Smoothed progress lags the
     // truth, so the two disagreed on 402 of 1875 frames -- longest run about
-    // 2.8s, longer than a callout lives -- and the ladder could read
-    // "3rd YOU / 4th GASKET" with Gasket drawn in front. The exact targets go
-    // with it so a distance plate can print a gap that matches the ladder.
+    // 2.8s, longer than a callout lives -- and a readout taken from the drawn
+    // order could put the child third with the third kart drawn in front. The
+    // exact targets go with it so the road's gap tags print the engine's gap.
     track.setProgress(values, Engine.raceOrder(state), targets)
 
     // Speed is effective-progress rate, in questions per second, plus the
@@ -549,33 +553,69 @@ FocusScope {
   // place that knows the expected answer; the picker cannot see it and should
   // not. The arbitration, in full:
   //
-  //   With a hand held and the field empty, a press of 1, 2 or 3 is read
-  //   against the answer that is on screen right now.
+  // ROUND TWO FIXED THE FIRST PRESS AND LEFT THE SECOND. The rule below used to
+  // read the key against an EMPTY field only, so once one card key had put its
+  // digit in the field the next card key fell through to the ordinary-digit
+  // path: `1` then `2` on `1 x 10` made `12`, `Engine.typeDigit` submits the
+  // instant the entry is as long as the answer, and the child who changed their
+  // mind between two of the three keys the panel prints lost the streak, banked
+  // a miss on a fact they never attempted, put out a mastery lamp and played no
+  // card. 121 of the 144 facts in the 1-12 deck have a two-or-more-digit answer,
+  // and there is no other way to change which card is chosen. So the rule below
+  // is written against the WHOLE of what the card presses have put in the field,
+  // not against the first press only.
   //
-  //   a. The answer is one digit and the key IS that answer (`1 x 1`, press 1).
-  //      The press is unambiguously the answer. It types, the engine submits it,
-  //      the child is right, and the hand is not touched.
-  //   b. The answer is one digit and the key is NOT that answer (`1 x 6`, press
-  //      1). Typing it would submit a wrong answer the instant it landed, which
-  //      no child ever means to do, so it chooses the card and types nothing.
-  //   c. The answer is two digits or more (`1 x 10`, press 1). It chooses the
-  //      card AND types the digit, because the child may well be starting to
-  //      type `10`. Nothing is submitted -- the entry is short -- and the digit
-  //      is held as PROVISIONAL: it belongs to the card press, not to an answer.
+  //   A press of 1, 2 or 3, with that card in the hand and NOTHING OF THE
+  //   CHILD'S OWN in the field, is read against the answer on screen. Write
+  //   `cand` for what the field would show if the press were typed.
   //
-  //   Enter then decides, and `provisional` is what it decides on. If every
-  //   character in the field was typed by the press that chose the card, the
-  //   child meant the card: the digits are taken back with the engine's own
+  //   a. `cand` IS the answer (`1 x 1`, press 1; `3 x 4`, press 1 then 2). The
+  //      press is unambiguously the answer. It types, the engine submits it, the
+  //      child is right, and the hand is not touched.
+  //   b. `cand` is a shorter start of the answer (`1 x 10`, press 1; `11 x 11`,
+  //      press 1 then 2). It chooses the card AND types the digit, because the
+  //      child may well be typing the answer. Nothing can be submitted -- the
+  //      entry is still short -- and the digits are held PROVISIONAL: they
+  //      belong to the card presses, not to an answer.
+  //   c. `cand` cannot be the answer (`1 x 10`, press 1 then 2; `1 x 6`, press
+  //      1). Whatever else it is, it is not the child typing this answer, so it
+  //      is a card choice -- possibly a change of one. The digits the earlier
+  //      presses put in are taken back first, so the field never accumulates
+  //      two card keys into a number, and then:
+  //        - the answer is two digits or more: the digit is typed and held
+  //          provisional, exactly as in (b). It cannot submit, because one digit
+  //          is shorter than the answer.
+  //        - the answer is ONE digit: typing it would submit a wrong answer on
+  //          the spot. The digit is DEFERRED instead -- `pending` below. It is
+  //          drawn in the field so the child can see the key landed, and it is
+  //          handed to the engine only when the child says it is an answer.
+  //
+  //   Enter decides, and `pending` decides first. A deferred digit is the
+  //   child's answer as far as Enter is concerned: it goes to the engine, the
+  //   engine submits it, and a wrong one costs the streak and nothing else --
+  //   the sputter, the reset and the recorded miss the design's answer loop
+  //   step 4 asks for. Round two swallowed that press entirely: no sputter, no
+  //   streak reset, no `missed` entry, and then Enter spent all three cards on a
+  //   card and a rival the child had never confirmed.
+  //
+  //   With no deferred digit, Enter is the design's confirm key: if every
+  //   character in the field was typed by the presses that chose the card, the
+  //   child meant the card, the digits are taken back with the engine's own
   //   backspace and the card is played. If the child typed anything of their
-  //   own after choosing, the field is an answer and Enter submits it.
+  //   own, the field is an answer and Enter submits it.
   //
-  //   Escape takes the provisional digits back too, which is the other half of
-  //   the same fix: round one left a stray `1` in the field after Escape, so the
-  //   next digit the child typed was appended to a `1` they thought they had
-  //   just undone.
+  //   Backspace, Escape and `H` all retire the claim. Backspace on a deferred
+  //   digit simply drops it and leaves the card chosen, so the panel's own
+  //   footer turns from `FINISH THE ANSWER FIRST` to `⏎ USE IT` and the card is
+  //   one printed key away. Escape drops it and puts the card back. `H` drops it
+  //   because the hint moves the fact, and a claim that outlives its fact eats
+  //   the next digit the child types -- round two's `1` `H` `4` `⏎`, which
+  //   backspaced the child's own `4` away and spent the hand.
   //
-  // Nothing is ever spent by a keystroke that was meant as a digit, and no
-  // answer in the tables has become untypable while a hand is held.
+  // Nothing is ever spent by a keystroke that was meant as a digit; no keystroke
+  // of the child's is thrown away without the engine seeing it; a card choice,
+  // and a change of card choice, costs nothing at all; and no answer in the
+  // tables has become untypable while a hand is held.
   Item {
     id: keys
     anchors.fill: parent
@@ -592,9 +632,11 @@ FocusScope {
         // leave the race. Round one had three, and the middle one neither left
         // nor cleared the digit it had caused.
         if (picker.chosen >= 0) {
+          race.dropPending()
           race.takeBackProvisional()
           picker.reset()
         } else {
+          race.dropPending()
           race.leaveRequested()
         }
         event.accepted = true
@@ -602,7 +644,13 @@ FocusScope {
       }
 
       if (key === Qt.Key_Return || key === Qt.Key_Enter) {
-        if (race.enterSpendsCard()) {
+        if (race.pending.length > 0) {
+          // A deferred digit is the child's answer. It goes to the engine now,
+          // which submits it and charges a wrong one the streak -- and only the
+          // streak. It never becomes a card play.
+          picker.reset()
+          race.flushPending()
+        } else if (race.enterSpendsCard()) {
           race.takeBackProvisional()
           picker.confirm()
         } else if (race.entryLength() > 0) {
@@ -618,7 +666,14 @@ FocusScope {
 
       if (key === Qt.Key_Backspace) {
         // A backspace of the child's own retires the provisional claim: what is
-        // left in the field is theirs now.
+        // left in the field is theirs now. On a deferred digit it takes back the
+        // digit and leaves the card chosen, which is the printed way to a card
+        // on a one-digit fact: the panel's footer turns to `⏎ USE IT`.
+        if (race.pending.length > 0) {
+          race.dropPending()
+          event.accepted = true
+          return
+        }
         race.clearProvisional()
         race.send({ "kind": "backspace" })
         event.accepted = true
@@ -626,6 +681,10 @@ FocusScope {
       }
 
       if (key === Qt.Key_H) {
+        // The hint moves the fact on. Every claim on the old fact's field dies
+        // with it, or it eats the first digit the child types at the new one.
+        race.dropPending()
+        race.clearProvisional()
         race.send({ "kind": "hint" })
         event.accepted = true
         return
@@ -653,9 +712,41 @@ FocusScope {
   // and retires the claim.
   property int provisional: 0
 
+  // A digit a card press put on screen that the engine has NOT been given,
+  // because handing it over would have submitted a wrong answer on the spot.
+  // Never more than one character: it only ever arises against a one-digit
+  // answer, and any second keystroke resolves it one way or the other. It is
+  // drawn in the field, so it is visible to the child rather than swallowed.
+  property string pending: ""
+
   function clearProvisional() { race.provisional = 0 }
 
+  function dropPending() { race.pending = "" }
+
+  // Hand the deferred digit to the engine. It goes through `typeDigit` like
+  // every other digit -- same stall guard, same leading-zero rule, same
+  // automatic submit -- so a deferred wrong answer costs exactly what a typed
+  // one costs: the streak, a sputter, a `missed` entry, and nothing else.
+  function flushPending() {
+    if (race.pending.length === 0)
+      return
+    var value = Number(race.pending)
+    race.pending = ""
+    race.clearProvisional()
+    race.send({ "kind": "digit", "value": value })
+    // Belt and braces: if the engine took the digit without submitting (it
+    // cannot, on a one-digit answer, but the field is not this file's to
+    // assume), Enter still means submit.
+    if (race.entryLength() > 0)
+      race.send({ "kind": "submit" })
+  }
+
   function entryLength() { return race.human ? race.human.entry.length : 0 }
+
+  // What the field shows: the engine's entry plus any deferred digit. This is
+  // the string the arbitration reads, the picker measures, and the readout below
+  // draws, so all three agree about what the child is looking at.
+  readonly property string shownEntry: (race.human ? race.human.entry : "") + race.pending
 
   // The answer to the question on screen, as the string the child has to type.
   function expectedAnswer() {
@@ -665,50 +756,103 @@ FocusScope {
   }
 
   // Enter spends the card exactly when the field holds nothing but the digits
-  // the card press put there.
+  // the card presses put there -- and a deferred digit is never one of them: it
+  // is on screen precisely because it might be an answer, so Enter reads it as
+  // one and the panel prints `FINISH THE ANSWER FIRST` while it is there.
   function enterSpendsCard() {
     if (picker.chosen < 0)
+      return false
+    if (race.pending.length > 0)
       return false
     return race.entryLength() === race.provisional
   }
 
   function takeBackProvisional() {
-    while (race.provisional > 0 && race.entryLength() > 0) {
+    // The count is held locally: `reconcileClaims` below rewrites
+    // `race.provisional` under every send, and a loop that trusted the property
+    // it is mutating would be counting two things at once.
+    var left = race.provisional
+    while (left > 0 && race.entryLength() > 0) {
       race.send({ "kind": "backspace" })
-      race.provisional -= 1
+      left -= 1
     }
     race.provisional = 0
   }
 
+  // The field belongs to the fact it was typed at. The engine clears the entry
+  // in five places -- a correct answer, a wrong one, a reveal, a hint, a fresh
+  // lap -- and every one of them would otherwise leave a claim behind that eats
+  // the child's next digit. This runs after every step, so no path can forget.
+  function reconcileClaims() {
+    if (race.provisional > race.entryLength())
+      race.provisional = race.entryLength()
+    if (race.pending.length > 0 && race.entryLength() > 0)
+      race.pending = ""
+  }
+
+  // The fact moving is the other half of the same rule, and it is the one the
+  // hint used to slip through.
+  readonly property int factOnScreen: race.human ? race.human.currentFact : -1
+  onFactOnScreenChanged: {
+    race.pending = ""
+    race.provisional = 0
+  }
+
   function typeKey(digit) {
-    var typed = race.entryLength()
-    var holding = race.hand.length >= digit
-    if (digit >= 1 && digit <= 3 && typed === 0 && holding) {
-      var expected = race.expectedAnswer()
-      if (expected.length === 1) {
-        if (expected === String(digit)) {
-          // (a) the key is the answer. Type it and leave the hand alone.
-          race.clearProvisional()
-          race.send({ "kind": "digit", "value": digit })
-          return
-        }
-        // (b) typing it would submit a wrong answer on the spot. Choose only.
+    var expected = race.expectedAnswer()
+    var holding = digit >= 1 && digit <= 3 && race.hand.length >= digit
+    // Nothing of the child's own in the field: everything in it, deferred digit
+    // included, was put there by a card press.
+    var clean = race.entryLength() === race.provisional
+
+    if (holding && clean && expected.length > 0) {
+      var cand = race.shownEntry + String(digit)
+
+      if (cand === expected) {
+        // (a) the press completes the correct answer. Type it, let the engine
+        // submit it, and leave the hand alone.
+        race.dropPending()
         race.clearProvisional()
-        picker.choose(digit - 1)
+        picker.reset()
+        race.send({ "kind": "digit", "value": digit })
         return
       }
-      // (c) two digits or more to come: choose, type, and hold the digit as
-      // provisional so Enter can give it back.
+
+      if (cand.length < expected.length && expected.indexOf(cand) === 0) {
+        // (b) the press could be building the answer, and it cannot submit.
+        // Choose the card and type it, provisionally.
+        picker.choose(digit - 1)
+        race.send({ "kind": "digit", "value": digit })
+        race.provisional = race.entryLength()
+        return
+      }
+
+      // (c) `cand` cannot be this answer, so the press is a card choice or a
+      // change of one. Take back what the earlier presses put in FIRST -- this
+      // is the line round two did not have, and without it two card keys ran
+      // together into a number and submitted themselves.
+      race.dropPending()
+      race.takeBackProvisional()
       picker.choose(digit - 1)
-      race.send({ "kind": "digit", "value": digit })
-      race.provisional = race.entryLength()
+      if (expected.length > 1 && !race.stalled) {
+        // A single digit is shorter than the answer, so it cannot submit: show
+        // it, held provisional, and Enter still gives it back.
+        race.send({ "kind": "digit", "value": digit })
+        race.provisional = race.entryLength()
+      } else if (!race.stalled) {
+        // One digit expected. Handing it over would submit a wrong answer, so
+        // defer it: on screen, in the child's hands, and one Enter from the
+        // engine.
+        race.pending = String(digit)
+      }
       return
     }
-    // A digit of the child's own, typed on top of something already in the
-    // field. They are answering, not spending: the field is theirs from here,
-    // and the card the first press chose is put back rather than left selected
-    // under an Enter that would spend it once the answer clears the field.
-    if (typed > 0) {
+
+    // A digit of the child's own. Any deferred digit is theirs too, and it goes
+    // to the engine first so the keystrokes reach it in the order they were
+    // pressed -- exactly what typing those two digits does with no hand held.
+    race.flushPending()
+    if (race.entryLength() > 0) {
       race.clearProvisional()
       picker.reset()
     }
@@ -842,166 +986,27 @@ FocusScope {
     }
   }
 
-  // ---------------------------------------------------- the position ladder
+  // ---------------------------------------------------- the empty strip
   //
-  // Design, the comparison table: "Looking down the track, positions visible at
-  // a glance." At a glance was doing no work. The HUD said `PLACE 2nd` and the
-  // minimap put four dots on one loop, and in the first seconds of a race those
-  // dots sit on top of one another; between the left readouts and the minimap
-  // ran 890 px of nothing. A critic's verdict on the whole screen was that you
-  // cannot see the race.
+  // Between the left readouts and the minimap run about 890 px of nothing, and
+  // round two filled them with a standings ladder: four rungs, `1st 21 BOLT`
+  // through `4th 7 YOU`, ringed on the child's own rung and named to a screen
+  // reader as "4th, YOU" on every frame of the race.
   //
-  // This is the standings, in the strip that was empty. It invents nothing: the
-  // order is `Engine.raceOrder`, and the gap is the difference in effective
-  // progress, which the design defines as position itself -- "Position is
-  // effective progress". The number is therefore in questions, which is the
-  // unit the child is already counting in, and it is the same number the karts
-  // on the road are drawn from.
+  // It is gone, and the rule it broke is not a HUD-inventory rule but the
+  // design's Fairness list: "the callouts only ever say PASSED BOLT or BOLT
+  // SLIPPED PAST, never a running last-place label." A four-rung ordered strip
+  // naming who is last IS that label, printed continuously rather than for the
+  // 900 ms a callout lives, and reading it aloud on a view the design says "is
+  // visual by nature and is not claimed" made it worse rather than better. It
+  // was also the third copy of one standings on one screen -- the ladder, the
+  // gap tags `ui/TrackView.qml` draws on the road, and the minimap's four dots.
   //
-  // It appears only when there is somebody to be ahead of or behind. In the
-  // three solo modes the strip stays empty, because there are no positions and
-  // a ladder of one would be furniture.
-  readonly property var ladder: {
-    var out = []
-    if (!state || state.racers.length < 2)
-      return out
-    var order = Engine.raceOrder(state)
-    var mine = 0
-    for (var h = 0; h < state.racers.length; h++)
-      if (state.racers[h].id === state.humanId)
-        mine = Engine.effectiveProgress(state.racers[h], state.questionsPerLap)
-    for (var i = 0; i < order.length; i++) {
-      var index = race.indexOfRacer(order[i])
-      if (index < 0)
-        continue
-      var racer = state.racers[index]
-      out.push({
-        "place": i + 1,
-        "name": race.nameOf(racer.id),
-        "number": race.numberOf(racer),
-        "paint": race.paintOf(racer),
-        "isHuman": racer.kind === "human",
-        "finished": racer.finished === true,
-        "gap": Engine.effectiveProgress(racer, state.questionsPerLap) - mine
-      })
-    }
-    return out
-  }
-
-  Item {
-    id: ladderStrip
-    x: leftHud.x + leftHud.width + race.px(26)
-    y: race.px(24)
-    width: Math.max(0, rightHud.x - x - race.px(26))
-    height: race.px(62)
-    visible: race.ladder.length > 1
-
-    Accessible.role: Accessible.StaticText
-    Accessible.name: "Race order"
-
-    Row {
-      anchors.centerIn: parent
-      spacing: race.px(10)
-
-      Repeater {
-        model: race.ladder
-
-        Rectangle {
-          readonly property bool self: modelData.isHuman === true
-          height: race.px(54)
-          width: rung.width + race.px(22)
-          radius: Theme.cornerRadiusSmall
-          color: self ? Theme.focusFill
-                      : Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.80)
-          border.width: self ? 2 : 1
-          border.color: self ? Theme.focusRing : Theme.line
-
-          Accessible.role: Accessible.StaticText
-          Accessible.name: Engine.ordinal(modelData.place) + ", " + modelData.name
-                           + (modelData.finished
-                              ? ", home"
-                              : (modelData.gap === 0
-                                 ? ""
-                                 : (modelData.gap > 0
-                                    ? ", " + modelData.gap + " questions ahead of you"
-                                    : ", " + (-modelData.gap) + " questions behind you")))
-
-          Row {
-            id: rung
-            anchors.centerIn: parent
-            spacing: race.px(8)
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: Engine.ordinal(modelData.place)
-              color: Theme.textLabel
-              font.family: Theme.mono
-              font.bold: true
-              font.pixelSize: Math.max(11, race.fs(15))
-              font.letterSpacing: 1
-            }
-
-            // The kart's own number plate, in the kart's own paint, so the
-            // rung and the kart on the road are the same object.
-            Rectangle {
-              anchors.verticalCenter: parent.verticalCenter
-              width: Math.max(race.px(30), plate.implicitWidth + race.px(10))
-              height: race.px(26)
-              radius: race.px(3)
-              color: modelData.paint
-
-              Text {
-                id: plate
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: String(modelData.number)
-                color: Theme.ink(modelData.paint)
-                font.family: Theme.mono
-                font.bold: true
-                font.pixelSize: Math.max(11, race.fs(16))
-              }
-            }
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: modelData.name
-              color: parent.parent.self ? Theme.amberGlow : Theme.textBright
-              font.family: Theme.mono
-              font.bold: true
-              font.pixelSize: Math.max(12, race.fs(18))
-              font.letterSpacing: 1
-            }
-
-            // The gap, in questions, with an arrow so it is shape as well as
-            // colour. The child's own rung has no gap to itself.
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              visible: text.length > 0
-              text: {
-                if (modelData.isHuman === true)
-                  return ""
-                if (modelData.finished === true)
-                  return "HOME"
-                if (modelData.gap === 0)
-                  return "LEVEL"
-                return (modelData.gap > 0 ? "\u25B2 " : "\u25BC ") + Math.abs(modelData.gap)
-              }
-              color: modelData.finished === true
-                     ? Theme.teal
-                     : (modelData.gap > 0 ? Theme.hazard : Theme.lime)
-              font.family: Theme.mono
-              font.bold: true
-              font.pixelSize: Math.max(11, race.fs(16))
-              font.letterSpacing: 1
-            }
-          }
-        }
-      }
-    }
-  }
+  // What the design does sanction is here already and stays: `PLACE 4th` in the
+  // HUD ("lap and table name top left, place beside it"), the minimap, and the
+  // pass callouts. The band is left empty on purpose. An empty band costs a
+  // child nothing; a rule broken on every frame costs them the thing the
+  // Fairness list exists to protect.
 
   // ------------------------------------------------------------ HUD right
   // The wireframe's order along the top: the minimap, then the clock in the
@@ -1177,7 +1182,7 @@ FocusScope {
         anchors.centerIn: parent
         textFormat: Text.PlainText
         visible: !reveal.active
-        text: (race.human ? race.human.entry : "") + (caret.on ? "_" : " ")
+        text: race.shownEntry + (caret.on ? "_" : " ")
         color: Theme.amberGlow
         font.family: Theme.mono
         font.bold: true
@@ -1318,11 +1323,14 @@ FocusScope {
     anchors.fill: parent
     hand: race.hand
     rivals: race.liveRivals
-    entryLength: race.entryLength()
+    entryLength: race.shownEntry.length
     // The override the picker documents: the digits the card press itself put
     // in the field are not an answer the child is part-way through, so Enter
-    // still spends.
-    enterSpends: race.enterSpendsCard() || race.entryLength() === 0
+    // still spends. A DEFERRED digit is the exception, and it is why this reads
+    // `shownEntry` rather than the engine's entry: that digit might be the
+    // child's answer, so Enter belongs to it and the footer says
+    // `FINISH THE ANSWER FIRST` until Backspace or Enter settles it.
+    enterSpends: race.enterSpendsCard() || race.shownEntry.length === 0
     dockWidth: race.px(500)
     dockMargin: race.px(30)
     visible: race.hand.length > 0
