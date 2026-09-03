@@ -35,6 +35,20 @@ const binaryMagic = [
 // is grepped, except the files scope.ts says are not the plugin at all.
 const layerThree = ["TurboTables.qml", "BarWidget.qml", "shell/"];
 
+// Where a binary asset is allowed to live. docs/plan.md's repository layout
+// puts sprite sheets and sounds under assets/, the baked shader under shaders/,
+// and one preview at the root, so those are the three places a PNG, WAV or
+// .qsb belongs. Anywhere else -- notably inside ui/ or src/ -- a binary is
+// somewhere code is read from, which is what the rule is actually guarding
+// against, so it still fails there.
+const binaryHomes = ["assets/", "shaders/", "docs/", "preview.png"];
+
+function inABinaryHome(display: string): boolean {
+  return binaryHomes.some((where) =>
+    where.endsWith("/") ? display.startsWith(where) : display === where,
+  );
+}
+
 // The tokens the plan names. Each is matched literally, case sensitively.
 // `Process` is deliberately capitalised so Node's lowercase `process` object,
 // which layer 1 tooling legitimately uses, is not a hit.
@@ -124,8 +138,10 @@ async function walk(directory: string): Promise<void> {
         continue;
       }
       if (withinLayerBoundary(display)) grepImports(display, contents.toString("utf8"));
-    } else if (withinLayerBoundary(display)) {
-      failures.push(`${display}: binary asset inside a layer boundary directory`);
+    } else if (withinLayerBoundary(display) && !inABinaryHome(display)) {
+      failures.push(
+        `${display}: binary asset outside assets/, shaders/, docs/ and the root preview`,
+      );
     }
   }
 }
