@@ -1,323 +1,274 @@
-Implementation plan · 2026-09-02 · TypeScript engine, QML screens, four layers, eight milestones, gauntlet-loop kickoff
+Implementation plan · v2 · 2026-09-03 · Golden Hour direction, rally cars, one sprite pipeline, gauntlet restart
 
-# Turbo Tables Solo — Implementation Plan
+# Turbo Tables Solo — Implementation Plan v2
 
-The build plan for the plugin alone, from an empty repository to a verified listing under Kids on plugins.omarchy.org. It implements the settled design v2 and nothing else. Development runs in four layers on a Mac, an Omarchy VM, and one real Omarchy device, with a strict boundary so that most of the work never needs Linux.
+The build plan for the plugin alone, from where the first gauntlet run left it to a verified listing under Kids on plugins.omarchy.org. It supersedes plan v1 (2026-09-02). The engine, rivals, save file, package gates and shell integration from v1 stand; the visual direction, the cars, and the art pipeline do not, and this document replaces them.
 
-**Repository:** `omarchy-kids-game-turbo-tables` · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Language:** TypeScript for all game logic, QML for screens, GLSL for the road · **License:** MIT, assets CC0 or original
+**Repository:** `omarchy-kids-game-turbo-tables` · **Plugin id:** `io.github.dmcchesney.turbo-tables-solo` · **Language:** TypeScript for all game logic, QML for screens, GLSL for the road · **License:** MIT, assets original or CC0 · **Branches:** `gauntlet/turbo-tables-build` (the loop's branch, 27 commits past `main`), `proto/golden-hour` (the prototype this plan adopts)
+
+## What changed from plan v1, and why
+
+| Plan v1 | Plan v2 | Reason |
+| --- | --- | --- |
+| Garage at night, amber work lights, teal shadows; art placeholder until the maintainer's M6 pass | **"Golden Hour at the Pit"**: the palette and light of Omarchy Quattro's own wallpaper — a retrowave sunset — applied to every game screen; art generated in-loop | The v1 build was judged "retro but cheap" by the maintainer. A pixel-art post-process was tried and rejected; relighting the existing low-poly to the wallpaper was prototyped on `proto/golden-hour` and accepted as the direction. It also makes the plugin belong to its shell visually. |
+| Six voxel-styled open go-karts | **Six low-poly rally cars**, one model each, closed bodies, livery, lit lamps | The reference is a Group B rally car. A go-kart cannot be made to read like one, and the v1 karts failed silhouette, identity and grounding against it. |
+| Kart drawn live by `KartSprite` in the garage and separately by `TrackSprite` on the track | **One car renderer, one model, baked to sprite sheets** at eight angles and three scales, used by garage, countdown and track | v1 shipped two different karts for one child. The design always specified sprite sheets; v1 never built them. |
+| Bars: the garage mock, the omarchy-racer plugin | Bars: `docs/golden-hour-reference.png` for every scene, `docs/golden-hour-car.png` for the cars, the racer plugin only for race-view structure | The mock depicts a multiplayer lobby and was the reason `preview.png` had to be deleted; it stays in `docs/` as history, not as a bar. |
+| GPU frame rate measured on the Mac | GPU frame rate measured **only on the device**; the Mac is headless, software-rendered | `-platform offscreen` reports `api=1` on this Mac, so every GPU figure taken here was unverifiable, and opening a Qt window steals the maintainer's focus. |
+| Pieces 1–7, all open | Pieces 1, 2 and 6 **frozen won**; 7 won and awaiting a VM re-check; 3, 4, 5 re-run under the new direction; a new piece **C, Cars**, runs first | Recorded state of the first run, below. |
 
 ## Done means
 
 - The plugin installs with `omarchy plugin add … --enable` on a stock Omarchy 4.0.2 and opens from the bar button or a keybinding.
 - Practice, Time trial, Ghost, and Grand Prix all work keyboard-only, with three seeded rivals, twelve-lap tables, the twelve-streak hand, all eight cards, the pit crew, the pit lane, records, and the garage.
-- Every rule in the design has a test, every seed has a vector, and the compiled bundle reproduces the TypeScript source's vectors byte for byte.
-- The marketplace scanner, run locally, reports `passed` with no capabilities.
-- Frame rate: 60 fps on a GPU machine at 1080p; 30 fps in the software-rendered VM at the internal resolution.
+- Every rule in the design has a test, every seed has a vector, and the compiled bundle reproduces the TypeScript source's vectors byte for byte, under Node and under Qt's QML engine.
+- The six cars are one model each, baked to committed sprite sheets by a reproducible script, and every screen that shows a car shows the same car.
+- Every game screen is lit and coloured to `docs/golden-hour-reference.png`, and a blind critic picks ours against it on composition, palette and light.
+- The marketplace scanner, run locally against the working tree, reports `passed` with no capabilities, and every repository gate is green.
+- Frame rate: 60 fps on a GPU machine at 1080p, measured on the device; 30 fps in the software-rendered VM at the internal resolution.
 - Listed under Kids with tags kids, education, games; announced in the hub.
+
+## State at the start of v2
+
+The first gauntlet run (2026-09-02 to 03) is on `gauntlet/turbo-tables-build`. Every critic verdict is quoted in the run's evidence; the short version:
+
+| Piece | Verdict | Where it stands |
+| --- | --- | --- |
+| 1 Rules | *"Is this engine correct against the design? Yes."* Independent reference reproduces our 347-step transcript byte for byte; one authorised divergence from the bellringer. | **Frozen.** 653 tests, every spec run against source and bundle, vectors replayed under the QML engine. |
+| 2 Rivals, ghost, save | Rival numbers exact over 400,000 draws per cell; mercy rules survived an independent attacker; `save.ts` YES after 54 checks and 21 mutations. The save *path* took four rounds — the same bug, "there is no file" inferred from "I could not find out", appeared independently in the engine, the shell and the UI. | **Frozen**, with one open VM check: whether an atomic write over a `chmod 000` file leaves a readable one. The M2 clause "2nd or 3rd at Pro more often than not" measures ~50% and is **recorded, not fixed**, by the maintainer's decision (`docs/open-questions.md`). |
+| 3 Garage | Picked over the mock five rounds running, on content and interface; never on the picture. Final craft residue judged art direction, not defect. | **Re-run under v3** with the new bar. Tab did nothing until round 6 — the harness advanced focus by API and only the test pressed the key. |
+| 4 Race view | Picked over omarchy-racer, partly on craft; road turns, minimap honest, fallback grid now actually draws. | **Re-run under v3.** |
+| 5 Flow | Key count 1 (was 7); all screens reachable; card key rewritten so a deliberate choice costs nothing in 16 shapes; ladder deleted for breaking the Fairness rule. | **Re-run under v3** for the countdown only; the flow itself holds. |
+| 6 Package | Picked over the listed, verified Lode Runner plugin five rounds running. `npm run scan` now scans the working tree; the boundary check reads glued strings and verifies binary content; a README gate pairs claims with tokens and states what it cannot check. | **Frozen**; re-run once at M6 for the new images and the wallpaper's attribution. |
+| 7 Shell | *"As good as the first-party overlay? YES. Safe on a child's machine? YES."* 0 of 205 keys leaked over 41 cold starts against `omarchy.emojis` leaking 50 of 50. | **Won**; needs the VM back to re-verify the save-path fix. |
+
+The prototype on `proto/golden-hour` (commit `11555f9`) is the starting point for pieces 3, 4 and 5. Its known defects are listed under each piece below. The VM was unreachable at the end of the run (`utmctl start` → `OSStatus -609`); bringing it back is a prerequisite.
 
 ## Four layers
 
-| Layer | What lives here | Runs on | Imports allowed | What it proves |
-| --- | --- | --- | --- | --- |
-| **1 Engine** | `src/engine/**` (TypeScript): decks, laps, answer loop, streaks, hands, cards, effective progress, rivals, ranking, ghost timeline, save-file schema, seeded RNG | Mac, Node | nothing but the standard library | the rules, deterministically, in milliseconds |
-| **2 Screens** | `ui/**` (QML): Garage, Countdown, Race, TrackView, Minimap, Picker, Results, Settings, gauges, `Theme` and `Store` adapters | Mac, Qt 6 `qml` runner with `dev/harness` | `QtQuick*` modules and the engine bundle; never `Quickshell`, never `qs.*` | look, feel, keyboard flow, frame budget |
-| **3 Shell** | `TurboTables.qml`, `BarWidget.qml`, `manifest.json`, `shell/**` adapters that bind the real theme singletons, `FileView` persistence, the audio loader | Omarchy VM (UTM aarch64 build) | `Quickshell*`, `qs.Commons`, `qs.Ui` | the plugin contract, focus under Hyprland, hot reload, validation |
-| **4 Device** | nothing new; the assembled plugin | one real Omarchy x86 machine | — | GPU frame rate, sound, the final recording, the submission commit |
+Unchanged from v1 in intent: layer 1 engine (`src/engine/**`, Node), layer 2 screens (`ui/**`, the `qml` harness), layer 3 shell (`TurboTables.qml`, `BarWidget.qml`, `shell/**`, the VM), layer 4 the device. The boundary is enforced by `npm run check:boundary`, which now greps every file except a printed allow-list, reads glued strings, and verifies binary content against real signatures rather than extensions.
 
-**The boundary is enforced, not hoped for.** `npm run check:boundary` greps `ui/` and `src/` for `Quickshell`, `qs.`, `Process`, `FileView`, `XMLHttpRequest`, and `Qt.labs` and fails the build on a hit. Only `TurboTables.qml`, `BarWidget.qml`, and `shell/` may touch the shell.
+One addition: **the sprite bake is a layer-2 tool.** `dev/Harness.qml`'s `--kart` mode renders a car alone on transparency; `npm run sprites` drives it to produce the committed sheets. Baked sheets are build output like `engine/engine.mjs` and are rebuilt in the same commit as any model change; `npm run check:sprites` rebuilds to a temp path and diffs.
 
 ## Repository layout
 
 ```
 omarchy-kids-game-turbo-tables/
-├── manifest.json
-├── TurboTables.qml              overlay entry (layer 3)
-├── BarWidget.qml                bar launcher (layer 3)
-├── qmldir
+├── manifest.json  TurboTables.qml  BarWidget.qml  qmldir
 ├── shell/                       ThemeBridge.qml, FileStore.qml, AudioLoader.qml (layer 3)
-├── ui/                          screens and views (layer 2)
-│   ├── Theme.qml                singleton of colors and sizes; bound by shell/ThemeBridge or dev/harness
-│   ├── Store.qml                load/save interface; implemented by shell/FileStore or dev/MemoryStore
-│   ├── Garage.qml  Countdown.qml  Race.qml  TrackView.qml  Minimap.qml  Picker.qml  Results.qml  Settings.qml
-│   └── parts/                   ChargeBar.qml, LapLamps.qml, KartSprite.qml, Callout.qml, Readout.qml
-├── engine/
-│   └── engine.mjs               COMMITTED build output of src/engine; the only JS QML imports
-├── src/
-│   ├── engine/                  TypeScript source (layer 1)
-│   │   ├── rng.ts  deck.ts  race.ts  streak.ts  cards.ts  rivals.ts  rank.ts  ghost.ts  save.ts  events.ts  index.ts
-│   └── tools/                   vectors.ts (generate), verify-bundle.ts, scan.ts (marketplace baseline runner)
-├── vectors/                     decks.json  hands.json  races.json  rivals.json  parity-15.json
-├── shaders/                     road.frag (source), road.frag.qsb (baked, committed)
-├── assets/                      karts/ props/ cards/ sfx/ (PNG, WAV)
-├── dev/                         harness (layer 2 only)
-│   ├── Harness.qml              a Window that loads any ui/ screen with mock theme and store
-│   ├── imports/qs/Commons/      mock Color.qml, Style.qml + qmldir, values from a real Omarchy theme
-│   ├── MemoryStore.qml
-│   └── run.sh                   qml -I dev/imports dev/Harness.qml --screen Race --seed 42
-├── tests/
-│   ├── engine/                  node:test specs per module
-│   ├── vectors.test.ts          replays every vector through src and through engine.mjs
-│   ├── qml/                     qmltestrunner specs for ui/ parts
-│   └── entrypoint/              copy of Omarchy's manifest-entrypoints fixture (VM)
-├── preview.png
-├── LICENSE  NOTICE  README.md
+├── ui/
+│   ├── Theme.qml  Store.qml  Game.qml (the router)
+│   ├── Garage.qml  Countdown.qml  Race.qml  TrackView.qml  CanvasRoad.qml  Minimap.qml  Picker.qml  Results.qml  Settings.qml
+│   └── parts/
+│       ├── CarSprite.qml        ONE car renderer: model table, camera, culling, depth sort, one light, livery, lamps
+│       ├── SunsetSky.qml        sky gradient, banded sun, cloud streaks, parallax hills -- used by Garage, Countdown, TrackView
+│       ├── GarageStall.qml      the bay, lit from the open door
+│       └── ChargeBar.qml  LapLamps.qml  HudReadout.qml  Confirm.qml  StatRow.qml  HandCard.qml  ...
+├── engine/engine.mjs            COMMITTED build of src/engine
+├── src/engine/                  TypeScript (layer 1) -- frozen
+├── src/tools/                   vectors.ts, check-*.ts, scope.ts, scan.ts, verify-bundle.ts, bake-sprites.ts
+├── vectors/                     decks, hands, races, rivals, parity-15
+├── shaders/                     road.frag + baked road.frag.qsb
+├── assets/
+│   ├── karts/<body>.png         COMMITTED baked sheets: 8 angles x 3 scales per body, paint via mask channel
+│   ├── props/                   roadside sprites (banners, tyre walls, gantry, timing board)
+│   └── sfx/                     WAV, M6
+├── dev/                         Harness.qml (--screen, --kart, --shot, all headless), MemoryStore.qml, mock qs.Commons
+├── tests/                       engine specs (source + bundle), vectors, bundle-qml, qml/, qml-shell/, entrypoint/
+├── docs/
+│   ├── design.md  plan.md  environment.md  open-questions.md
+│   ├── golden-hour-reference.png   THE BAR for every scene: Omarchy Quattro's wallpaper at 1920x1080
+│   ├── golden-hour-car.png         THE BAR for the cars: the wallpaper's car, cropped
+│   └── garage-room-mock.png        v1's mock; history, not a bar
+├── LICENSE  NOTICE  README.md  HANDOFF.md
 └── package.json  tsconfig.json  esbuild.config.mjs  .github/workflows/ci.yml
 ```
 
-No `scripts/`, `bin/`, `install*`, or `setup*` anywhere. No symlinks. The only non-text files are PNG, WAV, and the baked `.qsb`.
+`KartSprite.qml`, `TrackSprite.qml` and `CountdownKart.qml` are deleted by piece C. No `scripts/`, `bin/`, `install*`, `setup*`, no symlinks, no executables. Binaries only PNG, WAV and `.qsb`, only under `assets/`, `shaders/`, `docs/`, and the root preview.
 
-## TypeScript into QML
+## Visual direction v3: Golden Hour at the Pit
 
-QML imports ECMAScript modules directly: `import "../engine/engine.mjs" as Engine`. So the engine is written in TypeScript, bundled to one ES module, and that bundle is committed, because a listed plugin must run from the repository as cloned with no build step.
+The bar is `docs/golden-hour-reference.png` — the wallpaper Omarchy Quattro ships as `themes/tokyo-night/backgrounds/1-quattro.webp`: an 80s rally car mid-jump against a retrowave sunset. The bar is its **palette, light and composition**, not its brushwork. Nothing in this plugin is painted; it is gradients, silhouettes and flat-shaded low-poly geometry rendered at the 480×270 layer, which is where the design already puts it.
 
-- **Target:** `es2016`, ES module output, no Node built-ins, no dependencies in the bundle. esbuild downlevels optional chaining and nullish coalescing; the engine avoids async, generators, and `BigInt`.
-- **Purity:** the engine is a reducer. `step(state, input, now) -> { state, events }`. No timers, no randomness except the seeded generator inside `state`, no I/O. QML owns the clock and calls `step` with elapsed milliseconds; rivals are advanced by the same call.
-- **Determinism:** `rng.ts` is a small xoshiro128** seeded from the race seed; every draw goes through it, including rival think times and rival decisions. Same seed, same history, same race, on Node and in QML.
-- **Bundle parity:** `tests/vectors.test.ts` replays every vector through the TypeScript source and, separately, through `engine/engine.mjs` loaded as a module, and requires identical output. CI fails if `engine.mjs` is stale relative to `src/`.
-- **Types the UI sees:** `RaceState`, `Racer`, `Lap`, `Hand`, `Card`, `Signal`, `RaceEvent` (a discriminated union: `correct`, `wrong`, `reveal`, `pitCrew`, `lapComplete`, `handDealt`, `cardUsed`, `hit`, `blocked`, `swap`, `passed`, `passedBy`, `finished`, `signal`), and `SaveFile`. Events drive every animation and sound so the UI never re-derives rules.
+**Palette**, sampled from the image, not chosen:
 
-## Engine specification (layer 1)
+| element | colour |
+| --- | --- |
+| sky, top → mid → horizon glow | `#5e1a50` → `#a4337b` → `#c24073` → `#d75d6b` |
+| sun | `#efcb72` core, `#f0956e` edge, wide `#d75d6b` glow; horizontal cut lines through the lower half |
+| hills, far → near | `#bc405f` → `#8e2c50` → `#5e1a50` |
+| ground | `#3c1228`; grid lines `#ff4fa3` at ~0.35 alpha fading into the glow |
+| shadow | `#5f255e` purple, never grey |
+| rim light | `#f0b07a` |
+| kept from v1 | amber `#f5a524` for work lights and the charge bar; cream `#f2e6c4` for the fact, plates and road paint; hazard `#d8a12a`; the shell's `accent` for focus |
 
-| Module | Responsibilities | Key tests |
-| --- | --- | --- |
-| `rng.ts` | xoshiro128**, `fork(label)` for independent streams per racer | known-answer vectors |
-| `deck.ts` | preset → ordered tables → per-lap shuffled facts; pit-lane insertion; extra questions from missed facts first, then the lap's table | every fact correct; each lap holds its table exactly once before extras; `2–5` is 48 questions |
-| `race.ts` | racer state (`lapsComplete`, `correctInLap`, `questionsNeededThisLap`, `finished`, `finishTimeMs`), answer handling, reveal-and-advance, pit crew, lap advancement loop, finish | wrong never moves; second wrong reveals and advances; lap rollover resets need to 12; surplus carries |
-| `streak.ts` | consecutive-correct counter; threshold 12; pit-crew neither builds nor resets; deal when ≥ threshold and hand empty | the quirk from the bellringer: streak keeps climbing while a hand is held |
-| `cards.ts` | eight cards with scope and delta; shared round-robin cursor over the fixed schedule; hand of three; using any card clears the hand; floor 1; Roll Cage stack and single consumption; Oil Slick skips attacker and finished; Tow Hook swaps the position triple; finished racers cannot attack or be attacked; stall durations | one spec per rule, plus `parity-15.json` reproducing the bellringer's expected first three hands |
-| `progress.ts` | effective progress = laps × 12 + correctInLap − (need − 12); position order | a Pile-Up moves a racer back 15 on landing and forward as they answer |
-| `rivals.ts` | three personalities × three levels; think-time draws; accuracy; rubber band ±15% toward the child's rolling pace, never under 1.5 s; play policy; mercy rules; signal moments | over 10,000 seeded races: no rival ever targets the child with consecutive hands or targets last place; rivals answer their own lap deck |
-| `rank.ts` | finished first, then finish time, then effective progress, then correct, then fewer pit-crew answers | deterministic ties |
-| `ghost.ts` | answer timeline recording and playback for records; record update rules; per preset | a tie keeps the old record |
-| `save.ts` | `SaveFile` schema, versioned; settings, records, facts; migration stub; validation that rejects unknown keys | round-trip; no dates anywhere |
-| `events.ts` | event union and the ordering guarantee within one step | every state change emits exactly one event |
+**The light rule:** one key, the sun, low and behind-right of the subject. Every object has a warm rim on its sun side and a cool purple body; shadows run long toward the camera. The garage's amber work lights are the only other light and are the warm counterpoint to a cool-pink room. **Paint is a flat tone that stays its own hue** — a red car reads red under this sky; the warmth lives in the rim and the lamps, never in the paint. This is the rule the prototype broke.
 
-Vectors are generated by `src/tools/vectors.ts` from a fixed seed list and committed. A vector is `{ seed, preset, level, inputs[], expected: { events[], finalState } }` where `inputs` are timestamped keystrokes and card choices. The multiplayer engine that comes later must reproduce `decks.json` and `hands.json` exactly.
+**Composition:** horizon at 55–60% of frame height; the sun straddles it, off-centre right; the sky is 40% of the frame and is never black; the hero sits low-centre, large, silhouetted against the glow.
+
+Per screen, what the prototype established and what it left:
+
+- **Race view** — `SunsetSky` above a neon grid floor drawn identically by `road.frag` and `CanvasRoad`; rim-lit cars with long shadows; sponsor banners, tyre walls, a timing board and a checkered gantry as props; dust on a surge. Left: road-spanning arches cross the fixed answer field for a moment; `Race.qml`'s 0.55 vignette darkens the sky top to ~`#2a0c24`; the far road has no surface past z ≈ 20.
+- **Garage** — the roller door open onto the sunset; magenta bounce on floor and far wall; purple shadows; amber lights kept. Left: paint-hue drift (red → orange; roster thumbnails to tan/olive) — the light rule above is the fix; the left wall and shelves still flat.
+- **Countdown** — the car on the start line seen from behind-right, sun behind it, hills, grid, gantry, the number huge in cream over the sky, the first fact readable behind GO. Left: the numeral covers the gantry's board on beats 3–1; the car is a dark lump (piece C fixes that, not piece 5).
+- **Results, Settings, Picker, HUD chrome** — unchanged. The chrome stays native and theme-bound; only the game layer takes the light.
+
+### Design amendments this plan requires
+
+`docs/design.md` is the settled specification and the loop's rules forbid a build agent from changing it. The following amendments are therefore applied by the maintainer **before kickoff** (or by the coordinator on the maintainer's explicit instruction), each a replacement of the named passage:
+
+1. **"Visual style", first paragraph** — replace with: *Ground: near-black purple `#3c1228`. Light: one low sun, warm rim `#f0b07a`, with amber `#f5a524` work lights as the local counterpoint in the garage. Shadow: purple `#5f255e`. Sky: the retrowave gradient of Omarchy Quattro's wallpaper, `docs/golden-hour-reference.png`, which is the visual bar for every game screen. Chrome: the theme's `accent` for focus rings and the selected control. Paint stays its own hue under this light.*
+2. **"Visual style", the "Karts" paragraph** — replace with: *Cars: six original low-poly rally-car bodies — a boxy coupe, a hot hatch, a wedge, a saloon, a buggy, a pickup — one model each, rendered to sprite sheets at eight angles and three scales. Eight paints as a flat base colour; a cream livery panel with a stripe; the number on a roundel on the door and a plate at the rear; lit headlights and a wide tail-light bar. "Kart" remains the game's word for them in copy.*
+3. **"Garage Room", first sentence** — append: *The roller door stands open onto the sunset and the bay is lit from it.*
+4. **"The view", the bullet on the fact** — unchanged; **add a bullet**: *Above the horizon is the sky, never black: the sun, its glow, and three silhouette hill layers that parallax with the curve.*
+5. **"Decisions, settled"** — add a row: *Visual direction | **Golden Hour at the Pit** (v3, 2026-09-03). The garage-at-night palette of v2 is superseded; its amber and cream survive as accents.*
+
+No mechanic, number, mode, rule or fairness guarantee changes. If the maintainer declines any amendment, the corresponding piece's bar reverts to v1's.
+
+## The cars: piece C
+
+Six low-poly rally cars, one model each, in `ui/parts/CarSprite.qml`, baked to `assets/karts/<body>.png`.
+
+**The bar** is `docs/golden-hour-car.png`, judged on three things, in this order:
+
+1. **Silhouette.** Recognisable as a car — and as *that* car — as a black cut-out at 40 px and at 400 px. Low, wide, flared arches, a roof line, a spoiler that belongs to the body. From behind (the race view), a rear that reads: wide tail-light bar, rear window band, bumper, big rear tyres.
+2. **Identity.** A cream livery panel with a stripe; the number on a door roundel and a rear plate; two lit headlights (warm, with a small glow) and a red tail-light bar that is the single most legible cue for a rival ahead; the eight paints as flat base tones that stay their hue.
+3. **Grounding and light.** A flat purple contact shadow the shape of the car; a long soft shadow toward the camera; the warm rim on the sun side, caught by **chamfered edges** — flat boxes give a rim nothing to land on, which the prototype proved.
+
+**Model rules:** 40–80 faces per body, authored as a geometry table in model space; chamfers on every silhouette edge; a dark window band; wheels as short cylinders with a two-tone rim, partly inside the arches. Six bodies must differ **below the beltline**, not as six tops on one chassis. Proportions exaggerated toward the toy end — big wheels, short overhangs — as Art of Rally and Horizon Chase Turbo do, which are the two shipped games the maintainer should look at beside the crop (neither is bundled; the crop is the critic's bar).
+
+**Normals:** the v1 sprites' face winding produced inward normals, self-consistent for their cull and wrong-sided for any added light. `CarSprite` uses outward normals and a test that a face's normal points away from the model's centroid.
+
+**One renderer.** `CarSprite` replaces `KartSprite`, `TrackSprite` and `CountdownKart`. The garage turntable, the roster thumbnails, the countdown and the track all draw from the baked sheets; the live renderer runs only in the bake and in the harness.
+
+**The bake.** `npm run sprites` renders each body at eight yaws and three scales on transparency through the harness, with paint regions written to a mask channel so one sheet serves all eight paints (a small `ShaderEffect` recolours at load; a magenta placeholder swapped at load is the acceptable fallback). Sheets are committed. `npm run check:sprites` rebuilds to a temp path and diffs byte for byte, so a model change cannot land without its sheets, exactly as `check:bundle` guards the engine.
+
+**Gate:** an 8-angle turnaround of body 1 beside the crop; the six bodies as one contact sheet, each judged individually; the four cars from behind on the road; the car on the turntable; one car in all eight paints. A blind critic picks ours against the crop on the three criteria above, confirms paint fidelity (each paint measured against its swatch), confirms the same car appears on all three screens, and confirms the bake reproduces.
 
 ## Screens and views (layer 2)
 
-Screens are plain Qt Quick. They read `Theme` for colors, fonts, and spacing, `Store` for load and save, and hold a `RaceState` from the engine. Keyboard handling is in one place per screen with `Keys.onPressed` on a focus item, and every screen exposes `focusTarget` so the overlay can hand focus down.
+As v1, with these changes: `SunsetSky.qml` is a shared part used by `TrackView`, `Garage` (through the door) and `Countdown`; `TrackView` keeps the 480×270 layer on in both shader and canvas modes (measured: 48 fps with it off, 61–63 with it on, software renderer); `CanvasRoad` draws the same picture as `road.frag` and a CPU-rasterised reference of the shader is part of piece 4's evidence; `Countdown` is a scene, not a box; the race HUD band left empty by the ladder's deletion stays empty — a running last-place label breaks the Fairness rule and does not come back.
 
-- **Garage:** kart stall (six bodies, eight paints, number 1 to 99), roster with rivals and level badges, settings rows, the signal catalog, `READY UP`, `RACE A FRIEND` disabled with its message.
-- **Countdown:** four beats, first fact visible behind `GO`.
-- **Race:** HUD (lap and table, place, clock), fact and field, charge bar, hand panel, callouts; hosts `TrackView` and `Minimap`; runs a 100 ms `Timer` for the race clock and rival deadlines and a `FrameAnimation` for the view.
-- **TrackView:** `ShaderEffect` road in a `layer` at 480×270 with `layer.smooth: false`; kart, ghost, prop sprites as `Image { smooth: false }` positioned from the projection each frame; `onStatusChanged` fallback to `CanvasRoad.qml`; reduced-motion static plane.
-- **Minimap:** `Shape` loop with twelve sector ticks and numbered dots.
-- **Picker:** lower-right panel; `1` `2` `3`; target selection with arrows and Enter; Escape backs out.
-- **Results:** headline by place, stats, facts to look at, tables lit, `RACE AGAIN`, `GARAGE`.
-- **Settings:** sound, reduced motion, scanlines, timer, rival level, resets with one confirmation each.
+## Shell integration (layer 3) — done
 
-**Frame budget instrument:** `dev/Harness.qml` shows an fps counter from `FrameAnimation.smoothFrameTime` and a toggle for `QSG_VISUALIZE=overdraw`; the budget is measured before art is finished.
-
-## Shell integration (layer 3)
-
-- `TurboTables.qml`: the overlay contract from the design's approval section verbatim: `shell`, `manifest`, `opened`, `open(payloadJson)`, `close()`, `dismiss()`, a fullscreen `PanelWindow` on the Overlay layer with `keyboardFocus` bound to `opened`, a focus item with `Keys.priority: Keys.BeforeItem` and defensive re-focus, `keepLoaded: true`. It instantiates `ui/Race.qml` and friends and passes `focusTarget` down.
-- `BarWidget.qml`: a kart button; click runs the toggle through the shell's IPC.
-- `shell/ThemeBridge.qml`: binds `ui/Theme` properties from `Color.menu.*`, `Color.accent`, `Style.font.*`, `Style.space`, `Style.cornerRadius`.
-- `shell/FileStore.qml`: `FileView { atomicWrites: true }` at `${XDG_DATA_HOME:-~/.local/share}/turbo-tables-solo/garage.json`, 400 ms debounced save, `loaded` guard so a hot reload cannot overwrite live state with an empty file.
-- `shell/AudioLoader.qml`: a `Loader` around a `QtMultimedia` component; on error, a silent stub with the same interface.
-- Every `Text` sets `textFormat: Text.PlainText`.
+`TurboTables.qml` hosts `ui/Game.qml`; the surface outlives the summon and the first full-size frame is paid at plugin load, so no keystroke reaches the desktop cold or warm; `FileStore` proves absence with a `<dir>/.` traversability probe and re-reads before every write. `tests/entrypoint/` is Omarchy's real fixture, 51 assertions, proved to be a real gate. Re-verify in the VM once it is back; nothing here changes in v2 unless the VM says so.
 
 ## Toolchain
 
-**Mac (layers 1 and 2):**
-
-```bash
-brew install qt node
-```
-
-No `npm install`, ever, inside the checkout: the folder is mounted into the VM at the plugin path and `node_modules` symlinks fail `omarchy plugin validate`. Tools are pinned and invoked through `npx`, tests use Node's built-in runner with native TypeScript, and a `preinstall` guard refuses installs. Scripts:
+**Mac (layers 1 and 2):** `brew install qt node`. No `npm install` in the checkout, ever. Scripts as v1, plus:
 
 | Script | Does |
 | --- | --- |
-| `npm run build` | `npx esbuild` `src/engine/index.ts` → `engine/engine.mjs` (es2016, ESM, minify off so the scanner and reviewers can read it) |
-| `npm run check:types` | `npx tsc --noEmit` |
-| `npm test` | `node --test` over `tests/**/*.test.ts` (Node 24 runs TypeScript natively) |
-| `npm run vectors` | regenerate `vectors/` from the seed list |
-| `npm run check:boundary` | the import grep, forbidden names, symlinks, executables, and a `node_modules` presence check |
-| `npm run check:bundle` | rebuild to a temp path and diff against the committed bundle |
-| `npm run scan` | runs the marketplace's security-baseline scripts against the repo and prints the outcome |
-| `npm run harness -- Race --seed 42` | `qml -I dev/imports dev/Harness.qml` with arguments |
-| `npm run shader` | `qsb --qt6 -o shaders/road.frag.qsb shaders/road.frag` |
+| `npm run sprites` | bakes `assets/karts/*.png` from `CarSprite` through the harness, headless |
+| `npm run check:sprites` | rebuilds the sheets to a temp path and diffs against the committed ones |
+| `npm run check` | test, types, boundary, bundle, sprites, readme, scan — the whole gate |
+| `npm run harness -- --screen Race --shot out.png --exit` | a headless frame at exact size |
 
-CI (`ci.yml`) runs test, types, boundary, bundle parity, and the marketplace scan (cloning the marketplace at a pinned commit) on every push, and fails if `engine.mjs` is stale.
+**Every Qt process on the Mac is headless.** `QT_QPA_PLATFORM=offscreen` and `QT_QUICK_BACKEND=software` are set for the project in `/Users/don/Developer/.claude/settings.local.json`, and every `qml`/`qmltestrunner` call also passes `-platform offscreen`. No `cocoa` runs, no GPU numbers from the Mac, no `screencapture`, nothing that raises a window. The maintainer works on this machine while the loop runs.
 
-**VM (layer 3):** the UTM aarch64 Omarchy build. Mount the repo as a UTM shared folder at `~/.config/omarchy/plugins/io.github.<owner>.turbo-tables-solo` inside the VM (a mount, not a symlink). Then:
+`npm run scan` needs the marketplace checkout beside the repository or `TURBO_TABLES_MARKETPLACE` pointing at it; a worktree elsewhere needs the variable.
 
-```bash
-omarchy plugin validate ~/.config/omarchy/plugins/io.github.<owner>.turbo-tables-solo
-```
+**VM (layer 3):** as `docs/environment.md`. Two additions learned the hard way: never run `omarchy plugin remove` — its script `rm -rf`s the target, and the target is the host checkout over 9p; and the reload is `omarchy-restart-shell`, because Omarchy starts the shell with `QS_DISABLE_FILE_WATCHER=1`.
 
-```bash
-qmllint -I /usr/share/omarchy/shell TurboTables.qml BarWidget.qml shell/*.qml
-```
-
-```bash
-qs log -p /usr/share/omarchy/shell --tail 100
-```
-
-Saves hot-reload in the running shell. `omarchy-shell shell toggle <id>` opens it from a terminal.
-
-**Device (layer 4):** a stock Omarchy 4.0.2 x86 machine, the same commands, plus the fps counter at 1080p and a screen recording.
+**Device (layer 4):** the only place a GPU frame rate is measured.
 
 ## Milestones
 
-Each milestone ends with its gate met and CI green. Layers are noted so it is clear where you sit that week.
+M0, M1, M2 and M5 are met. The remaining milestones:
 
-### M0 — Repository, toolchain, boundary, CI (layer 1, two days)
+### MC — Cars (layer 2, one week)
 
-- Create the repo with the layout above, `manifest.json`, `LICENSE`, a README skeleton with the eight required sections, `package.json`, `tsconfig.json`, esbuild config, CI.
-- Write `rng.ts` and one trivial engine function; build the bundle; write the first vector; prove `import "../engine/engine.mjs"` works from a throwaway QML file in the `qml` runner.
-- Wire `check:boundary`, `check:bundle`, and `scan` (vendor the marketplace's baseline scripts under `tests/` so they are outside the scan scope themselves, or run them from a sibling checkout).
-- **Spike, half a day:** confirm the esbuild output loads as an ES module in Qt's QML engine on the Mac and, in the VM, in Quickshell. If `.mjs` fails in Quickshell for any reason, fall back to a classic `.js` with `.pragma library` and record it.
+Piece C in full: `CarSprite`, six bodies, livery, lamps, outward normals, the bake and its parity check, the three old sprites deleted, every screen on the sheets.
 
-**Gate:** CI green on an empty engine; the scanner reports `passed`; the bundle imports in both QML engines.
+**Gate:** the piece C critic picks ours against the crop; `check:sprites` green; the same car on all three screens.
 
-### M1 — Engine core (layer 1, one week)
+### M3′ — Garage and countdown under v3 (layer 2, one week)
 
-`deck.ts`, `race.ts`, `streak.ts`, `cards.ts`, `progress.ts`, `rank.ts`, `events.ts`; vectors `decks.json`, `hands.json`, `races.json`, `parity-15.json`. Every rule in the design's powerup section has a named test. The parity vector reproduces the bellringer's first three hands from its own test suite: Nitro Oil Slick Wrench, Pothole Roll Cage Pile-Up, Turbo Tow Hook Nitro.
+Pieces 3 and 5 re-run from `proto/golden-hour`: the paint-hue fix, the left wall lit, the numeral clear of the gantry board, the roster on the baked sheets.
 
-**Gate:** a headless four-racer Grand Prix with scripted inputs replays identically 10,000 times; bundle parity holds.
+**Gate:** critics pick ours against the reference on composition, palette and light — not on content alone; keyboard run intact; contrast floor holds; Tab works.
 
-### M2 — Rivals, ghost, save file (layer 1, one week)
+### M4′ — Race view under v3 (layer 2, one week)
 
-`rivals.ts`, `ghost.ts`, `save.ts`; vectors `rivals.json`. Rival personalities and levels, rubber band, policy, mercy rules, signals; ghost timelines and record rules; the save schema with validation.
+Piece 4 re-run from `proto/golden-hour`: arches clear of the answer field, the vignette off the sky, a surface on the far road, cars from the sheets, props as sprites.
 
-**Gate:** over 10,000 seeded Grand Prix races the mercy rules never break, rival finish-time distributions per level match the design's intent (Rookie slower than Pro slower than Champion, with overlap), and a child scripted at 4 s per answer and 90% accuracy finishes second or third at Pro more often than not.
+**Gate:** critic picks ours against the reference; 60 fps software at 1080p with four cars and twelve props; fallback matches the shader; reduced motion still.
 
-### M3 — Harness and screens (layer 2, two weeks)
+### M6′ — Package, sound, device (layers 1, 2, 4, one week)
 
-`dev/Harness.qml`, mock singletons with a real theme's values, `MemoryStore`; Garage, Countdown, Results, Settings, Picker, gauges; keyboard flow end to end using the engine bundle with a stub track view.
+Piece 6 re-run: `NOTICE` attributes the wallpaper (basecamp/omarchy, its licence, the theme path); `README` and the gate's canonical sentences describe `golden-hour-reference.png` and `golden-hour-car.png` identically; a real `preview.png` from the countdown or race frame; the eight card sounds and engine loop behind `AudioLoader`, with the README's audio sentences moved to present tense **in the same commit** as the `SoundEffect` lands, or the gate fails; the device run at 1080p with the fps counter.
 
-**Gate:** a keyboard-only run through Practice, Time trial, and Grand Prix in the harness with no mouse; every screen readable at 1366×768 and 2560×1440; screen-reader names on garage and settings controls.
+**Gate:** scanner `passed`, every gate green, 60 fps on the device.
 
-### M4 — Track view and minimap (layer 2, two weeks)
+### M7 — Submission (layer 1, two days)
 
-`road.frag` and its baked `.qsb`; `TrackView.qml` with sprite projection, ghost, callouts, Turbo lurch, hit pull-back; `CanvasRoad.qml` fallback; reduced-motion plane; `Minimap.qml`; sprite sheets for six karts at eight angles and three scales, placeholder art acceptable.
-
-**Gate:** 60 fps in the harness on the Mac at 1080p with four karts and twelve props; the fallback renders the same scene; reduced motion shows no shake or lurch; the fps counter and overdraw view are in the harness.
-
-### M5 — Shell integration (layer 3, one week)
-
-`TurboTables.qml`, `BarWidget.qml`, `ThemeBridge`, `FileStore`, `AudioLoader`; the entry-point fixture copied from Omarchy's test suite; validation and lint clean; hot reload confirmed.
-
-- **Spike, one day, first thing:** enable the plugin with both kinds and confirm the overlay entry is written to `shell.json`. If only the bar entry appears, switch to the bar-widget-hosts-panel structure and record it.
-- Focus: typing digits the moment the overlay opens, Escape closes and returns keys to the desktop, theme change retints the garage live.
-- Never trust a toggle's exit code: confirm `omarchy plugin list` shows the plugin `enabled` with both kinds, and grep `qs log` for `not summoning` after every toggle. Both `omarchy plugin` and `omarchy-shell` need `OMARCHY_PATH=/usr/share/omarchy` over SSH.
-
-**Gate:** `omarchy plugin validate` and `qmllint` clean; the entry-point fixture loads the overlay with mocks; a full Grand Prix played in the VM at 30 fps or better at the internal resolution; the save file survives a hot reload.
-
-### M6 — Device pass, art, sound, accessibility (layers 2 and 4, one week)
-
-Final kart and prop art, card art, the eight card sounds and engine loop, `preview.png`; the device run at 1080p with the fps counter; the keyboard-only recording; scanline and reduced-motion checks; README complete.
-
-**Gate:** 60 fps on the device; sound plays; every README section present; the scanner still reports `passed` after assets landed.
-
-### M7 — Submission and announcement (layer 1, two days)
-
-- Tag `v0.1.0`. Submit the exact commit through the marketplace form: category Kids; tags kids, education, games; the maintainer note from the design.
-- Post the hub Ideas discussion and the Spoke row.
-- After listing, open the verify form for any later commit rather than pushing to `main` unannounced, so the verified badge holds.
-
-**Gate:** listed under Kids as `Snapshot verified`; hub post up.
+As v1. Never done by the loop.
 
 ## Test matrix
 
-| What | Where | How |
-| --- | --- | --- |
-| Rules | Mac, Node | vitest per module, vectors, bundle parity |
-| Rival fairness | Mac, Node | 10,000-race property tests |
-| Screens | Mac, Qt | qmltestrunner on parts; harness walkthrough recorded |
-| Frame budget | Mac, VM, device | fps counter in harness; VM at internal resolution; device at 1080p |
-| Shell contract | VM | validate, qmllint, entry-point fixture, hot reload, focus |
-| Marketplace outcome | Mac | `npm run scan` on every push |
-| Accessibility | Mac, device | keyboard-only recording; contrast check on both themes; reduced motion |
+As v1, with: sprite parity (`check:sprites`) on every push; the CPU-rasterised shader reference vs `CanvasRoad` in piece 4's evidence; no GPU frame rate anywhere but the device; `tests/qml` and `tests/qml-shell` as two runners, neither needing a VM.
 
 ## Risks and their spikes
 
 | Risk | When it is retired |
 | --- | --- |
-| ES-module bundle does not load in Quickshell | M0 spike; fallback is a `.pragma library` classic script |
-| Dual-kind plugin only enables the bar entry | M5 spike; fallback is bar-widget-hosts-panel |
-| Baked shader differs between Metal on the Mac and OpenGL on Omarchy | M4 bakes with `--qt6` for all targets; M5 checks in the VM; the Canvas fallback covers a failure |
-| Qt Multimedia missing on some installs | `AudioLoader` degrades to silence; README lists it as optional |
-| Software-rendered VM under 30 fps | internal resolution is a single constant; drop to 400×225 before touching the design |
-| Marketplace scan flags something unexpected | `npm run scan` runs on every push from M0 |
-
-## Order of the first week
-
-1. `brew install qt node`, confirm `qsb` and `qml` exist.
-2. Create the repo from the layout, commit the manifest and README skeleton.
-3. `rng.ts`, first vector, bundle, the M0 spike in the `qml` runner.
-4. UTM VM up with the shared folder mounted at the plugin path; run `omarchy plugin validate` on the skeleton; run the M0 spike in Quickshell.
-5. Start `deck.ts` with the `2–5` preset and its 48-question vector.
+| The VM stays down (`utmctl start` → `OSStatus -609`) | prerequisite; piece 7's re-verify and the seam's `chmod 000` check wait on it, and the handoff says so if it never returns |
+| Warm light pulls paint hue | MC: paint fidelity is a gate criterion, measured per swatch |
+| A rim needs chamfers, and 80 faces × 6 bodies × 8 angles is slow to bake | MC: the bake is offline; runtime is a blit |
+| Sheets balloon the repository | MC: 8 × 3 per body at 480-layer scale; budget 2 MB total, checked in evidence |
+| Arches vs. the fixed answer field | M4′: props that span the road cross under the field's line or the field yields for the frame |
+| The wallpaper's licence | M6′: attributed in NOTICE from the omarchy repository's licence file; if it forbids redistribution, the reference stays out of the repository and the bar is fetched into the scratchpad at kickoff |
+| A flaky QML test contaminates mutation scores again | every mutation claim carries ≥3 solo re-runs; `tst_race_keys` has a focus guard |
 
 ## Running it as a gauntlet loop
 
-The gauntlet-loop skill turns a goal and a bar into a loop: split the work into pieces that can be judged on their own, fan out a builder and a separate harsh critic per piece, have the critic compare ours against the bar blind with labels stripped, and `/loop` until the critic picks ours. No round counts, no scores. This plan is already split into pieces; what it adds here is a named, fetchable, comparable bar for each piece, the critic's rubric, the rules the builder may not break, and the handoff that ends the run.
+Same skill, same shape as v1: pieces judged on their own, a builder and a fresh harsh critic per piece, blind comparison against a fetchable bar, `/loop` until the critic picks ours. What v2 adds is a recorded starting state, a new piece that runs first because every other piece shows its output, and rules learned from the first run.
 
-### Prerequisites before kicking it off
+### Prerequisites
 
-Things only you can do, once, so the loop never stalls on them.
-
-1. Mac toolchain: `brew install qt node`, and confirm `qsb` and `qml` exist under the Homebrew Qt prefix.
-2. The Omarchy VM from the UTM build is running, with SSH enabled inside it and the repository mounted as a UTM shared folder at the plugin path. The agent needs to run `omarchy plugin validate`, `qs log`, `omarchy-shell shell toggle`, and `grim` for screenshots over SSH. Record the SSH host and the mount path in `docs/environment.md`.
-3. The repository exists on GitHub with the layout from this plan, and these files are committed under `docs/`: `design.md` (design v2, settled), `plan.md` (this document), `garage-room-mock.png` (Sol's Garage Room image), `environment.md`.
-4. The gauntlet-loop skill is copied into the repository at `.claude/skills/gauntlet-loop/`.
-5. A local checkout of the marketplace repository exists beside this one so `npm run scan` can call its baseline scripts.
-6. The bellringer source is reachable at its paths on this Mac, since it is a bar: `/Users/don/Developer/LiveClassBackend/internal/bellringerruntime/` and `/Users/don/Developer/StudentApp3.0-powerups-testing/src/features/bellringer/`.
-
-If the VM is not reachable, the loop must run pieces 1 through 6 and stop at piece 7 with a handoff that says so. It must not fake the VM results.
+1. **The design amendments above are applied** to `docs/design.md`. Without them every critic judges against the night garage and the loop cannot win.
+2. `proto/golden-hour` is merged into `gauntlet/turbo-tables-build` (or the loop starts on it). Its commit `11555f9` carries all three prototype screens with gates green.
+3. The Omarchy VM is running and `ssh omarchy-turbo-tables` answers. If it does not, the loop runs C, 3, 4, 5 and 6, and stops at 7 with a handoff that says so.
+4. `docs/golden-hour-reference.png` and `docs/golden-hour-car.png` are committed (they are).
+5. Headless Qt is enforced (it is, in the project settings) and every agent brief says so.
+6. The marketplace checkout is beside the repository, or `TURBO_TABLES_MARKETPLACE` is set.
 
 ### Pieces and bars
 
-Every bar is named, fetchable from this Mac, and comparable side by side. The critic gets both sides with labels stripped and answers one question: which is better against the rubric.
-
 | Piece | Builds | Bar | What the critic compares | Milestone |
 | --- | --- | --- | --- | --- |
-| **1 Rules** | `src/engine` minus rivals; `engine/engine.mjs`; vectors | the bellringer runtime in `LiveClassBackend/internal/bellringerruntime/` and its `service_test.go`; the design's powerup and streak sections | the same scripted race inputs run through ours and through the bellringer's rules, event by event: deltas, floor, lap reset, hand dealing order, shield consumption, swap, finished-racer immunity, effective progress. Then threshold 12 and reveal-and-advance against the design text. Ours must match the bellringer where the design keeps a rule and match the design where it changes one. | M1 |
-| **2 Rivals** | `src/engine/rivals.ts` and its vectors | the design's rival table and fairness list; a scripted child at 4 s per answer and 90% accuracy | a 10,000-race statistics report from ours against the numbers the design states: level ordering, rubber-band bounds, mercy rules never broken, the scripted child's finishing distribution at Pro | M2 |
-| **3 Garage** | `ui/Garage.qml` and parts, in the harness | `docs/garage-room-mock.png` | a harness screenshot at 1920×1080 against the mock: composition, the kart stall, the roster, the settings rows, the signal tiles, the ready control, the policy rail, type hierarchy, palette, and that nothing text-entry exists | M3 |
-| **4 Race view** | `ui/Race.qml`, `TrackView.qml`, `Minimap.qml`, shader, fallback, sprites | the `oppenheimer-rick/omarchy-racer` plugin running in the harness at the same size; the design's race wireframe | side-by-side screenshots and 10-second recordings: reads as looking down the track, the fact is unmistakably primary, minimap legible, callouts and hit pull-back visible, fps counter at or above 60 on the Mac; reduced motion shows no shake | M4 |
-| **5 Flow** | Countdown, Picker, Results, Settings; keyboard flow across all screens | the keyboard flow of `com.columbiafoundry.loderunner` and the results copy rules in the design | a keyboard-only recording of Practice, Time trial, Ghost, and Grand Prix with no mouse; picker on keys 1 2 3; every settings reset asks once; results headline by place; facts to look at present | M3 |
-| **6 Package** | manifest, README, LICENSE, NOTICE, preview, layout, CI, `npm run scan` | the `com.columbiafoundry.loderunner` repository as listed and verified on plugins.omarchy.org | validate clean, scanner `passed` with no capabilities, README has all eight sections, no forbidden file names, no symlinks, bundle parity check green, boundary check green | M0, M6 |
-| **7 Shell** | `TurboTables.qml`, `BarWidget.qml`, `shell/` | the `omarchy.emojis` first-party overlay in the VM | in the VM over SSH: `omarchy plugin list` shows enabled with both kinds and the log never says `not summoning`; open from the bar button and from the toggle command, digits accepted immediately, Escape closes and the desktop gets keys back, hot reload keeps the save file, theme change retints live, a Grand Prix at or above 30 fps at the internal resolution, screenshots via `grim` | M5 |
+| **C Cars** | `ui/parts/CarSprite.qml`, six model tables, `src/tools/bake-sprites.ts`, `assets/karts/*.png`, the three old sprites deleted | `docs/golden-hour-car.png` | an 8-angle turnaround and the six-body sheet beside the crop, blind: silhouette at 40 and 400 px, identity (livery, roundel, lit lamps, tail bar), grounding (shadow, rim on the sun side, chamfers catching it); each paint measured against its swatch; the same car on garage, countdown and track; `check:sprites` green | MC |
+| **3 Garage** | `Garage.qml`, `GarageStall.qml`, `Theme.qml`, roster on the sheets | `docs/golden-hour-reference.png` | a 1920×1080 frame beside the reference, blind: composition, palette, light rule, the door, the bay, the car on the turntable; paint fidelity in the roster; the chrome unchanged; keyboard run and Tab intact; contrast floor | M3′ |
+| **4 Race view** | `TrackView.qml`, `road.frag`, `CanvasRoad.qml`, `SunsetSky.qml`, props, `Race.qml` HUD colours and vignette | `docs/golden-hour-reference.png`; omarchy-racer for structure only | frames and a 10-second motion sheet beside the reference: sky, sun, hills, grid, rim-lit cars, banners; shader vs canvas identical; 60 fps software at 1080p; arches clear of the answer field; reduced motion still | M4′ |
+| **5 Countdown** | `Countdown.qml`, `CountdownScene.qml` on `SunsetSky` and the sheets | `docs/golden-hour-reference.png`; Lode Runner for the flow, which holds | the GO frame beside the reference; numeral clear of the gantry; fact readable behind GO; four beats unchanged; the flow's key count still 1 | M3′ |
+| **6 Package** | NOTICE attribution, README image sentences, `preview.png`, sound | the Lode Runner repository as listed | as v1, plus: the two reference images described identically in README and NOTICE; the wallpaper's licence recorded; scanner `passed` with the new PNGs | M6′ |
+| **7 Shell** | nothing new; re-verify | `omarchy.emojis` in the VM | as v1: keys cold and warm, the save path's `chmod 000` case, hot reload, theme retint, 30 fps at the internal resolution | — |
 
-Pieces 1, 2, and 6 are judged largely by evidence the builder cannot argue with: parity output, statistics, scanner output. Pieces 3, 4, 5, and 7 are judged on screenshots and recordings, which is where a harsh critic earns its keep.
+Pieces 1 and 2 are frozen and are not re-run; CI proves later pieces do not regress them.
 
 ### Rules the builder may not break
 
-The skill says to specify minimally and let the agent decide architecture. That holds for internals. These are not internals.
+All of v1's, unchanged: the design is settled (as amended above, and only as amended), no new mechanics or numbers, no free text, no name field, no network code, no dates in the save file; the boundary holds; never `npm install`; the scanner passes on every commit; the bundle — and now the sprite sheets — are rebuilt in the same commit as their source; no kid testing; the critic is fresh and blind; a won piece is frozen.
 
-- The design is settled. No new mechanics, no changed numbers, no fourth question form, no free text anywhere, no name field, no network code, no dates in the save file.
-- The boundary holds: nothing under `ui/` or `src/` imports Quickshell or `qs.*`; only the three shell files may. Never run `npm install` in the checkout; `node_modules` breaks validation in the VM.
-- The scanner outcome is `passed` on every commit. No `scripts/`, `bin/`, `install*`, `setup*`, no executables, no `sudo` in prose except negated.
-- The committed bundle is rebuilt in the same commit as any engine change.
-- Kid testing is not something the agent does. It does not write anything about a real child anywhere.
-- The critic is a fresh session with no access to the builder's reasoning, given both sides unlabeled.
-- When a piece's critic picks ours, the piece is frozen; later pieces may not regress it, and CI proves it.
+Learned in the first run, and now rules:
+
+- **Headless only.** No Qt window on the Mac, ever. No GPU number from the Mac.
+- **Never `git checkout --`, `git restore`, `git stash` or `git clean` in the tree.** Several agents write to it at once and it is 9p-shared into the VM; a revert that way destroyed an hour of finished work. Back up by file copy, verify by hash, commit each piece as it is won.
+- **Measure the thing being shipped, in the frame being shipped, in one stated colour space.** Three rounds of garage reports quoted a favourable neighbouring number or mixed gamma-encoded and linear luminance; each was caught and each cost more than the defect it hid.
+- **A test's name is a claim.** A test that passes under mutation of the rule it names is a defect, and a report's "what is not covered" section must list those.
+- **One renderer for the car.** No screen draws its own.
+- **The chrome stays native.** Results, Settings, the picker and HUD panels keep the theme's colours and the shell's font; only the game layer takes the light.
 
 ### Order and parallelism
 
-Pieces 1 and 6 first, in parallel, because everything else builds on the engine and the package skeleton. Then 2 and 3 in parallel. Then 4 and 5 in parallel. Then 7, which needs the VM. Within a piece, the builder and critic alternate under `/loop` until the critic picks ours; the loop for one piece may run while another piece's builder works.
+**C first, alone**, because the garage, countdown and race all show its output and a critic cannot judge them fairly around a dark lump. Then **3, 4 and 5 in parallel**, each from `proto/golden-hour` with the sheets. Then **6**. Then **7**, which needs the VM.
 
 ### Stop condition and handoff
 
-The run ends when every piece's critic has picked ours and CI is green, or when piece 7 is blocked on the VM. Either way the agent writes `HANDOFF.md` at the repository root and stops:
-
-- Which pieces the critic accepted, with the final comparison verdicts quoted.
-- How to install in the VM and on a device, and the exact keybinding line.
-- What to play, in order: Practice on 2–5, a Time trial, the Ghost, then a Grand Prix at Pro.
-- Measured frame rates on the Mac and in the VM.
-- What is placeholder: art and sound that need your eye before piece 6 is re-run for M6.
-- Anything the critic accepted with a stated reservation.
-
-That file is the definition of "ready for me to test." After your test, your notes become the next goal and the loop runs again from the pieces they touch. Submission to the marketplace (M7) is never done by the loop; it is your commit and your form.
+The run ends when every open piece's critic has picked ours and CI is green, or when piece 7 is blocked on the VM. Either way the coordinator writes `HANDOFF.md` at the repository root and stops, as v1: verdicts quoted; install and keybinding; what to play in order (Practice on 2–5, a Time trial, the Ghost, a Grand Prix at Pro); frame rates measured on the Mac (software) and in the VM; what is placeholder; what was accepted with a reservation; and, new in v2, a before/after of each screen beside the reference.
 
 ### The kickoff prompt
 
-Paste this into a fresh Claude Code session in the repository, with the skill installed and the prerequisites done.
+Paste into a fresh Claude Code session on `gauntlet/turbo-tables-build` after the prerequisites are done.
 
-> Build the Turbo Tables Solo plugin exactly as specified in `docs/design.md` and `docs/plan.md`, using the four-layer structure and TypeScript engine the plan describes. The bar is the set of references in the plan's "Pieces and bars" table: the Zipline bellringer runtime for the rules, `docs/garage-room-mock.png` for the garage, the omarchy-racer plugin for the race view, the Lode Runner plugin for keyboard flow and packaging, and the emojis overlay for shell behavior in the VM described in `docs/environment.md`. Break the work into the seven pieces in that table, in the order the plan gives, and for each piece fan out a builder and a separate critic in a fresh context. The critic compares ours against the bar blind, labels stripped, using that piece's rubric, and is a harsh critic; praise is not useful. Never break the rules under "Rules the builder may not break." `/loop` on each piece until the critic picks ours. When every piece is won and CI is green, or when the VM is unreachable at piece 7, write `HANDOFF.md` as the plan describes and stop.
-
-That is about 190 words, a little over the skill's usual size, because the bars are plural and the stop condition matters.
+> Continue the Turbo Tables Solo build under `docs/plan.md` v2 and the design as amended for Visual Direction v3. Pieces 1, 2 and 6 are frozen won; do not re-run them. Start from the prototype on `proto/golden-hour`. The bars are `docs/golden-hour-reference.png` for every game screen and `docs/golden-hour-car.png` for the cars, with omarchy-racer for race-view structure, Lode Runner for flow and packaging, and the emojis overlay in the VM for the shell. Run piece C — one low-poly rally car per body, one renderer, baked sprite sheets, outward normals, paint that keeps its hue — first and alone, then pieces 3, 4 and 5 in parallel from the prototype, then 6, then 7. For each piece fan out a builder and a fresh critic; the critic compares ours against the bar blind, labels stripped, on that piece's rubric, and is harsh — a win on content or interface alone does not count, the picture has to win. Every Qt process is headless; never open a window on this Mac. Never revert with git in this tree. Never break the rules under "Rules the builder may not break." `/loop` on each piece until the critic picks ours. When every open piece is won and CI is green, or when the VM is unreachable at piece 7, write `HANDOFF.md` as the plan describes and stop.
