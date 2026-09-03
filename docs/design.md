@@ -205,6 +205,7 @@ Behind the kart, looking down the track, in the manner of a 16-bit kart racer: t
 - **HUD**: lap and table name top left, place beside it, race clock top right, streak charge and the held hand lower right, Roll Cage count as small icons by the place.
 - **Speed** in the view is effective progress rate: a Turbo throws the road forward, a Pile-Up landing pulls the horizon back and shows the attacker's kart sweeping past. The kart never actually reverses; the road does the telling.
 - **Callouts** for 1.6 s: `PASSED BOLT`, `BOLT SLIPPED PAST`, `ROLL CAGE HELD`, `WRENCH ▸ PISTON`.
+- **Above the horizon is the sky, never black:** the sun straddling the horizon off-centre, its glow, and three silhouette hill layers that parallax with the curve. The floor is the diagnostic grid in neon over near-black purple, fading into the glow.
 
 ### Rendering approach
 
@@ -226,7 +227,7 @@ The constraint is a stock Omarchy install with no extra packages, and an accepta
 
 ## Garage Room
 
-The lobby follows the Garage Room mock: title bar, policy rail, the kart stall with a big kart under a work light, the roster on the right, and the race settings, signals, and the big ready control along the bottom. In solo the roster holds the child and the three rivals; the invite code and the friend badges are simply absent rather than greyed, and a `RACE A FRIEND` tile in their place says "ask a parent to install Kids Play" until the platform exists.
+The lobby follows the Garage Room mock: title bar, policy rail, the kart stall with a big kart under a work light, the roster on the right, and the race settings, signals, and the big ready control along the bottom. The roller door stands open onto the sunset and the bay is lit from it. In solo the roster holds the child and the three rivals; the invite code and the friend badges are simply absent rather than greyed, and a `RACE A FRIEND` tile in their place says "ask a parent to install Kids Play" until the platform exists.
 
 - **Kart stall:** cycle six original kart bodies; pick a paint from eight swatches; pick a number 1 to 99 with arrows. "Colors and numbers are visible to all racers." There is no name field anywhere.
 - **Roster:** four slots with kart preview, color, number, a ready lamp, and for rivals a level badge (`ROOKIE` `PRO` `CHAMPION`).
@@ -236,11 +237,11 @@ The lobby follows the Garage Room mock: title bar, policy rail, the kart stall w
 
 ## Visual style
 
-**Ground:** near-black from the theme's darkest background; Garage Grid stays dark under a light theme. **Light:** warm amber for work lights, lap lamps, the streak charge, boosts. **Shadow:** dark teal for the revealed answer, the ghost kart, secondary surfaces. **Chrome:** the theme's `accent` for focus rings and the selected control, so the game belongs to the child's Omarchy.
+**Ground:** near-black purple `#3c1228`; the game layer stays dark under a light theme. **Light:** one low sun, warm rim `#f0b07a`, with amber `#f5a524` work lights as the local counterpoint in the garage; amber also for lap lamps, the streak charge and boosts. **Shadow:** purple `#5f255e`, never grey; the revealed answer and the ghost keep teal. **Sky:** the retrowave gradient of Omarchy Quattro's wallpaper, `docs/golden-hour-reference.png`, which is the visual bar for every game screen. **Chrome:** the theme's `accent` for focus rings and the selected control, so the game belongs to the child's Omarchy. **Paint stays its own hue under this light** — a red car reads red; warmth lives in the rim and the lamps, never in the paint.
 
 **Type:** the shell's monospace face for readouts, the clock, the minimap numbers, and the fact itself; the shell's UI face for menus. The fact is never smaller than a tenth of the screen height.
 
-**Karts:** six original low-detail voxel-styled bodies in the spirit of the mock, rendered to sprite sheets at eight angles and three scales so the pseudo-3D view is sprite work, not geometry. Eight paints. Numbers on a white plate.
+**Cars:** six original low-poly rally-car bodies — a boxy coupe, a hot hatch, a wedge, a saloon, a buggy, a pickup — one model each, rendered to sprite sheets at eight angles and three scales so the pseudo-3D view is sprite work, not geometry, and so every screen shows the same car. Eight paints as a flat base colour; a cream livery panel with a stripe; the number on a roundel on the door and on a plate at the rear; lit headlights and a wide tail-light bar. The reference for the cars is `docs/golden-hour-car.png`. "Kart" remains the game's word for them in copy.
 
 **Motifs:** checkered flag edges, diagnostic grid floor, rivets on gauge bezels, the roller door, tire walls, a `WELCOME TO THE PIT` terminal. Scanlines a toggle, off by default.
 
@@ -286,6 +287,7 @@ No dates, no session counts, no Grand Prix history, no streak history. Human-rea
 | Powerup picker | **Side panel**, keys 1, 2, 3; the question stays visible. |
 | Pile-Up in solo | **In the schedule** at every rival level. |
 | Kart number range | **1 to 99.** |
+| Visual direction | **Golden Hour at the Pit** (v3, 2026-09-03). The garage-at-night palette of v2 is superseded; its amber and cream survive as accents. The bar is `docs/golden-hour-reference.png`; the cars' bar is `docs/golden-hour-car.png`. |
 
 Everything else in this document is as designed. The next document is the implementation plan for the plugin alone.
 
