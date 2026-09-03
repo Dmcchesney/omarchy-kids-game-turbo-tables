@@ -83,6 +83,32 @@ import "../engine/engine.mjs" as Engine
 //
 // The garage's controls are never disabled: they still apply for the session,
 // and `setSetting` answers false so a screen can say "not saved".
+//
+// ---------------------------------------------------------------------------
+// AND THE WAY OUT OF ONE
+// ---------------------------------------------------------------------------
+//
+// A quarantine that cannot be left is a trapdoor, and for four rounds this one
+// was: `discardQuarantinedFile()` cleared the flag above, was refused by the
+// file layer's own three refusals, re-quarantined the session, and returned
+// `true` anyway -- so the screen said "A NEW SAVE FILE HAS BEEN STARTED" while
+// the red locked strip was still up, forever, on every future launch. A corrupt
+// `garage.json` on a machine whose child has no terminal was permanent, and the
+// game said it was fixed.
+//
+// Two rules come out of that and they are the ones the bottom of this file
+// keeps:
+//
+//   **The way out has to reach the layer that is refusing.** Clearing a flag
+//   here is not a decision the file layer can see. It is told, through
+//   `backend.replaceUnreadableFile()`, and told before this store clears
+//   anything of its own.
+//
+//   **Every report of success has to be a report about the file.** These
+//   functions return what happened on disk, not what was asked for -- so
+//   `setSetting`, the three resets and the discard all answer false when the
+//   write behind them was refused, and `ui/Settings.qml` can keep its promise
+//   that "the banner reports what happened to the file".
 QtObject {
   id: store
 
@@ -126,12 +152,35 @@ QtObject {
   property var quarantineIssues: []
   property string quarantineReason: ""
 
+  // Which half of the rule produced the quarantine, because a screen that says
+  // the wrong one sends a parent to look at the wrong thing. "read" is a file
+  // that could not be read and is being kept exactly as it is; "write" is a
+  // file that read perfectly and cannot be written to -- a full disk, a
+  // directory the process no longer owns. A critic measured the second being
+  // reported as the first, on a screen that then offered to overwrite the
+  // healthy file holding the child's records.
+  //
+  // "" while there is no quarantine.
+  property string quarantineKind: ""
+
   // True once a backend has answered a load with something this file accepted
   // -- a file, or a proved absence. After that, a backend that goes away is a
   // backend that was taken away, which is not a statement that the file is
   // gone. It is the last of the five doors: without it, `Store.backend = null`
   // after a real load would silently re-arm the defaults.
   property bool _backendHasAnswered: false
+
+  // The protocol the load that answered was spoken in, latched at that load.
+  // `backendFormat()` reads a property off the backend on every flush, so a
+  // backend whose `format` moves between the load and the write hands the file
+  // layer a payload of the other protocol: measured, a text load followed by a
+  // flip to "object" wrote a JSON snapshot over the file, which then did not
+  // parse as a save, with nothing quarantined. The protocol is a fact about the
+  // pair, established once; a later disagreement is a bug and is refused out
+  // loud rather than serialised.
+  //
+  // "" until a load has been adopted.
+  property string _adoptedFormat: ""
 
   signal changed()
 
@@ -286,7 +335,14 @@ QtObject {
     if (settings[key] === value) return true
     applyLocally(key, value)
     flush()
-    return true
+    // Not an unconditional `true`. A write that was refused on its way through
+    // `flush()` -- a backend with no `save` to call, a protocol that moved, a
+    // file layer that would not take it -- has quarantined this session by way
+    // of `stopWriting`, and the honest answer for that is the same one a
+    // session-only key gets: applied, not saved. Answering true here is how a
+    // store that could not write a byte all session told Results there was
+    // nothing to say and left the notice strip down.
+    return !quarantined
   }
 
   // A choice that lives for this session only, applied and never written.
@@ -311,9 +367,42 @@ QtObject {
   // retried on every keystroke afterwards. It stops the writing and says so.
   function flush() {
     if (!loaded || quarantined) return
-    if (!backend || typeof backend.save !== "function") return
+
+    // No backend at all is the one case where a write that does not happen
+    // costs nothing: there is nobody holding a file, so there is nothing on a
+    // disk for this session to be wrong about. Everything else below is a
+    // backend that is there and cannot take the write.
+    if (!backend) return
+
+    // A backend with no callable `save` is the write-side twin of a backend
+    // with no callable `load`, and it used to be a silent `return`: `setSetting`
+    // had already committed to answering true, Results showed no NOT SAVED, and
+    // the notice strip never appeared. Measured: `setSetting` true,
+    // `quarantined` false, writes 0, for the whole session. The file survived
+    // only because there was no `save` to call, which is luck rather than a
+    // rule -- and luck that says "saved" on screen.
+    if (typeof backend.save !== "function") {
+      stopWriting([{
+        "path": "",
+        "problem": "the backend has no save() to call, so nothing this session changes can"
+                   + " reach the save file"
+      }])
+      return
+    }
+
+    // The protocol may not move under a session. See `_adoptedFormat`.
+    var speaking = backendFormat()
+    if (_adoptedFormat.length > 0 && speaking !== _adoptedFormat) {
+      stopWriting([{
+        "path": "",
+        "problem": "the backend answered the load in " + _adoptedFormat + " and now declares "
+                   + speaking + ", so nothing here knows which one the file is written in"
+      }])
+      return
+    }
+
     try {
-      if (backendFormat() === "text") backend.save(Engine.serialiseSave(file()))
+      if (speaking === "text") backend.save(Engine.serialiseSave(file()))
       else backend.save(snapshot())
     } catch (e) {
       stopWriting([{ "path": "", "problem": "the save file could not be written: " + e }])
@@ -349,7 +438,10 @@ QtObject {
     settings = copyOf(defaultSettings)
     changed()
     flush()
-    return true
+    // Each reset answers with what happened to the file. `ui/Settings.qml`
+    // turns a false into "NOTHING WAS CHANGED", which is the one thing a
+    // screen must never get wrong about a reset it cannot undo.
+    return !quarantined
   }
 
   function resetRecords() {
@@ -361,7 +453,7 @@ QtObject {
     _streakThreshold = next.settings.streakThreshold
     changed()
     flush()
-    return true
+    return !quarantined
   }
 
   function resetFacts() {
@@ -382,7 +474,7 @@ QtObject {
     // that race its answers.
     changed()
     flush()
-    return true
+    return !quarantined
   }
 
   // ------------------------------------------------------- the race seam
@@ -536,6 +628,7 @@ QtObject {
     quarantined = false
     quarantineIssues = []
     quarantineReason = ""
+    quarantineKind = ""
     _seededWith = null
 
     // 1. Nothing on disk -- proved, not assumed. The garage's own defaults, not
@@ -546,6 +639,7 @@ QtObject {
       records = {}
       facts = []
       loaded = true
+      _adoptedFormat = backendFormat()
       if (backend) _backendHasAnswered = true
       changed()
       return
@@ -573,6 +667,7 @@ QtObject {
     records = read.file.records
     facts = read.file.facts
     loaded = true
+    _adoptedFormat = text ? "text" : "object"
     _backendHasAnswered = true
     changed()
   }
@@ -648,6 +743,7 @@ QtObject {
     quarantined = true
     quarantineIssues = issues
     quarantineReason = reasonOf(issues)
+    quarantineKind = "read"
     settings = copyOf(defaultSettings)
     _streakThreshold = Engine.STREAK_THRESHOLD
     records = {}
@@ -679,6 +775,7 @@ QtObject {
     quarantined = true
     quarantineIssues = issues
     quarantineReason = reasonOf(issues)
+    quarantineKind = "write"
     console.warn("Store: the save file could not be written and will not be written again this"
                  + " session: " + quarantineReason)
     changed()
@@ -698,17 +795,100 @@ QtObject {
   // The explicit way out: somebody has decided the unreadable file is not worth
   // keeping. Only ui/Settings.qml calls this, behind the same Confirm dialog
   // the three resets use, and it names what is lost before it asks.
+  //
+  // ---------------------------------------------------------------------------
+  // THIS FUNCTION USED TO RETURN TRUE AND DO NOTHING
+  // ---------------------------------------------------------------------------
+  //
+  // It cleared the flag above and called `flush()`, and for the case it exists
+  // for -- a save file that could not be *read* -- every part of that was
+  // refused one layer down. `shell/FileStore.qml` had never loaded, so its own
+  // first refusal fired ("refused to write ... before the file had been read"),
+  // which raised `writeFailed`, which came back in here as `stopWriting` and
+  // re-quarantined the session. Measured: `writes=0, bytesMoved=false,
+  // quarantinedAfter=true` -- and it still answered `true`, so `ui/Settings.qml`
+  // put "A NEW SAVE FILE HAS BEEN STARTED" on the same screen as the red strip
+  // saying the garage was still locked. There was no other way out in the
+  // product, so a corrupt `garage.json` on a Kids-Mode machine was permanent
+  // and the screen said it had been fixed.
+  //
+  // Three things had to change and all three are here:
+  //
+  //   1. The file layer is told, not merely asked. `replaceUnreadableFile()` is
+  //      its own record of the decision a person just made and is the only
+  //      thing that can stand its "before the file had been read" and "over an
+  //      unreadable save file" refusals down.
+  //   2. `changed()` goes before `flush()`. The wiring in TurboTables.qml acts
+  //      on the quarantine *clearing* -- that transition is how the file layer
+  //      learns it may write again -- and a flush that ran first was refused,
+  //      and the refusal dropped the payload it was carrying, so nothing was
+  //      ever written even when the second write would have succeeded. A child
+  //      who confirmed and pressed Escape saw the same old file next launch.
+  //   3. It reports what happened to the file. Every refusal on the way through
+  //      comes back as `writeFailed` -> `stopWriting`, so `quarantined` is the
+  //      answer, and `ui/Settings.qml` can keep its promise that the banner
+  //      "reports what happened to the file, not what was asked for".
   function discardQuarantinedFile() {
     if (!quarantined) return false
+
+    // Nothing here can reach a file, so nothing has been replaced and the
+    // quarantine stands. Saying so is the whole point of this round.
+    if (!backend || typeof backend.save !== "function") return false
+
+    // 1. The file layer's own refusals, which are the ones that matter.
+    if (typeof backend.replaceUnreadableFile === "function") {
+      try {
+        backend.replaceUnreadableFile()
+      } catch (e) {
+        return false
+      }
+    }
+
     quarantined = false
     quarantineIssues = []
     quarantineReason = ""
-    flush()
+    quarantineKind = ""
+
+    // 2. The transition first, then the write it re-armed.
     changed()
-    return true
+    flush()
+
+    // Land it now rather than at the end of the file layer's debounce, so what
+    // is returned below is the outcome of a write that has already happened
+    // rather than one a timer might get to after the child has walked away.
+    // A backend that has no `flushNow` is holding nothing back: whatever its
+    // `save()` did, it has already done.
+    if (!quarantined && typeof backend.flushNow === "function") {
+      try {
+        backend.flushNow()
+      } catch (e) {
+        stopWriting([{ "path": "", "problem": "the new save file could not be written: " + e }])
+      }
+    }
+
+    // 3. The truth. A refusal anywhere above has re-quarantined this store.
+    return !quarantined
   }
 
   onBackendChanged: reload()
 
-  Component.onCompleted: if (!loaded) adopt(null)
+  // The singleton finishing construction is not news about a disk. It means
+  // only "nobody has assigned a backend yet", and the guard is what keeps it
+  // meaning that: `adopt(null)` is the proved-absence path, and running it over
+  // a store that has already read a file replaces the child's records and fact
+  // history with the defaults in memory -- which the next keystroke would then
+  // flush over the file.
+  //
+  // It is a named function rather than an inline expression so a test can reach
+  // it. `Component.onCompleted` fires once, before any backend is assigned, so
+  // the ordering that makes the guard matter cannot be produced inside a
+  // running process -- and a mutation removing the guard survived the whole
+  // suite twice because of that. The rule can be checked even when the ordering
+  // cannot: put the store in the state and call the function. A lock nothing
+  // can reach is a lock nobody is checking.
+  function completeIfNothingHasAnswered() {
+    if (!loaded) adopt(null)
+  }
+
+  Component.onCompleted: completeIfNothingHasAnswered()
 }

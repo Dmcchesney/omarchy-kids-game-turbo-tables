@@ -153,8 +153,12 @@ FocusScope {
     // over it with this session's defaults. Nothing else in the plugin calls
     // `Store.discardQuarantinedFile()`.
     if (pending === "discard")
-      return "The save file on this computer cannot be read, so it has been left alone and "
-             + "nothing has been written to it. Saying yes writes over it: every best time "
+      return (settings.writeSide
+              ? "The save file on this computer could not be written to, so nothing since "
+                + "then has been saved. "
+              : "The save file on this computer cannot be read, so it has been left alone and "
+                + "nothing has been written to it. ")
+             + "Saying yes writes over it: every best time "
              + "and every fact in it goes, and the game starts a new file from today's "
              + "settings. Saying no keeps it exactly as it is. There is no undo."
     return ""
@@ -168,6 +172,16 @@ FocusScope {
   // and offer exactly one action behind the same question the resets ask.
   readonly property bool quarantined: Store.quarantined
   readonly property string quarantineReason: Store.quarantineReason
+
+  // Which half of the rule stopped the file, so this screen names the right
+  // one. A critic filled a disk in the VM, watched the file read perfectly and
+  // the write fail, and read "THE SAVE FILE COULD NOT BE READ" off this screen
+  // -- a parent sent to look at a file that is fine, and offered a button that
+  // proposed to overwrite it. The Store now says which it was.
+  readonly property bool writeSide: Store.quarantineKind === "write"
+  readonly property string quarantineHeadline: settings.writeSide
+        ? "THE SAVE FILE COULD NOT BE WRITTEN TO."
+        : "THE SAVE FILE COULD NOT BE READ."
 
   // ---------------------------------------------------------- focus chain
   // Reading order, top to bottom and left to right: the five rows that can
@@ -570,8 +584,11 @@ FocusScope {
           sublabelSize: settings.fs(14)
           iconSize: settings.px(28)
           Accessible.name: "Start a new save file"
-          Accessible.description: "The save file on this computer cannot be read and has been"
-                                  + " left alone. This writes over it and starts again."
+          Accessible.description: (settings.writeSide
+                                   ? "The save file on this computer could not be written to."
+                                   : "The save file on this computer cannot be read and has been"
+                                     + " left alone.")
+                                  + " This writes over it and starts again."
                                   + " It asks before it does it."
           onActivated: settings.ask("discard")
         }
@@ -589,7 +606,7 @@ FocusScope {
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         text: settings.quarantined
-              ? ("THE SAVE FILE COULD NOT BE READ.  " + settings.quarantineReason
+              ? (settings.quarantineHeadline + "  " + settings.quarantineReason
                  + "  ·  It is still on this computer, exactly as it was, and nothing has been"
                  + " written to it. The three resets above cannot run until it is dealt with.")
               : ("This computer keeps one file: what you chose, your best times, "

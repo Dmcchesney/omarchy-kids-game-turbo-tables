@@ -40,6 +40,14 @@ import "../../engine/engine.mjs" as Engine
 //
 // Run it:
 //   qmltestrunner -input tests/qml -import ui -import dev/imports
+//
+// `shell/FileStore.qml` -- the layer below this one -- now has a spec of its
+// own, and it is deliberately NOT in this directory: it needs a model of
+// Quickshell to run at all, and a spec importing a shell module cannot compile
+// on a machine with no Quickshell. It lives in `tests/qml-shell/` with the
+// model, and is run by:
+//
+//   qmltestrunner -input tests/qml-shell -import ui -import tests/qml-shell
 Item {
   id: root
   width: 400
@@ -51,6 +59,27 @@ Item {
     id: disk
     property string blob: ""
     property int writes: 0
+  }
+
+  // The other disk: the one section 7 uses, which can also be unreadable,
+  // unwritable, absent, or quietly replaced by somebody else while the session
+  // is running. `disk` above cannot be any of those, which is most of the
+  // reason section 7 did not exist.
+  QtObject {
+    id: realDisk
+    property string blob: ""
+    property bool exists: true
+    property bool readable: true
+    property bool writable: true
+    property int writes: 0
+
+    function reset(text) {
+      realDisk.blob = text === undefined ? "" : text
+      realDisk.exists = text !== undefined && text.length > 0
+      realDisk.readable = true
+      realDisk.writable = true
+      realDisk.writes = 0
+    }
   }
 
   TestCase {
@@ -149,6 +178,189 @@ Item {
       return b
     }
 
+    // ---------------------------------------------------------------------
+    // A BACKEND THAT CAN SAY NO
+    //
+    // THE FIXTURE CHOICE THAT COST FOUR ROUNDS. Every backend above accepts
+    // every write it is handed. `shell/FileStore.qml` does not: it has four
+    // refusals of its own, and three of them are exactly the state a save file
+    // that could not be *read* leaves it in. So `test_14`, which asserts the
+    // one way out of a quarantine, asserted it against a stub for which there
+    // was nothing to get out of -- and the way out was inert in the product for
+    // four rounds while a green test said it worked.
+    //
+    // This models the file layer's decisions, and only those. It is a second
+    // copy of a rule and can therefore drift from the original, which is a real
+    // cost and is why each branch names the refusal in `shell/FileStore.qml` it
+    // stands for:
+    //
+    //   1. `!_everLoaded`               nothing before a read has answered
+    //   2. `_verdict === "unreadable"`  nothing over a file that would not read
+    //   3. blank payload                nothing empty, ever
+    //   4. `_checkedTheBytesStillMatch` nothing over bytes it does not know
+    //
+    //   `replaceUnreadableFile()`  stands 1, 2 and 4 down for exactly one write
+    //   `allowWritingAgain()`      lifts only the latch a failed write set
+    //   `flushNow()`               writes what the debounce is holding, now
+    //
+    // A failed write is reported the way the real one is -- by telling the
+    // Store, which is what `TurboTables.qml` wires `writeFailed` to -- rather
+    // than by throwing, because the Store's `try` around `save()` cannot see a
+    // signal and that difference is itself a door.
+    //
+    // `debounced` is true by default because the real one always is: a write
+    // that only lands because the child happened to press another key
+    // afterwards has not landed.
+    function fileBackendOf(options) {
+      var opt = options === undefined ? {} : options
+      var b = {
+        "format": opt.format === undefined ? "text" : opt.format,
+        "debounced": opt.debounced !== false,
+        // The file layer's own state, spelled as it is spelled there.
+        "everLoaded": false,
+        "verdict": "unknown",
+        "writable": true,
+        "lastKnownText": "",
+        "lastKnownTextIsKnown": false,
+        "replaceAuthorised": false,
+        "replacedTheFile": false,
+        "pending": "",
+        "hasPending": false,
+        "refusals": []
+      }
+
+      b.stopWriting = function (reason) {
+        if (!b.writable)
+          return
+        b.writable = false
+        b.hasPending = false
+        b.pending = ""
+        b.refusals.push(reason)
+        // How TurboTables.qml connects `writeFailed`. Not a throw: the Store's
+        // `try` around `save()` never sees a signal.
+        Store.writeFailed(reason)
+      }
+
+      b.load = function () {
+        if (!realDisk.exists) {
+          b.verdict = "absent"
+          b.everLoaded = true
+          return null                    // absence, modelled as proved
+        }
+        if (!realDisk.readable) {
+          b.verdict = "unreadable"
+          throw new Error("the save file could not be read: PermissionDenied")
+        }
+        b.verdict = "present"
+        b.everLoaded = true
+        b.lastKnownText = realDisk.blob
+        b.lastKnownTextIsKnown = true
+        return b.format === "text" ? realDisk.blob : JSON.parse(realDisk.blob)
+      }
+
+      b.save = function (payload) {
+        var text = typeof payload === "string"
+                 ? payload
+                 : JSON.stringify(payload, null, 2) + "\n"
+
+        // 3.
+        if (text.replace(/\s+/g, "").length === 0) {
+          b.stopWriting("refused to write an empty save file")
+          return
+        }
+        // 1 and 2, and the exception a person's decision buys.
+        if (!(b.replaceAuthorised || b.replacedTheFile)) {
+          if (!b.everLoaded) {
+            b.stopWriting("refused to write to the save file before the file had been read")
+            return
+          }
+          if (b.verdict === "unreadable") {
+            b.stopWriting("refused to write over an unreadable save file")
+            return
+          }
+        }
+        if (!b.writable)
+          return
+
+        b.pending = text
+        b.hasPending = true
+        if (!b.debounced)
+          b.writeNow()
+      }
+
+      b.flushNow = function () { b.writeNow() }
+
+      b.writeNow = function () {
+        if (!b.hasPending || !b.writable)
+          return
+        var text = b.pending
+        b.hasPending = false
+        b.pending = ""
+
+        // 4. The bytes about to be replaced have to be the bytes this session
+        //    is holding a newer version of.
+        if (!b.replaceAuthorised && b.lastKnownTextIsKnown) {
+          if (realDisk.exists && realDisk.readable) {
+            if (realDisk.blob !== b.lastKnownText) {
+              b.stopWriting("the save file changed on disk after this session read it")
+              return
+            }
+          } else if (realDisk.exists) {
+            b.stopWriting("the save file could not be re-read before writing over it")
+            return
+          }
+          // Not there at all: proved absent, so there is nothing to destroy.
+        }
+
+        if (!realDisk.writable) {
+          b.stopWriting("the save file could not be written: ENOSPC")
+          return
+        }
+
+        realDisk.blob = text
+        realDisk.exists = true
+        realDisk.writes += 1
+        b.lastKnownText = text
+        b.lastKnownTextIsKnown = true
+        if (b.replaceAuthorised) {
+          b.replaceAuthorised = false
+          b.replacedTheFile = true
+        }
+      }
+
+      b.allowWritingAgain = function () { b.writable = true }
+
+      b.replaceUnreadableFile = function () {
+        b.replaceAuthorised = true
+        b.writable = true
+      }
+
+      return b
+    }
+
+    // The same wiring `TurboTables.qml` does at startup, so section 7 exercises
+    // the pair rather than either half. A brand-new backend object every time:
+    // assigning the same one twice fires no change and would skip the load.
+    property var fileBack: null
+    function freshFileStore(options) {
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineIssues = []
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      suite.fileBack = suite.fileBackendOf(options)
+      Store.backend = suite.fileBack
+      return suite.fileBack
+    }
+
+    // What is on the modelled disk, as the engine reads it.
+    function realDiskFile() {
+      var parsed = Engine.parseSave(realDisk.blob)
+      return parsed.ok ? parsed.file : null
+    }
+
     // A Store as a freshly built singleton would be, then handed `backend`.
     //
     // The two flags reset here are the ones a new QML engine would start with.
@@ -163,13 +375,16 @@ Item {
       Store.quarantined = false
       Store.quarantineIssues = []
       Store.quarantineReason = ""
+      Store.quarantineKind = ""
       Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
       Store.backend = suite.backendOf(broken)
     }
 
     function init() {
       disk.blob = suite.victimText()
       disk.writes = 0
+      realDisk.reset(suite.victimText())
     }
 
     function cleanupTestCase() {
@@ -316,6 +531,17 @@ Item {
     function test_09_an_object_under_the_text_protocol_is_quarantined() {
       suite.freshStore("load-object")
       suite.assertTheFileSurvived("an object handed back under the text protocol")
+      // And it is quarantined for the RIGHT reason. Without this line the test
+      // passes with `adopt`'s protocol check deleted -- the object falls
+      // through to `parseSave`, which refuses it as text and quarantines with a
+      // parse error. A mutation run found exactly that: the check the file
+      // documents was guarded by nothing, and the test named after it was
+      // passing for a different reason than its name claims. The reason is not
+      // decoration; it is the sentence ui/Settings.qml puts in front of a
+      // parent, and "not JSON" would send them to look at a file that is fine.
+      verify(Store.quarantineReason.indexOf("declared text") >= 0
+             && Store.quarantineReason.indexOf("handed back object") >= 0,
+             "the reason does not name the protocol mismatch: " + Store.quarantineReason)
     }
 
     // =====================================================================
@@ -346,6 +572,14 @@ Item {
       compare(Store.setSetting("scanlines", true), false)
       compare(Store.setting("scanlines"), true)
       compare(disk.writes, 0)
+      // Including a change that changes nothing. `setSetting` answers "this
+      // will survive a reload", and under a quarantine nothing will -- the
+      // values in memory are the defaults, not the file's, so even setting a
+      // key to what it already holds is not a claim this session can make. The
+      // early-out for an unchanged value sits above the quarantine branch and
+      // would answer true without this line.
+      compare(Store.setSetting("kartBody", 3), false,
+              "setting a key to what it already held claimed a save")
     }
 
     // What a screen has to read to be able to say anything at all. ui/Game.qml
@@ -376,13 +610,35 @@ Item {
 
     // The only way out, and only ui/Settings.qml calls it -- behind the same
     // Confirm dialog the three resets use, naming what is lost.
+    //
+    // THIS TEST'S BACKEND CAN REFUSE. It used to be `backendOf("load-throws")`,
+    // whose `save` accepts everything it is handed, so the case the way out
+    // exists for -- a file layer that is refusing to write because the read
+    // never came back -- was not in the fixture at all. The way out was inert
+    // in the product for four rounds underneath this green test. It is now the
+    // faithful model above, over a disk that genuinely cannot be read.
     function test_14_discarding_a_quarantined_file_is_the_one_way_out() {
-      suite.freshStore("load-throws")
-      compare(Store.discardQuarantinedFile(), true)
-      compare(Store.quarantined, false)
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      var back = suite.freshFileStore()
+
+      verify(Store.quarantined, "an unreadable file did not quarantine")
+      compare(Store.quarantineKind, "read")
+      compare(realDisk.writes, 0, "something was written over the unreadable file")
+      // The file layer really is refusing: this is the state that made the way
+      // out inert, asserted rather than assumed.
+      compare(back.everLoaded, false, "the fixture's file layer thinks it has read the file")
+      compare(back.verdict, "unreadable")
+
+      compare(Store.discardQuarantinedFile(), true, "the way out reported what it did not do")
+      compare(Store.quarantined, false, "the way out re-quarantined the session")
       compare(Store.quarantineReason, "")
-      compare(disk.writes, 1, "discarding did not start a new file")
-      var fresh = suite.onDisk()
+      compare(back.refusals.length, 0,
+              "the file layer refused the discard: " + JSON.stringify(back.refusals))
+      compare(realDisk.writes, 1, "discarding did not start a new file")
+
+      realDisk.readable = true
+      var fresh = suite.realDiskFile()
       verify(fresh !== null, "the new file does not parse")
       compare(Object.keys(fresh.records).length, 0)
       compare(fresh.facts.length, 0)
@@ -395,7 +651,12 @@ Item {
     function test_15_a_write_that_throws_stops_the_writing_and_keeps_the_session() {
       suite.freshStore("save-throws")
       verify(Store.loaded && !Store.quarantined, "the file did not load")
-      compare(Store.setSetting("kartBody", 3), true, "the first write is attempted")
+      // The first write IS attempted -- `save` throwing is the proof of that --
+      // and the answer is still false, because the change it carried did not
+      // reach the file. `setSetting` used to answer true here on the reasoning
+      // that the write had been tried; a screen cannot act on "tried".
+      compare(Store.setSetting("kartBody", 3), false,
+              "a change whose write was refused was reported as saved")
       compare(Store.quarantined, true, "a failed write did not stop the writing")
       verify(Store.quarantineReason.indexOf("ENOSPC") >= 0, Store.quarantineReason)
       // The child's records are still in memory: the session is still theirs.
@@ -586,13 +847,47 @@ Item {
     // three reset buttons plus, only while there is a quarantine to act on, the
     // way out of one.
     function test_26_a_reset_over_a_quarantined_file_writes_nothing_and_says_so() {
-      suite.freshStore("load-throws")
+      suite.freshStore()
+      // Start from a session that has the child's work in memory, so "nothing
+      // was changed" can be checked against something.
+      var records = Object.keys(Store.records).length
+      var facts = Store.facts.length
+      var number = Store.setting("kartNumber")
+      verify(records > 0 && facts > 0, "the fixture did not load a real save")
+      verify(number !== Store.defaultSettings.kartNumber,
+             "the fixture's kart number is the default, so a reset would be invisible")
+      Store.writeFailed("the disk is full")
+
       var before = disk.blob
       compare(Store.resetSettings(), false)
       compare(Store.resetRecords(), false)
       compare(Store.resetFacts(), false)
       compare(disk.writes, 0)
       compare(disk.blob, before)
+      // A reset that answered "nothing was changed" must not have changed
+      // anything -- including in memory. The three of them each go through the
+      // engine and take every key back off the file that comes out, so a reset
+      // that ran and only failed to WRITE would have emptied the session's
+      // records and fact history behind a banner saying it had not. The return
+      // value alone does not catch that: a mutation removing the quarantine
+      // guard from `resetSettings` still answers false, because the flush it
+      // reaches is refused for its own reasons.
+      compare(Object.keys(Store.records).length, records,
+              "a refused reset emptied the session's records anyway")
+      compare(Store.facts.length, facts,
+              "a refused reset emptied the session's fact history anyway")
+      compare(Store.setting("kartNumber"), number,
+              "a refused reset put the settings back to the defaults anyway")
+
+      // And the same over a read-side quarantine, where the session is empty by
+      // design and the file is the thing being protected.
+      suite.freshStore("load-throws")
+      var untouched = disk.blob
+      compare(Store.resetSettings(), false)
+      compare(Store.resetRecords(), false)
+      compare(Store.resetFacts(), false)
+      compare(disk.writes, 0)
+      compare(disk.blob, untouched)
     }
 
     // =====================================================================
@@ -725,6 +1020,16 @@ Item {
       compare(Store.resetFacts(), false)
       compare(Store.commit(null, null), null)
       compare(disk.blob, before)
+
+      // `flush()` keeps the guard of its own, rather than trusting the five
+      // callers above to have made it. It is a public function on a singleton,
+      // the same argument `adopt` keeps its own `undefined` guard for -- and
+      // without this line the guard is unreachable from any test, because every
+      // caller refuses first. A lock nothing can reach is a lock nobody is
+      // checking.
+      Store.flush()
+      compare(disk.writes, 0, "flush wrote before a load had answered")
+      compare(disk.blob, before)
     }
 
     // `adopt` is a public function on a singleton, so it keeps the `undefined`
@@ -740,6 +1045,37 @@ Item {
       compare(Store.setSetting("kartBody", 3), false)
       compare(disk.writes, 0)
       compare(disk.blob, before)
+    }
+
+    // The other half of the same door, and the one that could not be reached
+    // until `Component.onCompleted`'s guard was given a name.
+    //
+    // `adopt(null)` is the *legitimate* proved-absence path, so it cannot be
+    // refused -- and run over a store that has already read a file it replaces
+    // the child's records and fact history with the defaults, which the next
+    // keystroke flushes over the file. What stops that is one condition on the
+    // singleton's own completion, and because completion fires once before any
+    // backend exists, the ordering that makes it matter cannot be produced in a
+    // running process: a mutation deleting the guard survived the whole suite
+    // four times. The state can be produced even when the ordering cannot.
+    function test_34b_completion_does_not_re_adopt_over_a_file_that_has_been_read() {
+      suite.freshStore()
+      var records = Object.keys(Store.records).length
+      var facts = Store.facts.length
+      verify(records > 0 && facts > 0, "the fixture did not load a real save")
+
+      Store.completeIfNothingHasAnswered()
+
+      compare(Object.keys(Store.records).length, records,
+              "completing the singleton emptied the records it had already read")
+      compare(Store.facts.length, facts,
+              "completing the singleton emptied the fact history it had already read")
+      compare(Store.quarantined, false)
+      // And the file behind it is still the child's.
+      Store.setSetting("kartBody", 3)
+      var after = suite.progressOnDisk()
+      compare(after.records, 1, "the record was written away")
+      verify(after.facts > 0, "the fact history was written away")
     }
 
     // =====================================================================
@@ -883,6 +1219,325 @@ Item {
       compare(settingsProbe.stops.length, healthyStops + 1,
               "the way out of a quarantine is not reachable by keyboard")
       compare(settingsProbe.focusName(healthyStops - 1), "Start a new save file")
+    }
+
+    // =====================================================================
+    // 7. THE RECOVERY PATH, AND THE TWO RULES NOTHING GUARDED
+    //
+    // Everything above this line is about not touching the file. This section
+    // is about what happens *after* the plugin has correctly decided not to,
+    // which nobody had audited: a seam critic found the one action the product
+    // offers a family in that state did nothing, said it had worked, and that
+    // the only remedy outside the game -- a parent putting a good file back by
+    // hand -- was destroyed by the plugin on the child's next keystroke. The
+    // two composed into permanent, unrecoverable loss with a screen saying it
+    // was fine.
+    //
+    // It also banks the two rules an independent mutation run found guarded by
+    // nothing: the JSON-array check in `fileFromObject`, and a race committed
+    // over a fact history that is not empty -- which is to say, the normal case.
+    // =====================================================================
+
+    // --------------------------------------------------------------- D-1
+    //
+    // The way out has to move bytes, and what it reports has to be what it did.
+    // Measured before the fix: `discard returned true, writes=0,
+    // bytesMoved=false, quarantinedAfter=true` -- so ui/Settings.qml showed
+    // "A NEW SAVE FILE HAS BEEN STARTED" on the same screen as the red strip.
+    function test_41_the_way_out_of_a_read_side_quarantine_writes_and_says_so() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      var back = suite.freshFileStore()
+      verify(Store.quarantined)
+
+      // The screen's own path, question and answer, because the sentence a
+      // family reads is the observable this defect was invisible in.
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(Store.quarantined, false, "the session is still locked after the way out")
+      compare(realDisk.writes, 1, "the way out wrote nothing")
+      compare(settingsProbe.bannerText, "A NEW SAVE FILE HAS BEEN STARTED")
+      realDisk.readable = true
+      verify(suite.realDiskFile() !== null, "what was written is not a save file")
+
+      // And the session saves from here on without needing to be authorised
+      // again: the file layer owns the file it just wrote.
+      compare(Store.setSetting("kartBody", 3), true, "the session did not start saving again")
+      back.flushNow()
+      compare(realDisk.writes, 2, "the next change did not reach the file")
+      compare(suite.realDiskFile().settings.kart, 4)
+    }
+
+    // The other half of the same requirement: when the mechanism cannot work,
+    // the report says so. A disk that cannot be read AND cannot be written is
+    // the case a banner claiming success would be a lie about.
+    function test_42_a_way_out_that_could_not_write_reports_that_it_did_not() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      realDisk.writable = false
+      suite.freshFileStore()
+      verify(Store.quarantined)
+      var before = realDisk.blob
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED",
+              "the screen claimed a new save file that was never written")
+      compare(Store.quarantined, true, "the session was left believing it can write")
+      compare(realDisk.writes, 0)
+      compare(realDisk.blob, before, "the unwritable file moved")
+      // Still offered, because there is still a quarantine to act on.
+      verify(settingsProbe.quarantined)
+    }
+
+    // And with nothing on the other end at all, which is the shape D-4 has on
+    // the recovery path: a discard cannot claim a file it has no way to reach.
+    function test_43_a_way_out_with_no_backend_to_write_through_reports_false() {
+      suite.freshStore()
+      Store.backend = null                       // taken away after answering
+      verify(Store.quarantined)
+      compare(Store.discardQuarantinedFile(), false,
+              "a discard with nothing to write through said a new file was started")
+      compare(Store.quarantined, true)
+      compare(disk.writes, 0)
+    }
+
+    // --------------------------------------------------------------- D-2
+    //
+    // A file that changes on disk under a running shell is never silently
+    // overwritten. VM-reproduced before the fix: a second writer's save,
+    // holding a record this session had never seen, was gone after one
+    // keystroke -- no probe, no refusal, no message. This is what made a
+    // corrupt save file unrecoverable, because hand-restoring it is the
+    // obvious human remedy.
+    function test_44_a_save_that_changed_on_disk_is_not_overwritten() {
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+      verify(Store.loaded && !Store.quarantined, "the file did not load")
+
+      // A parent puts a different, good save file back while the child is
+      // logged in. It holds a race this session has never seen.
+      var restored = suite.victimFile()
+      var keys = Object.keys(restored.records)
+      verify(keys.length > 0 && restored.facts.length > 0, "the fixture is not a real save")
+      restored.records[keys[0]].timeMs -= 1200      // a better time, from another day
+      restored.facts[0].attempts += 7               // and seven answers this session never saw
+      restored.facts[0].correct += 7
+      var restoredText = Engine.serialiseSave(restored)
+      verify(restoredText !== realDisk.blob, "the fixture did not actually change the file")
+      realDisk.blob = restoredText
+
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+
+      compare(realDisk.blob, restoredText, "the other writer's save was overwritten")
+      compare(realDisk.writes, 0)
+      verify(Store.quarantined, "the refusal was silent")
+      verify(Store.quarantineReason.indexOf("changed on disk") >= 0, Store.quarantineReason)
+      compare(Store.setSetting("kartPaint", 4), false)
+    }
+
+    // The same rule over the path the absence re-proof does not cover: once
+    // this session has written the file itself, the "absent" re-proof retires
+    // and every write after that used to be taken on trust.
+    function test_45_a_fresh_install_that_wrote_once_still_checks_before_writing_again() {
+      realDisk.reset()                            // nothing on disk at all
+      var back = suite.freshFileStore()
+      verify(Store.loaded && !Store.quarantined, "a proved absence did not load")
+
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      compare(realDisk.writes, 1, "the fresh install wrote nothing")
+
+      // Somebody else writes over it between one keystroke and the next.
+      var theirs = Engine.serialiseSave(suite.victimFile())
+      realDisk.blob = theirs
+
+      Store.setSetting("kartPaint", 5)
+      back.flushNow()
+      compare(realDisk.blob, theirs, "the second writer's save was overwritten")
+      compare(realDisk.writes, 1)
+      verify(Store.quarantined, "the refusal was silent")
+    }
+
+    // The write-side quarantine's way out, which must not cost the child the
+    // records the session read before the disk filled up.
+    function test_46_recovering_from_a_write_side_quarantine_keeps_the_session() {
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+      var records = Object.keys(Store.records).length
+      verify(records > 0 && Store.facts.length > 0, "the file did not load")
+
+      realDisk.writable = false
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      verify(Store.quarantined, "a failed write did not stop the writing")
+      compare(Store.quarantineKind, "write")
+      // And the screen says which half it was. A parent told the file could not
+      // be READ goes and looks at a file that is perfectly fine.
+      verify(settingsProbe.quarantineHeadline.indexOf("WRITTEN") >= 0,
+             settingsProbe.quarantineHeadline)
+
+      realDisk.writable = true
+      compare(Store.discardQuarantinedFile(), true)
+      compare(realDisk.writes, 1)
+      var after = suite.realDiskFile()
+      verify(after !== null, "the recovered file does not parse")
+      compare(Object.keys(after.records).length, records,
+              "recovering from a full disk cost the child their records")
+      verify(after.facts.length > 0, "recovering from a full disk cost the fact history")
+    }
+
+    // --------------------------------------------------------------- D-4
+    //
+    // A store that cannot write anything used to say every change was saved:
+    // `setSetting` true, `quarantined` false, writes 0, no NOT SAVED anywhere,
+    // for the whole session. The file survived only because there was no `save`
+    // to call, which is luck, not a rule -- and luck that says "saved".
+    function test_47_a_backend_with_no_save_to_call_is_a_quarantine() {
+      var b = { "format": "text" }
+      b.load = function () { return disk.blob }      // no save at all
+      var before = disk.blob
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      Store.backend = b
+
+      verify(Store.loaded && !Store.quarantined, "a readable file did not load")
+      compare(Store.setSetting("kartBody", 3), false,
+              "a store with no way to write said the change was saved")
+      verify(Store.quarantined, "a backend that cannot write anything did not say so")
+      verify(Store.quarantineReason.indexOf("no save()") >= 0, Store.quarantineReason)
+      compare(disk.blob, before)
+      compare(disk.writes, 0)
+    }
+
+    // --------------------------------------------------------------- D-5
+    //
+    // `backendFormat()` is read on every flush, so a backend whose protocol
+    // moves after the load hands the file layer the other protocol's payload.
+    // Measured: a text load, `format` flipped to "object", and the next
+    // keystroke wrote a JSON snapshot over the file, which then did not parse
+    // as a save, with nothing quarantined.
+    function test_48_a_protocol_that_moves_after_the_load_is_refused() {
+      var b = { "format": "text" }
+      b.load = function () { return disk.blob }
+      b.save = function (p) {
+        disk.blob = typeof p === "string" ? p : JSON.stringify(p)
+        disk.writes += 1
+      }
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      Store.backend = b
+      verify(Store.loaded && !Store.quarantined, "the text file did not load")
+      var before = disk.blob
+
+      b.format = "object"
+      compare(Store.setSetting("kartBody", 3), false,
+              "a write in a protocol the load did not answer in was reported as saved")
+      compare(disk.writes, 0, "a snapshot was written over the child's text file")
+      compare(disk.blob, before)
+      verify(Store.quarantined)
+      verify(suite.onDisk() !== null, "the file no longer parses as a save")
+    }
+
+    // --------------------------------------------------- the array door
+    //
+    // `fileFromObject`'s array check. `typeof [] === "object"`, so without the
+    // explicit test a JSON array walks through a guard whose message says it
+    // did not: every key reads as undefined, the defaults are adopted, and the
+    // next keystroke writes them over the child's file. The check has been in
+    // the code, and named in a builder's report as a door it closed, since
+    // round 4 -- and an independent mutation run deleted it and the whole suite
+    // still passed 42/42 while the file was destroyed.
+    function test_49_a_json_array_under_the_object_protocol_is_not_a_save() {
+      var arrays = ["[1,2,3]", "[]", "[{\"settings\":{}}]"]
+      for (var i = 0; i < arrays.length; i++) {
+        var payload = JSON.parse(arrays[i])
+        var b = { "format": "object" }
+        b.load = function () { return payload }
+        b.save = function (o) { disk.blob = JSON.stringify(o); disk.writes += 1 }
+        disk.blob = suite.victimText()
+        disk.writes = 0
+        Store.loaded = false
+        Store.quarantined = false
+        Store.quarantineReason = ""
+        Store.quarantineKind = ""
+        Store._backendHasAnswered = false
+        Store._adoptedFormat = ""
+        Store.backend = b
+        suite.assertTheFileSurvived("a JSON array " + arrays[i]
+                                    + " under the object protocol")
+        verify(Store.quarantineReason.indexOf("not a save object") >= 0,
+               Store.quarantineReason)
+      }
+    }
+
+    // ------------------------------------------- the returning child
+    //
+    // Every committed commit test starts from `disk.blob = ""`. The single most
+    // common real-world path -- a child who has played before, whose file holds
+    // a record and forty-eight attempts, running one more race -- was untested,
+    // and a mutation that stopped `factHistoryForRace` remembering what it
+    // handed out survived the whole suite while silently refusing every race a
+    // returning child ran.
+    function test_50_a_race_over_a_non_empty_fact_history_banks_and_adds() {
+      suite.freshStore()
+      var before = suite.progressOnDisk()
+      verify(before.records === 1, "the fixture is not a returning child's file")
+      verify(before.facts > 0 && before.attempts > 0,
+             "the fixture has no fact history to return to")
+
+      var seeded = Store.factHistoryForRace()
+      compare(seeded.length, before.facts,
+              "the returning child's history did not reach the race")
+
+      var race = suite.playRace(63, "timeTrial", "2-5", seeded)
+      var result = Store.commit(race.state, race.timeline)
+      compare(result.issues.length, 0, JSON.stringify(result.issues))
+      compare(result.factsUpdated, true, "a returning child's race was refused")
+
+      var after = suite.progressOnDisk()
+      compare(after.attempts,
+              before.attempts + Engine.humanRacer(race.state).attemptCount,
+              "the race's answers did not add to the history that was already there")
+      verify(after.facts >= before.facts, "the fact history shrank")
+      compare(after.records, 1, "the record that was already there is gone")
+    }
+
+    // ------------------------------------------- a reset that did not happen
+    //
+    // The three resets are the one place on this screen where a banner claiming
+    // something the file did not do is unrecoverable: the child is told the
+    // records are cleared and there is no undo to check it against. `answer()`
+    // in ui/Settings.qml promises the banner "reports what happened to the
+    // file, not what was asked for", and until this round the resets answered
+    // `true` for a write the file layer refused.
+    function test_51_a_reset_whose_write_was_refused_says_nothing_was_changed() {
+      realDisk.reset(suite.victimText())
+      suite.freshFileStore({ "debounced": false })
+      var before = realDisk.blob
+      verify(Store.loaded && !Store.quarantined, "the file did not load")
+
+      realDisk.writable = false                  // the disk fills up
+
+      settingsProbe.pending = "records"
+      settingsProbe.answer(true)
+
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED",
+              "the screen said the records were cleared over a file that never changed")
+      compare(realDisk.blob, before, "the file moved")
+      compare(realDisk.writes, 0)
+      verify(Store.quarantined)
     }
   }
 

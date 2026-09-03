@@ -138,9 +138,61 @@ import Quickshell.Io
 //   2. Nothing is written once a read has come back unreadable.
 //   3. An empty or blank payload is never written at all.
 //
+// A fourth was added in round 4 of the seam audit, and it is the one that
+// covers the ordinary case rather than a broken one:
+//
+//   4. Nothing is written over a file whose bytes are not the bytes this object
+//      last read or last wrote. See "SOMEBODY ELSE'S BYTES" below.
+//
 // Directory creation is not a special case: FileView creates missing parents on
 // write, measured on the same Quickshell build, so a fresh install needs no
 // mkdir and this plugin never has to start anything to make one.
+//
+// ---------------------------------------------------------------------------
+// SOMEBODY ELSE'S BYTES
+// ---------------------------------------------------------------------------
+//
+// The re-proof above was worn only over an `absent` verdict. A `present`
+// verdict was sticky and trusted: the file was read once at shell start, the
+// plugin stays loaded all session (`keepLoaded: true`), and `setText` then
+// replaced whatever was on disk with this session's in-memory snapshot with no
+// second look. Reproduced in the VM: a save written by another writer at t=2.0s,
+// holding a record this session had never seen, was gone after one keystroke at
+// t=4.5s -- no probe, no refusal, no message.
+//
+// That is not a theoretical writer. The design promises a file "human-readable,
+// so a parent can see exactly what is kept", and the only remedy the product
+// has for a save file that cannot be read is a parent putting a good one back
+// by hand. Doing that while the child is logged in used to destroy it, which is
+// what made an unreadable save file permanent.
+//
+// So every write now re-reads the file first and compares it against
+// `_lastKnownText` -- the exact bytes this object last read from that path, or
+// last wrote to it. They differ, or the file cannot be re-read: refuse, and
+// stop writing for the session with a reason that says so. The file went away
+// and its absence proves out: allow it, because there is nothing there to
+// destroy. The cost is one blocking read per write, and writes are debounced at
+// 400 ms, so it is at most two and a half reads a second of a file measured at
+// well under a kilobyte.
+//
+// ---------------------------------------------------------------------------
+// THE WAY OUT
+// ---------------------------------------------------------------------------
+//
+// Refusals 1 and 2 are exactly the state a file that could not be *read* leaves
+// this object in, and they have no expiry: `_everLoaded` is false and nothing
+// in the session ever sets it. A family whose `garage.json` is corrupt would
+// therefore never save again on that machine -- in this session or any later
+// one -- because the way out the product offers, `Store.discardQuarantinedFile`,
+// cleared a flag one layer up and was refused down here, silently, while the
+// screen said "A NEW SAVE FILE HAS BEEN STARTED".
+//
+// `replaceUnreadableFile()` is the counterpart that was missing. It is the
+// file layer's own record of a decision a person made -- the Confirm dialog in
+// ui/Settings.qml, which names what is lost before it asks -- and it authorises
+// exactly one overwrite: refusals 1, 2 and 4 stand aside for it, and once the
+// write has landed this object owns the file and the ordinary rules apply again
+// to the bytes it just put there. Nothing calls it except that decision.
 QtObject {
   id: fileStore
 
@@ -171,6 +223,12 @@ QtObject {
     _writable = true
     _hasPending = false
     _pending = ""
+    // A new path is a new file: nothing is known about its bytes, and an
+    // authorisation to replace the previous one does not travel to it.
+    _lastKnownText = ""
+    _lastKnownTextIsKnown = false
+    _replaceAuthorised = false
+    _replacedTheFile = false
     if (debounce)
       debounce.stop()
   }
@@ -234,6 +292,34 @@ QtObject {
   // this object owns the file.
   property bool _wroteTheFile: false
 
+  // The bytes this object last read off `path`, or last wrote to it. It is the
+  // only thing that can tell "the file I am about to replace is the one I am
+  // holding a newer version of" from "somebody else has written here since",
+  // and the second of those is a parent hand-restoring a save while the child
+  // is logged in. Empty and `_lastKnownTextIsKnown` false until a read or a
+  // write has established it; while it is unknown, the absence re-proof above
+  // is the guard that stands in its place.
+  //
+  // Held as text on both protocols on purpose: the object protocol's payload is
+  // this exact string parsed, so the string is what is on disk either way, and
+  // comparing what is on disk to what is on disk needs no parser to agree.
+  property string _lastKnownText: ""
+  property bool _lastKnownTextIsKnown: false
+
+  // A person has decided, through the Confirm dialog in ui/Settings.qml, that
+  // the file this object is refusing to touch may be replaced. It authorises
+  // one overwrite; the write that lands consumes it and sets `_replacedTheFile`,
+  // after which this object owns the file and the ordinary refusals apply again
+  // -- to the bytes it put there, which it now knows.
+  //
+  // It is deliberately not spelled by setting `_everLoaded`, or by moving
+  // `_verdict` to "present". Those two record what a *read* said, no read has
+  // happened, and a file that lies to itself about having read something is the
+  // exact shape of the five bugs this whole layer exists to refuse.
+  readonly property bool replaceAuthorised: _replaceAuthorised
+  property bool _replaceAuthorised: false
+  property bool _replacedTheFile: false
+
   // How many directory levels the walk may climb before it gives up and calls
   // the answer "I could not find out". A save path is four levels below the
   // home directory; twenty is far more than the design can ever need and
@@ -280,6 +366,21 @@ QtObject {
   }
 
   function _probeRead(probePath) {
+    // `_probeComponent` is this object's own child, and refusal 4 now takes a
+    // probe before *every* write -- including the one `Component.onDestruction`
+    // asks for, by which time the children may already be gone. The same shape
+    // as the `debounce.stop()` guard three functions down, and the same cost if
+    // it is missed: a TypeError out of every teardown. "I could not build a
+    // probe" is not a verdict either, so it answers the way silence does and
+    // the write above is refused rather than taken on trust.
+    //
+    // In the shipping wiring this does not cost the child their last change:
+    // `TurboTables.qml` flushes on `close()`, on `dismiss()` and from its own
+    // `Component.onDestruction`, all while this object and its children are
+    // alive, so the flush that matters has already happened and this object's
+    // own destruction finds nothing pending.
+    if (!_probeComponent)
+      return { "outcome": -2, "text": "" }
     var probe = _probeComponent.createObject(null, { "path": probePath })
     if (!probe)
       return { "outcome": -2, "text": "" }
@@ -394,6 +495,8 @@ QtObject {
 
     if (_verdict === "present") {
       _everLoaded = true
+      _remember(text)
+      _readSupersedesAnyAuthorisation()
       return _decode(text)
     }
 
@@ -417,6 +520,8 @@ QtObject {
           _lastError = -1
           _lastErrorName = ""
           _everLoaded = true
+          _remember(again.text)
+          _readSupersedesAnyAuthorisation()
           return _decode(again.text)
         }
         if (again.outcome >= 0 && again.outcome !== FileViewError.FileNotFound) {
@@ -439,6 +544,24 @@ QtObject {
       throw new Error("the save file at " + path + " could not be read: " + _lastErrorName)
 
     throw new Error("the save file at " + path + " could not be read: the read produced no result")
+  }
+
+  // What is on disk at `path`, as far as this object knows: set by a read that
+  // succeeded and by a write that landed, and by nothing else. Refusal 4 is
+  // this and a comparison.
+  function _remember(text) {
+    _lastKnownText = typeof text === "string" ? text : ""
+    _lastKnownTextIsKnown = true
+  }
+
+  // A read that came back supersedes an authorisation to replace a file that
+  // could not be read. The person was asked about a file nothing could see; the
+  // file this session can now see is a different question, and an unspent
+  // authorisation left standing would let one write past refusal 4 without
+  // anyone having decided that. `_replacedTheFile` is not cleared: that records
+  // a write this object actually made, which is a fact, not a permission.
+  function _readSupersedesAnyAuthorisation() {
+    _replaceAuthorised = false
   }
 
   // The file's own bytes, in whichever protocol the Store speaks. Shared by
@@ -489,14 +612,20 @@ QtObject {
     }
 
     // 1 and 2. Never before a read has answered, never after it answered
-    //          "unreadable".
-    if (!_everLoaded) {
-      stopWriting("refused to write to " + path + " before the file had been read")
-      return
-    }
-    if (_verdict === "unreadable") {
-      stopWriting("refused to write over an unreadable save file at " + path)
-      return
+    //          "unreadable" -- unless a person has decided this file may be
+    //          replaced, which is the one thing that can outrank a read that
+    //          never came back. Without that exception these two refusals are
+    //          permanent, and the way out of a quarantine is a button that
+    //          reports success and does nothing.
+    if (!(_replaceAuthorised || _replacedTheFile)) {
+      if (!_everLoaded) {
+        stopWriting("refused to write to " + path + " before the file had been read")
+        return
+      }
+      if (_verdict === "unreadable") {
+        stopWriting("refused to write over an unreadable save file at " + path)
+        return
+      }
     }
     if (!_writable)
       return
@@ -542,18 +671,26 @@ QtObject {
     // and a first write that never landed left the guard spent and the second
     // write unguarded. `_wroteTheFile` is set below, by a write that did not
     // fail, which is the condition the reasoning actually wanted.
-    if (_verdict === "absent" && !_wroteTheFile) {
-      var second = _probe(path)
-      if (second === -1) {
-        stopWriting("the save file at " + path + " was not found when the game started"
-                    + " and is readable now, so the defaults in memory are not what is"
-                    + " on disk. Refusing to write over it")
-        return
-      }
-      if (second !== FileViewError.FileNotFound || !_absenceIsProven(path)) {
-        stopWriting("the save file at " + path + " could not be shown to be absent a"
-                    + " second time, so this session does not know what is on disk."
-                    + " Refusing to write over it")
+    //
+    // A write a person explicitly authorised skips both looks. They were shown
+    // what is lost and said yes to it; re-deriving a refusal from the state
+    // that made them press the button would be the same dead end again.
+    if (!_replaceAuthorised) {
+      if (_verdict === "absent" && !_wroteTheFile) {
+        var second = _probe(path)
+        if (second === -1) {
+          stopWriting("the save file at " + path + " was not found when the game started"
+                      + " and is readable now, so the defaults in memory are not what is"
+                      + " on disk. Refusing to write over it")
+          return
+        }
+        if (second !== FileViewError.FileNotFound || !_absenceIsProven(path)) {
+          stopWriting("the save file at " + path + " could not be shown to be absent a"
+                      + " second time, so this session does not know what is on disk."
+                      + " Refusing to write over it")
+          return
+        }
+      } else if (_lastKnownTextIsKnown && !_checkedTheBytesStillMatch()) {
         return
       }
     }
@@ -582,8 +719,55 @@ QtObject {
     // reasoning this file exists to refuse.
     _wroteTheFile = true
 
+    // The bytes on disk are now the bytes just written, and that is a thing
+    // this object knows first-hand rather than inferred. It is what refusal 4
+    // compares against next time, and it is what lets an authorised replacement
+    // hand the session back to the ordinary rules instead of needing to be
+    // re-authorised on every keystroke afterwards.
+    _remember(text)
+    if (_replaceAuthorised) {
+      _replaceAuthorised = false
+      _replacedTheFile = true
+    }
+
     if (_saves > savesBefore)
       wrote()
+  }
+
+  // Refusal 4. The file this object is about to replace has to still be the
+  // file it is holding a newer version of. Answers false when the write must
+  // not go ahead, and has already stopped the writing and said why.
+  function _checkedTheBytesStillMatch() {
+    var now = _probeRead(path)
+
+    if (now.outcome === -1) {
+      if (now.text === _lastKnownText)
+        return true
+      stopWriting("the save file at " + path + " changed on disk after this session read it,"
+                  + " so what is in memory is not a newer version of what is there."
+                  + " Refusing to write over it")
+      return false
+    }
+
+    if (now.outcome === FileViewError.FileNotFound) {
+      // It was there and it is not now. That is not automatically an absence --
+      // a directory shutting answers the same way -- so it is put to the same
+      // proof every other absence in this file is put to. Proved gone, there is
+      // nothing on that path to destroy and the write goes ahead; unproved, the
+      // honest answer is that this session no longer knows what is on disk.
+      if (_absenceIsProven(path))
+        return true
+      stopWriting("the save file at " + path + " could not be found or shown to be absent"
+                  + " before writing over it, so this session does not know what is on disk."
+                  + " Refusing to write over it")
+      return false
+    }
+
+    stopWriting("the save file at " + path + " could not be re-read before writing over it: "
+                + (now.outcome >= 0 ? FileViewError.toString(now.outcome)
+                                    : "the read produced no result")
+                + ". Refusing to write over it")
+    return false
   }
 
   function stopWriting(reason) {
@@ -592,16 +776,37 @@ QtObject {
     _writable = false
     _hasPending = false
     _pending = ""
-    debounce.stop()
+    // Guarded for the same reason `flushNow` is, and it was missed there:
+    // `Component.onDestruction` -> `flushNow()` -> `writeNow()` -> here, by
+    // which time this object's own children may already be gone.
+    if (debounce)
+      debounce.stop()
     console.warn("TurboTables FileStore: " + reason
                  + " -- this session will not write the save file again.")
     writeFailed(reason)
   }
 
-  // Somebody has decided the unreadable or unwritable file may be replaced.
-  // Nothing calls this on its own; it exists so a screen can offer the way out
-  // once one is built.
+  // Somebody has decided the unwritable file may be written to again. Called
+  // from the wiring when the Store's quarantine clears; it lifts the latch a
+  // failed write set and nothing else, which is right for a file that read
+  // perfectly and could not be written.
   function allowWritingAgain() {
+    _writable = true
+  }
+
+  // Somebody has decided the file this object is refusing to touch may be
+  // replaced -- through the Confirm dialog in ui/Settings.qml, which names what
+  // is lost before it asks. It is named for the case it exists for, a file that
+  // could not be *read*, and `ui/Store.qml` calls it for the write-side
+  // quarantine too, where it does no harm: that path has read the file, so
+  // refusals 1 and 2 were never standing and only `_writable` was.
+  //
+  // See "THE WAY OUT" in the header. This is the only thing in the plugin that
+  // can retire refusals 1, 2 and 4, it retires them for exactly one write, a
+  // read that comes back retires it unspent, and it is called only from
+  // `ui/Store.qml`'s `discardQuarantinedFile()`.
+  function replaceUnreadableFile() {
+    _replaceAuthorised = true
     _writable = true
   }
 

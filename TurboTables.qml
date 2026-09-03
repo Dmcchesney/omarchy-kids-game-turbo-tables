@@ -336,13 +336,20 @@ Item {
       // this is the only place both halves are visible, which is the same
       // reason the format decision below lives here.
       //
-      // What it does not do is write immediately: the Store's own flush runs
-      // before it says anything, so it is refused, and the file layer's
-      // pending payload was dropped when it stopped writing. The session
-      // starts saving again from the child's next change. And because the
-      // re-proof in `writeNow()` is now worn on every write over a path
-      // believed absent rather than once, that next write is guarded rather
-      // than taken on trust.
+      // This lifts the latch a failed *write* set, and that is all it lifts.
+      // It is deliberately not the whole way out of a quarantine and never
+      // was: a file that could not be *read* leaves `shell/FileStore.qml`
+      // refusing on `_everLoaded` and on an "unreadable" verdict, and neither
+      // of those is `_writable`. Clearing one of three refusals and reporting
+      // success is exactly what made a corrupt save file permanent. The other
+      // two are stood down by `replaceUnreadableFile()`, which
+      // `Store.discardQuarantinedFile()` calls directly on this object before
+      // it clears its own flag -- so by the time this handler runs the file
+      // layer has already been told, and this is the belt to that brace.
+      //
+      // The write itself is no longer deferred to the child's next change: the
+      // Store flushes on the transition and pushes it through the debounce, so
+      // what the screen says happened is what happened.
       var quarantined = (typeof Store.quarantined === "boolean") ? Store.quarantined : false
       if (root.storeQuarantined && !quarantined)
         saveFile.allowWritingAgain()
