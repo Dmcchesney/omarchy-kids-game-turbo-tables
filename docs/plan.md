@@ -139,9 +139,13 @@ Six low-poly rally cars, one model each, in `ui/parts/CarSprite.qml`, baked to `
 
 **Normals:** the v1 sprites' face winding produced inward normals, self-consistent for their cull and wrong-sided for any added light. `CarSprite` uses outward normals and a test that a face's normal points away from the model's centroid.
 
-**One renderer.** `CarSprite` replaces `KartSprite`, `TrackSprite` and `CountdownKart`. The garage turntable, the roster thumbnails, the countdown and the track all draw from the baked sheets; the live renderer runs only in the bake and in the harness.
+**One renderer, and it is Blender, offline.** The three v1 sprites — `KartSprite`, `TrackSprite`, `CountdownKart` — are deleted, and no QML draws a car live. The garage turntable, the roster thumbnails, the countdown and the track all draw from committed sheets. The sheets are baked by **Blender running headless from a `bpy` script**, `src/tools/bake-cars.py`, which *is* the model: every body is built from primitives with bevel modifiers, flat-shaded, lit by one warm sun from behind-right and a cool purple fill, and rendered on transparent film with EEVEE. **No `.blend` file exists anywhere** — the scene is generated from the script on every bake, so the model is text, reviewable, and passes the boundary check; a `.blend` is a binary and would fail it.
 
-**The bake.** `npm run sprites` renders each body at eight yaws and three scales on transparency through the harness, with paint regions written to a mask channel so one sheet serves all eight paints (a small `ShaderEffect` recolours at load; a magenta placeholder swapped at load is the acceptable fallback). Sheets are committed. `npm run check:sprites` rebuilds to a temp path and diffs byte for byte, so a model change cannot land without its sheets, exactly as `check:bundle` guards the engine.
+Why Blender and not the v1 Canvas rasteriser: chamfers that catch a rim, real cast shadows, contact occlusion and a consistent eight-angle turnaround are the four things every v1 critic said the kart lacked, and a renderer gives all four for free where a hand rasteriser made us pay for them line by line — 2,200 lines for one kart that still read as boxes. The first Blender coupe took three passes of a 150-line script (prototype evidence in the run's scratchpad: v1 boxes, v2 grounding and lamps, v3 the cabin as one form). Blender never ships and never runs on a child's machine; runtime is a blit.
+
+**The bake.** `npm run sprites` runs `blender -b --python src/tools/bake-cars.py -- --body <name> --paint <hex> --out assets/karts/` for each body, then `src/tools/pxart.py` (pure Python, no Pillow) applies the pixel grid, the paint-locked palette, ordered dither, despeckle, a one-pixel outline and a flat half-alpha contact shadow. Paint: one sheet per body per paint is acceptable at the sizes involved (budget below), and simpler than a mask channel; revisit if the budget is broken. Sheets are committed. **`npm run check:sprites`** verifies the committed sheets against a recorded SHA-256 manifest written by the bake, so a model change cannot land without its sheets; CI checks the manifest and does not rebake, because Blender lives only on the Mac. **Headless throughout:** `-b` never opens a window; nothing in the bake may.
+
+**Never drive Blender's GUI by computer use.** It is non-reproducible, slow, and opens windows on the maintainer's screen; `bpy` is a Python API and needs no clicking.
 
 **Gate:** an 8-angle turnaround of body 1 beside the crop; the six bodies as one contact sheet, each judged individually; the four cars from behind on the road; the car on the turntable; one car in all eight paints. A blind critic picks ours against the crop on the three criteria above, confirms paint fidelity (each paint measured against its swatch), confirms the same car appears on all three screens, and confirms the bake reproduces.
 
@@ -159,8 +163,8 @@ As v1, with these changes: `SunsetSky.qml` is a shared part used by `TrackView`,
 
 | Script | Does |
 | --- | --- |
-| `npm run sprites` | bakes `assets/karts/*.png` from `CarSprite` through the harness, headless |
-| `npm run check:sprites` | rebuilds the sheets to a temp path and diffs against the committed ones |
+| `npm run sprites` | bakes `assets/karts/*.png` with Blender headless (`blender -b --python src/tools/bake-cars.py`) and post-processes with `src/tools/pxart.py`; writes `assets/karts/manifest.json` of SHA-256s. Mac only — Blender is `brew install --cask blender` and never ships |
+| `npm run check:sprites` | verifies every committed sheet against the manifest; CI runs this and never rebakes |
 | `npm run check` | test, types, boundary, bundle, sprites, readme, scan — the whole gate |
 | `npm run harness -- --screen Race --shot out.png --exit` | a headless frame at exact size |
 
