@@ -15,10 +15,11 @@ Maintained by Don McChesney (`Dmcchesney`) as a games spoke of the
 | License | MIT |
 
 **Status: in development.** The overlay opens, takes the keyboard, and closes, and the rules engine
-behind it is written and covered by tests. The garage screen is written as a file under `ui/` and runs
-under the development harness; the overlay does not host it yet, so a parent who installs this today
-and clicks the kart button gets a placeholder panel and nothing else. The other screens in the design
-are not started, nothing is written to disk yet, and there is no sound yet. The settled design and the
+behind it is written and covered by tests. The overlay hosts the garage screen: a parent who installs this today and
+clicks the kart button gets the real garage, and the kart, paint, number and
+race settings they change there are written to one file and are still there
+next time. The other screens in the design are not wired into the overlay
+yet, and there is no sound yet. The settled design and the
 build plan are in
 [docs/design.md](docs/design.md) and [docs/plan.md](docs/plan.md).
 
@@ -105,9 +106,8 @@ because the removal deletes the plugin folder and this checkout is the working t
 throwaway clone is a task for M7, before submission. Nothing in this repository verifies any of it:
 `npm run check:readme` checks the shape of these commands, never their behaviour.
 
-Nothing else needs cleaning up today, because the game writes no files at all yet. When records and
-settings land they will live in one file the game owns, and deleting that file will be all that is
-left to do:
+The garage writes one file it owns, and deleting it is all that is left to do. It holds the settings
+and records described under Permissions and privacy, and nothing else:
 
 ```sh
 rm ~/.local/share/turbo-tables-solo/garage.json
@@ -126,13 +126,14 @@ Turbo Tables:
 - needs no sudo or pkexec
 - collects nothing about a child
 - has no name field, no free-text entry anywhere, and stores no dates
-- reads and writes no files at all today; when the save file lands it will read and write exactly one
-  file it owns, `garage.json` in its own data directory, and will touch no other configuration
+- reads and writes exactly one file it owns, `garage.json` under
+  `${XDG_DATA_HOME:-~/.local/share}/turbo-tables-solo/`, and touches no other
+  configuration
 
-What that one file will hold: chosen kart body, paint and number; sound,
-reduced-motion, scanline and timer settings; the rival level; best times and ghost timelines per
-preset; and one correct-answer count per multiplication fact. Nothing that identifies anybody,
-nothing that leaves the machine.
+What that one file holds: chosen kart body, paint and number; the stored preferences for reduced
+motion, scanlines and the timer, plus a `sound` key that nothing reads yet; the rival level; best
+times and ghost timelines per preset; and one correct-answer count per multiplication fact. Nothing
+that identifies anybody, nothing that leaves the machine.
 
 Omarchy loads plugin code into the child's session with no sandbox, so any plugin can do whatever the
 logged-in user can. That is exactly why this one has no network code and no process calls to audit:

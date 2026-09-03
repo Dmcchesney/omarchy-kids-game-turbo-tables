@@ -654,7 +654,15 @@ const ROWS: Row[] = [
   },
   {
     name: "audio",
-    subject: /multimedia|soundeffect|mediaplayer|\baudio\b|\bsound\b|\bmusic\b|\bvolume\b|silent stub/i,
+    // `sound` names a save-file key as well as a capability, and the design's
+    // Data table lists it among the settings. A sentence enumerating what the
+    // save file holds is not a claim that anything plays, so the key form --
+    // backticked, or written as "sound setting"/"sound key"/"sound preference"
+    // -- is excluded here rather than by contorting the README around the
+    // gate. Every word that describes audio *behaving* still fires, and the
+    // probe for that is in the evidence: "The game plays a sound on every
+    // correct answer." fails the build.
+    subject: /multimedia|soundeffect|mediaplayer|\baudio\b|(?<!`)\bsound\b(?!`|\s+(?:setting|key|preference))|\bmusic\b|\bvolume\b|silent stub/i,
     tokens: ["SoundEffect", "MediaPlayer", "AudioOutput", "QtMultimedia", "Multimedia"],
     what: "audio component",
     missing:
