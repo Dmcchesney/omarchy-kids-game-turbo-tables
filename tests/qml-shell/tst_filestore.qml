@@ -622,6 +622,41 @@ Item {
       compare(suite.wroteCount, 1)
     }
 
+    // The other half of the look. When a read DID come back -- the file loaded
+    // perfectly and could not be *written* to, or `ui/Store.qml` refused its
+    // contents -- the question is refusal 4's, unchanged, and the authorisation
+    // does not stand it down either. This is the parent who hand-restores a
+    // good save while the child is logged in and then presses the button.
+    function test_34_an_authorised_write_over_known_bytes_still_obeys_refusal_four() {
+      suite.withASaveOnDisk()
+      var store = suite.aStore()
+      compare(store.load(), suite.aSave)
+
+      FakeFs.file(root.savePath, suite.anotherSave)         // the restore
+      store.replaceUnreadableFile()
+      store.save("{\"this\": \"session\"}\n")
+      store.flushNow()
+
+      compare(FakeFs.textAt(root.savePath), suite.anotherSave,
+              "an authorised write replaced a restore this session never read")
+      compare(suite.wroteCount, 0)
+      compare(suite.refusals.length, 1, "the refusal was silent")
+      verify(suite.refusals[0].indexOf("changed on disk") >= 0, suite.refusals[0])
+
+      // And the same file, unchanged, is replaced -- which is the corrupt but
+      // readable `garage.json` the button is also for.
+      var store2 = storeComponent.createObject(root, { "path": root.savePath })
+      store2.writeFailed.connect(function (reason) { suite.refusals.push(reason) })
+      compare(store2.load(), suite.anotherSave)
+      store2.replaceUnreadableFile()
+      store2.save(suite.aSave)
+      store2.flushNow()
+      compare(FakeFs.textAt(root.savePath), suite.aSave,
+              "a readable file whose contents were rejected could not be replaced")
+      compare(suite.refusals.length, 1, JSON.stringify(suite.refusals))
+      store2.destroy()
+    }
+
     // ===================================================================
     // 7. ONE ACT, NOT ONE LANDED WRITE
     // ===================================================================
@@ -687,6 +722,27 @@ Item {
       compare(store.replaceAuthorised, true)
       store.allowWritingAgain()
       compare(store.replaceAuthorised, false)
+    }
+
+    // A refusal ends the act even when it happens before a write is attempted.
+    // The blank-payload refusal fires inside `save()`, so the consume at the
+    // top of `writeNow` never runs and `stopWriting` is the only thing that can
+    // end it. Without this the authorisation sits there after a refusal nobody
+    // connected to it, waiting for the next write.
+    function test_35_a_refusal_before_any_write_still_ends_the_act() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.savePath, { "readable": false })
+      var store = suite.aStore()
+      try { store.load() } catch (error) { /* expected */ }
+
+      store.replaceUnreadableFile()
+      compare(store.replaceAuthorised, true)
+      store.save("   \n")                       // refusal 3, before any write
+
+      compare(suite.refusals.length, 1, "the blank payload was not refused")
+      compare(store.replaceAuthorised, false,
+              "a refusal left the decision a person made standing")
+      compare(FakeFs.textAt(root.savePath), suite.aSave)
     }
 
     // ===================================================================

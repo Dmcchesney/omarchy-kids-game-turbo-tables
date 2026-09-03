@@ -1838,6 +1838,39 @@ Item {
       verify(Store.quarantined, "a backend that threw out of quarantine() lost the quarantine")
       compare(Store.setSetting("kartBody", 3), false, "the session kept writing")
     }
+
+    // The third line in the same class: a file layer that throws out of
+    // `replaceUnreadableFile()`. No fixture threw there, which is exactly why
+    // nothing was watching what happens to the quarantine this function has
+    // already cleared by the time it asks. It must go back on, and the banner
+    // must say so.
+    function test_61_a_way_out_whose_file_layer_throws_reports_that_it_did_nothing() {
+      var thrower = { "format": "text" }
+      thrower.load = function () { throw new Error("EACCES") }
+      thrower.save = function (t) { disk.blob = t; disk.writes += 1 }
+      thrower.replaceUnreadableFile = function () { throw new Error("no") }
+
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineIssues = []
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      Store.backend = thrower
+      verify(Store.quarantined)
+      disk.writes = 0
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED",
+              "the screen claimed a new save file the file layer refused to authorise")
+      verify(Store.quarantined, "the quarantine was left cleared over a file layer that threw")
+      verify(Store.quarantineReason.indexOf("could not be replaced") >= 0,
+             Store.quarantineReason)
+      compare(disk.writes, 0)
+    }
   }
 
   // ------------------------------------------------------------- the probes
