@@ -18,7 +18,42 @@ import "../../engine/engine.mjs" as Engine
 // in the middle of a measurement). Every keystroke of the CHILD's is real.
 //
 // Run it:
-//   qmltestrunner -import dev/imports -input tests/qml
+//   QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+//     qmltestrunner -platform offscreen -import dev/imports -input tests/qml
+//
+// ---------------------------------------------------------------------------
+// RUN THIS HEADLESS, AND WHY THAT IS NOT A PREFERENCE
+// ---------------------------------------------------------------------------
+//
+// This spec was reported flaky -- "3 failures in 20 runs alone at HEAD on a
+// clean tree", across five different case names -- and worse, it was scoring
+// other people's mutation runs: three `ui/Store.qml` mutations came back KILLED
+// partly by cases in this file, which contains the string `Store` zero times.
+//
+// It is not flaky. It is a spec made entirely of real key events, and a real
+// key event needs a window that holds the keyboard. Measured, four concurrent
+// `qmltestrunner` processes, same tree, same HEAD, one variable:
+//
+//   windowed (cocoa)          65 of 100 runs failed, 17 different case names
+//   headless (-platform offscreen)   0 of 100 runs failed
+//   one process at a time, either platform   0 of 60 runs failed
+//
+// macOS gives keyboard activation to one window at a time. A second Qt window
+// anywhere on the machine -- another spec, another agent's harness, anything --
+// deactivates this one, every item's `activeFocus` goes false, and `keyClick()`
+// after that is delivered nowhere. The engine sees no input, so `dealHand()`
+// reports "a hand of three is held: 0", `streakTo()` reports "the streak is
+// where the case wants it", `hintUntil()` reports "reached a fact whose answer
+// fits the shape" -- three sentences about the child's keyboard, none of them
+// true, and which case says them depends on when the other window appeared.
+// That is the whole of the flake, and it is in the runner, not in the
+// arbitration and not in `ui/Race.qml`.
+//
+// Two things follow, and both are in this file. Every key goes through
+// `pressKey()`, which checks the precondition on every press and says exactly
+// this when it is gone rather than letting a lost keystroke be read as a
+// verdict. And the run line above is headless, which is the repository's rule
+// for every Qt process on this Mac anyway.
 //
 // The two rules every row below is judged against:
 //
@@ -60,15 +95,33 @@ Item {
     // ------------------------------------------------------------- pressing
     function digitKey(d) { return Qt.Key_0 + d }
 
+    // Every key in this file goes through here, and every key is checked
+    // against the one precondition the whole spec rests on: the race screen's
+    // key catcher still has active focus. See "RUN THIS HEADLESS" in the header
+    // -- when it does not, `keyClick` is delivered nowhere, the engine sees no
+    // input at all, and the assertion that fails is a row about the child's
+    // keyboard rather than the truth, which is that the keystroke never
+    // arrived. Sixty-five runs in a hundred failed that way, spread over
+    // seventeen different case names, and every one of them read as a verdict
+    // about the arbitration.
+    function pressKey(code) {
+      verify(race.focusTarget.activeFocus,
+             "the race screen's key catcher lost active focus mid-case, so this keystroke"
+             + " was delivered nowhere. Nothing below this line is a statement about the"
+             + " arbitration. Run this spec headless (-platform offscreen): a windowed run"
+             + " shares keyboard activation with every other window on the machine.")
+      keyClick(code)
+    }
+
     // "12EBXH" -> the digits 1 and 2, Enter, Backspace, Escape, H.
     function press(script) {
       for (var i = 0; i < script.length; i++) {
         var c = script.charAt(i)
-        if (c === "E") keyClick(Qt.Key_Return)
-        else if (c === "B") keyClick(Qt.Key_Backspace)
-        else if (c === "X") keyClick(Qt.Key_Escape)
-        else if (c === "H") keyClick(Qt.Key_H)
-        else keyClick(tc.digitKey(Number(c)))
+        if (c === "E") tc.pressKey(Qt.Key_Return)
+        else if (c === "B") tc.pressKey(Qt.Key_Backspace)
+        else if (c === "X") tc.pressKey(Qt.Key_Escape)
+        else if (c === "H") tc.pressKey(Qt.Key_H)
+        else tc.pressKey(tc.digitKey(Number(c)))
       }
     }
 
@@ -107,7 +160,7 @@ Item {
     function hintUntil(wanted) {
       var guard = 0
       while (guard < 200 && !wanted(tc.answerString())) {
-        keyClick(Qt.Key_H)
+        tc.pressKey(Qt.Key_H)
         guard += 1
       }
       verify(wanted(tc.answerString()), "reached a fact whose answer fits the shape")
@@ -576,5 +629,61 @@ Item {
       }
       console.log("A11Y NAMES ON THE RACE SCREEN: " + JSON.stringify(names))
     }
+
+    // The failure mode `pressKey()` exists for, and the reason every other row
+    // in this file can be trusted.
+    //
+    // It is reproduced by taking the focus away, not by opening a second window
+    // -- the state is "the key catcher does not have active focus", and a test
+    // can put the tree in that state directly. Reproducing the state beats
+    // reproducing the race, and this repository does not open windows.
+    //
+    // Both halves matter. If the precondition can never go false the guard is
+    // dead wood; if a keystroke with the focus elsewhere still reached the
+    // engine there would have been nothing to guard. Measured windowed, before
+    // the guard: 65 runs in 100 failed this way, in seventeen different case
+    // names, every one of them phrased as a verdict about the child's keyboard.
+    function test_20_a_keystroke_with_the_focus_elsewhere_reaches_nothing() {
+      tc.fresh(122)
+      var before = tc.snap()
+
+      focusThief.forceActiveFocus()
+      compare(race.focusTarget.activeFocus, false,
+              "the precondition pressKey() checks cannot go false, so the guard is dead wood")
+
+      // Deliberately raw: this is the press `pressKey()` now refuses to make.
+      keyClick(tc.digitKey(Number(before.answer.charAt(0))))
+      var after = tc.snap()
+      compare(after.attempts, before.attempts, "a key with the focus elsewhere was scored")
+      compare(after.streak, before.streak, "a key with the focus elsewhere moved the streak")
+      compare(after.entry, before.entry, "a key with the focus elsewhere reached the field")
+
+      race.forceActiveFocus()
+      verify(race.focusTarget.activeFocus, "the case did not give the focus back")
+    }
+
+    // And the guard itself, in the same state. `expectFail` turns the refusal
+    // above into the expected outcome, so a `pressKey()` that stopped checking
+    // would be reported as a test that unexpectedly passed. Without this the
+    // guard is a line nothing is watching -- which is exactly the standard this
+    // round applied to two guards in `shell/FileStore.qml`.
+    function test_21_press_key_refuses_a_press_the_screen_cannot_receive() {
+      tc.fresh(123)
+      focusThief.forceActiveFocus()
+      expectFail("", "pressKey() made a press the race screen could not receive")
+      tc.pressKey(Qt.Key_1)
+    }
+
+    function cleanup() {
+      // Whatever a case did with the focus, the next one starts from the race.
+      race.forceActiveFocus()
+    }
+  }
+
+  // Somewhere for the focus to go that is not the race screen. See test_20.
+  Item {
+    id: focusThief
+    width: 1
+    height: 1
   }
 }

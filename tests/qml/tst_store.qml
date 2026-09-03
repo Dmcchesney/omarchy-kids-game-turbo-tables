@@ -199,8 +199,13 @@ Item {
     //   3. blank payload                nothing empty, ever
     //   4. `_checkedTheBytesStillMatch` nothing over bytes it does not know
     //
-    //   `replaceUnreadableFile()`  stands 1, 2 and 4 down for exactly one write
-    //   `allowWritingAgain()`      lifts only the latch a failed write set
+    //   `replaceUnreadableFile()`  stands 1 and 2 down for exactly one act. It
+    //                              does not stand 4 down, and where 4 cannot
+    //                              apply -- no read ever came back -- the write
+    //                              takes the look that stands in its place:
+    //                              the file must still be unreadable.
+    //   `allowWritingAgain()`      lifts the latch a failed write set, and ends
+    //                              any authorisation standing at the time
     //   `flushNow()`               writes what the debounce is holding, now
     //
     // A failed write is reported the way the real one is -- by telling the
@@ -235,6 +240,8 @@ Item {
         b.writable = false
         b.hasPending = false
         b.pending = ""
+        // A refusal ends the act the authorisation was for.
+        b.replaceAuthorised = false
         b.refusals.push(reason)
         // How TurboTables.qml connects `writeFailed`. Not a throw: the Store's
         // `try` around `save()` never sees a signal.
@@ -245,6 +252,7 @@ Item {
         if (!realDisk.exists) {
           b.verdict = "absent"
           b.everLoaded = true
+          b.replaceAuthorised = false    // a read that came back, either way
           return null                    // absence, modelled as proved
         }
         if (!realDisk.readable) {
@@ -255,6 +263,7 @@ Item {
         b.everLoaded = true
         b.lastKnownText = realDisk.blob
         b.lastKnownTextIsKnown = true
+        b.replaceAuthorised = false      // a read that came back, either way
         return b.format === "text" ? realDisk.blob : JSON.parse(realDisk.blob)
       }
 
@@ -297,9 +306,14 @@ Item {
         b.hasPending = false
         b.pending = ""
 
+        // The authorisation is spent by the attempt, not by the landing.
+        var authorised = b.replaceAuthorised
+        b.replaceAuthorised = false
+
         // 4. The bytes about to be replaced have to be the bytes this session
-        //    is holding a newer version of.
-        if (!b.replaceAuthorised && b.lastKnownTextIsKnown) {
+        //    is holding a newer version of. An authorised replacement takes a
+        //    different look, not none: `_authorisedReplacementStillApplies`.
+        if (b.lastKnownTextIsKnown) {
           if (realDisk.exists && realDisk.readable) {
             if (realDisk.blob !== b.lastKnownText) {
               b.stopWriting("the save file changed on disk after this session read it")
@@ -310,6 +324,14 @@ Item {
             return
           }
           // Not there at all: proved absent, so there is nothing to destroy.
+        } else if (authorised && realDisk.exists && realDisk.readable) {
+          // No read ever came back, which is the premise the family was shown.
+          // The disk says otherwise now, so there is a save file on that path.
+          b.stopWriting("the save file could not be read when the game started and can be"
+                        + " read now, so it is a save file rather than the wreck this session"
+                        + " was told about. Refusing to write over it -- close the game and"
+                        + " open it again to get the garage back")
+          return
         }
 
         if (!realDisk.writable) {
@@ -322,13 +344,16 @@ Item {
         realDisk.writes += 1
         b.lastKnownText = text
         b.lastKnownTextIsKnown = true
-        if (b.replaceAuthorised) {
-          b.replaceAuthorised = false
+        if (authorised)
           b.replacedTheFile = true
-        }
       }
 
-      b.allowWritingAgain = function () { b.writable = true }
+      b.allowWritingAgain = function () {
+        b.writable = true
+        // And it ends any authorisation standing at the time. See
+        // `Store.discardQuarantinedFile`: the grant comes after the transition.
+        b.replaceAuthorised = false
+      }
 
       b.replaceUnreadableFile = function () {
         b.replaceAuthorised = true
@@ -1538,6 +1563,280 @@ Item {
       compare(realDisk.blob, before, "the file moved")
       compare(realDisk.writes, 0)
       verify(Store.quarantined)
+    }
+
+    // =====================================================================
+    // 8. THE WAY OUT LOOKS AT THE FILE IT REPLACES
+    //
+    // Round 5 of the seam audit. Everything in section 7 is about a write the
+    // session decided to make; this is about the one write a *person* decided
+    // to make, which was for one round the only write in the plugin that put a
+    // byte on disk having taken no look at all.
+    // =====================================================================
+
+    // The destruction case, through the screen's own path. The file could not
+    // be read when the shell started -- so the strip a parent reads says the
+    // save file cannot be read, and the dialog says every best time in it goes
+    // -- and it can be read by the time they press. Measured before the fix:
+    // defaults written over a real save holding records and a fact history,
+    // zero refusals.
+    function test_52_the_way_out_refuses_a_file_that_can_be_read_again() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false                  // chmod 000 when the shell starts
+      suite.freshFileStore()
+      verify(Store.quarantined, "an unreadable file did not quarantine")
+      compare(Store.quarantineKind, "read")
+      var theirs = realDisk.blob
+      var theirFile = Engine.parseSave(theirs)
+      verify(theirFile.ok && Object.keys(theirFile.file.records).length > 0
+             && theirFile.file.facts.length > 0, "the fixture is not a real save")
+
+      // The permission is fixed, or the home directory unlocks, or the mount
+      // comes back -- all three of which resolve on their own. Nothing in the
+      // session looks again, and the strip still says the file cannot be read.
+      realDisk.readable = true
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(realDisk.blob, theirs, "the child's save was replaced with defaults")
+      compare(realDisk.writes, 0, "the way out wrote over a readable save")
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED",
+              "the screen claimed a new save file over a file it did not touch")
+      verify(Store.quarantined, "the refusal was silent")
+      verify(Store.quarantineReason.indexOf("can be read now") >= 0, Store.quarantineReason)
+      // And it names the action that recovers everything, which is the one the
+      // screen never mentions on its own.
+      verify(Store.quarantineReason.indexOf("close the game and open it again") >= 0,
+             Store.quarantineReason)
+    }
+
+    // The other side of the same rule, so the refusal above is not just "the
+    // way out never works": a file that is still unreadable at the moment of
+    // the write is replaced, which is what the button is for. `test_41` covers
+    // the happy path; this one says the new look is what decides between them.
+    function test_53_the_way_out_still_replaces_a_file_that_is_still_unreadable() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      suite.freshFileStore()
+      verify(Store.quarantined)
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(Store.quarantined, false, "the session is still locked after the way out")
+      compare(realDisk.writes, 1, "the way out wrote nothing")
+      compare(settingsProbe.bannerText, "A NEW SAVE FILE HAS BEEN STARTED")
+    }
+
+    // The write-side way out keeps refusal 4 rather than the look above: the
+    // file read perfectly, so the question is whether it is still the file this
+    // session read. A parent who hand-restores a good save while the child is
+    // logged in used to lose it to a second press of the button.
+    function test_54_the_write_side_way_out_will_not_overwrite_a_restored_save() {
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+      verify(Store.loaded && !Store.quarantined, "the file did not load")
+
+      realDisk.writable = false                  // the disk fills up
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      verify(Store.quarantined && Store.quarantineKind === "write")
+
+      // The grown-up frees the disk and puts a good save back by hand.
+      var restored = suite.victimFile()
+      restored.facts[0].attempts += 9
+      restored.facts[0].correct += 9
+      var restoredText = Engine.serialiseSave(restored)
+      verify(restoredText !== realDisk.blob, "the fixture did not change the file")
+      realDisk.blob = restoredText
+      realDisk.writable = true
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(realDisk.blob, restoredText, "the way out overwrote the restore unread")
+      compare(realDisk.writes, 0)
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED")
+      verify(Store.quarantineReason.indexOf("changed on disk") >= 0, Store.quarantineReason)
+    }
+
+    // The authorisation is one act, and this is every way an act can end.
+    // Measured before the fix: it survived a failed write for the life of the
+    // object, and `allowWritingAgain()` plus an ordinary keystroke then spent
+    // it on a parent's restored save.
+    function test_55_an_authorisation_does_not_outlive_the_act_it_was_for() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      realDisk.writable = false                  // and it cannot be written either
+      var back = suite.freshFileStore()
+      verify(Store.quarantined)
+      var theirs = realDisk.blob
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+      compare(realDisk.writes, 0, "a write that could not land reported that it did")
+      compare(back.replaceAuthorised, false,
+              "a failed write left the decision a person made lying around")
+
+      // The way the stale authorisation used to be spent: the latch is lifted
+      // and the child presses a key. Nothing here went through the dialog.
+      realDisk.writable = true
+      back.allowWritingAgain()
+      compare(back.replaceAuthorised, false,
+              "lifting the write latch left an authorisation standing")
+      back.writable = true
+      Store.quarantined = false
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      compare(realDisk.blob, theirs, "an ordinary keystroke rode a stale authorisation")
+      compare(realDisk.writes, 0)
+    }
+
+    // The three other ends of the act, at the backend, so each has a name.
+    function test_56_every_retirement_path_ends_the_authorisation() {
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+
+      back.replaceUnreadableFile()
+      compare(back.replaceAuthorised, true, "the authorisation was not recorded")
+      back.load()                                 // a read that comes back "present"
+      compare(back.replaceAuthorised, false, "a present read did not end it")
+
+      back.replaceUnreadableFile()
+      realDisk.exists = false                     // a read that comes back "absent"
+      back.load()
+      compare(back.replaceAuthorised, false, "a proved absence did not end it")
+
+      back.replaceUnreadableFile()
+      back.stopWriting("a refusal of any kind")
+      compare(back.replaceAuthorised, false, "a refusal did not end it")
+    }
+
+    // The ordering the way out depends on, which is not tidiness. The wiring in
+    // TurboTables.qml calls `allowWritingAgain()` on the quarantine-clear
+    // transition, and that ends any authorisation standing at the time -- so
+    // the grant has to come after the transition and immediately before the
+    // write it authorises. Granted before it, the way out is inert again.
+    function test_57_the_authorisation_is_granted_after_the_transition() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      var back = suite.freshFileStore()
+      verify(Store.quarantined)
+
+      // Exactly what `TurboTables.qml` does with `Store.changed()`.
+      var wasQuarantined = true
+      function onChanged() {
+        var now = Store.quarantined
+        if (wasQuarantined && !now)
+          back.allowWritingAgain()
+        wasQuarantined = now
+      }
+      Store.changed.connect(onChanged)
+      try {
+        compare(Store.discardQuarantinedFile(), true,
+                "the transition ate the authorisation the write needed")
+        compare(realDisk.writes, 1, "the way out wrote nothing with the wiring attached")
+      } finally {
+        Store.changed.disconnect(onChanged)
+      }
+    }
+
+    // The sentence a parent decides on. Measured: the write-side way out kept
+    // 1 record and 48 facts -- which is what `test_46` asserts -- while this
+    // screen told them every best time and every fact in it goes. The likely
+    // answer to that sentence is KEEP, and a family locked for nothing.
+    function test_58_the_confirm_dialog_says_what_each_way_out_actually_does() {
+      settingsProbe.pending = "discard"
+
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+      realDisk.writable = false
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      compare(Store.quarantineKind, "write")
+      var writeSide = settingsProbe.askDetail
+      verify(writeSide.indexOf("Nothing you have done today is lost") >= 0, writeSide)
+      verify(writeSide.indexOf("every best time and every fact in it goes") < 0,
+             "the write-side dialog still says everything goes: " + writeSide)
+      verify(writeSide.indexOf("could not be written to") >= 0, writeSide)
+
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      suite.freshFileStore()
+      compare(Store.quarantineKind, "read")
+      var readSide = settingsProbe.askDetail
+      verify(readSide.indexOf("every best time and every fact in it goes") >= 0, readSide)
+      verify(readSide.indexOf("Nothing you have done today is lost") < 0, readSide)
+
+      settingsProbe.pending = ""
+    }
+
+    // =====================================================================
+    // 9. TWO LINES THAT WERE CALLED UNOBSERVABLE, AND WERE ONLY UNOBSERVED
+    //
+    // Both were reported as mutation survivors with the argument "no path
+    // through the product reaches them". The argument is correct and it is not
+    // the standard this file already holds itself to: the note on
+    // `completeIfNothingHasAnswered()` says a lock nothing can reach is a lock
+    // nobody is checking, and acts on it by making the lock reachable. These
+    // two were left as arguments instead. They are one test each.
+    // =====================================================================
+
+    // `reasonOf`'s empty-issues fallback. Every producer in `save.ts` guarantees
+    // a false `ok` carries at least one issue, and all eleven call sites pass a
+    // literal -- so it is unreachable through the product, and it is the
+    // sentence a parent reads off the strip if any of that ever stops being
+    // true. `quarantine(null, [])` is a call a test can make.
+    function test_59_a_quarantine_with_no_issues_still_says_something() {
+      suite.freshStore()
+      verify(Store.loaded && !Store.quarantined)
+      Store.quarantine(null, [])
+      verify(Store.quarantined)
+      compare(Store.quarantineReason, "the save file could not be read",
+              "a quarantine with no issue to name said nothing at all")
+      compare(Store.quarantineKind, "read")
+    }
+
+    // The advisory `backend.quarantine(payload)` call. No backend in the
+    // repository offers the method -- which is the whole reason nothing was
+    // watching whether the Store still makes the call, or whether it survives
+    // one that throws. A spy is one object.
+    function test_60_a_backend_that_offers_quarantine_is_told_and_may_throw() {
+      var told = []
+      var spy = { "format": "text" }
+      spy.load = function () { throw new Error("EACCES") }
+      spy.save = function (t) { disk.blob = t }
+      spy.quarantine = function (payload) { told.push(payload) }
+
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineIssues = []
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      Store.backend = spy
+      verify(Store.quarantined, "an unreadable file did not quarantine")
+      compare(told.length, 1, "a backend that offers quarantine() was not told")
+
+      // And it is advisory: a backend that throws out of it must not take the
+      // quarantine, or the session, down with it.
+      var thrower = { "format": "text" }
+      thrower.load = function () { throw new Error("EACCES") }
+      thrower.save = function (t) { disk.blob = t }
+      thrower.quarantine = function () { throw new Error("the copy-aside failed") }
+
+      Store.loaded = false
+      Store.quarantined = false
+      Store.quarantineIssues = []
+      Store.quarantineReason = ""
+      Store.quarantineKind = ""
+      Store._backendHasAnswered = false
+      Store._adoptedFormat = ""
+      Store.backend = thrower
+      verify(Store.quarantined, "a backend that threw out of quarantine() lost the quarantine")
+      compare(Store.setSetting("kartBody", 3), false, "the session kept writing")
     }
   }
 

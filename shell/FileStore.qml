@@ -190,9 +190,33 @@ import Quickshell.Io
 // `replaceUnreadableFile()` is the counterpart that was missing. It is the
 // file layer's own record of a decision a person made -- the Confirm dialog in
 // ui/Settings.qml, which names what is lost before it asks -- and it authorises
-// exactly one overwrite: refusals 1, 2 and 4 stand aside for it, and once the
-// write has landed this object owns the file and the ordinary rules apply again
-// to the bytes it just put there. Nothing calls it except that decision.
+// exactly one act: refusals 1 and 2 stand aside for it, and once the write has
+// landed this object owns the file and the ordinary rules apply again to the
+// bytes it just put there. Nothing calls it except that decision.
+//
+// It authorises no more than that, and both halves of that sentence were wrong
+// for a round:
+//
+//   * It never stood refusal 4, or the absence re-proof, down. An authorised
+//     write was the only write in this file that put a byte on disk having
+//     taken no look at all, and the two saves that cost were the two cases the
+//     rest of this file exists for -- a chmod 000 save readable again by the
+//     time the family reached the button, a shut home unlocked -- with the
+//     screen still saying the file could not be read.
+//     `_authorisedReplacementStillApplies()` is that look, and it is taken at
+//     the moment of the write rather than inherited from the read that made
+//     the family press.
+//   * It is one *act*, not one landed write. It is spent by the attempt, and
+//     cleared by anything that ends the act: a refusal (`stopWriting`), a read
+//     that comes back either way (present or a proved absence),
+//     `allowWritingAgain()`, and a new path.
+//
+// One exception it does keep, and it is written here because it is a permanent
+// one: `_replacedTheFile`. After an authorised write lands, refusals 1 and 2
+// are off for the life of the object, while `_everLoaded` is still false and
+// `_verdict` is still "unreadable" -- because no read has happened and this
+// file will not pretend one has. Refusal 4 carries that session on its own,
+// over bytes this object wrote and therefore knows first-hand.
 QtObject {
   id: fileStore
 
@@ -537,6 +561,13 @@ QtObject {
       }
       _absenceProven = true
       _everLoaded = true
+      // This is a read that came back, and it retires an authorisation exactly
+      // like the one above does. It used not to, and that made the invariant
+      // this file states -- "retired unspent by a read that comes back" --
+      // false for the one branch where it mattered most: a standing
+      // authorisation then skipped the absence re-proof below and wrote over a
+      // file that had appeared since.
+      _readSupersedesAnyAuthorisation()
       return null
     }
 
@@ -672,10 +703,21 @@ QtObject {
     // write unguarded. `_wroteTheFile` is set below, by a write that did not
     // fail, which is the condition the reasoning actually wanted.
     //
-    // A write a person explicitly authorised skips both looks. They were shown
-    // what is lost and said yes to it; re-deriving a refusal from the state
-    // that made them press the button would be the same dead end again.
-    if (!_replaceAuthorised) {
+    // A write a person explicitly authorised takes a different look, not none.
+    // It used to take none at all, and it was the only write in this file that
+    // put a byte on disk having looked at nothing: see
+    // `_authorisedReplacementStillApplies()` for the two saves that cost.
+    var authorised = _replaceAuthorised
+    if (authorised) {
+      // Spent by the attempt, not by the landing. A write that failed has used
+      // up the decision a person made; the next write is one nobody asked for,
+      // and it used to inherit this. Set `_replacedTheFile` below only if the
+      // write actually lands, because that flag records a fact about the disk
+      // rather than a permission.
+      _replaceAuthorised = false
+      if (!_authorisedReplacementStillApplies())
+        return
+    } else {
       if (_verdict === "absent" && !_wroteTheFile) {
         var second = _probe(path)
         if (second === -1) {
@@ -725,13 +767,63 @@ QtObject {
     // hand the session back to the ordinary rules instead of needing to be
     // re-authorised on every keystroke afterwards.
     _remember(text)
-    if (_replaceAuthorised) {
-      _replaceAuthorised = false
+    if (authorised)
       _replacedTheFile = true
-    }
 
     if (_saves > savesBefore)
       wrote()
+  }
+
+  // The look an authorised replacement takes, immediately before it lands.
+  //
+  // `replaceUnreadableFile()` may stand down refusals 1 and 2, because a person
+  // decided about exactly the thing those two refuse -- a file this session
+  // could not read. It may not stand down the question every other write in
+  // this file is asked, which is *what is on that path right now*. It used to,
+  // and both cases it lost are the two this whole file exists for, measured in
+  // the shipping wiring:
+  //
+  //   a chmod 000 save that becomes readable before the family reaches the
+  //   button -- defaults written over a record and 48 facts, no refusal;
+  //   a shut home that unlocks, with the strip still reading "was not found"
+  //   -- the same, and the premise on the screen was already false when it was
+  //   read.
+  //
+  // Both are conditions the header lists as the realistic triggers -- an
+  // fscrypt home not yet unlocked, a root-owned `~/.local/share`, a mount
+  // briefly away -- and all three resolve on their own, which is exactly what
+  // makes the gap between the read at shell start and the press the interesting
+  // one. The consent is real; the premise it was given had expired.
+  //
+  // So the question is put in the only two ways this state can answer it:
+  //
+  //   the bytes are known    a read did come back. That is the write-side way
+  //                          out (the file read perfectly and could not be
+  //                          *written* to) and the read-side quarantine over a
+  //                          file whose *contents* the Store rejected. Refusal
+  //                          4 unchanged: the file about to be replaced has to
+  //                          still be the file this session read.
+  //   the bytes are unknown  no read ever came back, which is the premise the
+  //                          family was shown. Ask the disk once more, here,
+  //                          now. If it reads back, there is a save sitting on
+  //                          that path and the screen was wrong: refuse, and
+  //                          name the action that recovers it. Still unreadable
+  //                          or still not found, the button does what it says.
+  //
+  // Cost: one `stat`, on a path that already builds probes.
+  function _authorisedReplacementStillApplies() {
+    if (_lastKnownTextIsKnown)
+      return _checkedTheBytesStillMatch()
+
+    var now = _probeRead(path)
+    if (now.outcome === -1) {
+      stopWriting("the save file at " + path + " could not be read when the game started"
+                  + " and can be read now, so it is a save file rather than the wreck this"
+                  + " session was told about. Refusing to write over it -- close the game"
+                  + " and open it again to get the garage back")
+      return false
+    }
+    return true
   }
 
   // Refusal 4. The file this object is about to replace has to still be the
@@ -776,6 +868,12 @@ QtObject {
     _writable = false
     _hasPending = false
     _pending = ""
+    // A refusal ends the act the authorisation was for. It used to survive one,
+    // unspent, for the life of the object: a write that failed left the
+    // decision a person made lying around, and the next write -- an ordinary
+    // keystroke, after `allowWritingAgain()` lifted this latch -- spent it on a
+    // file nobody had been asked about.
+    _replaceAuthorised = false
     // Guarded for the same reason `flushNow` is, and it was missed there:
     // `Component.onDestruction` -> `flushNow()` -> `writeNow()` -> here, by
     // which time this object's own children may already be gone.
@@ -790,8 +888,17 @@ QtObject {
   // from the wiring when the Store's quarantine clears; it lifts the latch a
   // failed write set and nothing else, which is right for a file that read
   // perfectly and could not be written.
+  // It also ends any authorisation that is standing. `TurboTables.qml` calls
+  // this on every quarantine-clear transition, which is a thing that happens
+  // for reasons of its own -- so an authorisation still standing when it runs
+  // is one that belongs to some earlier act, and the write that would spend it
+  // is a write nobody asked for. `ui/Store.qml`'s `discardQuarantinedFile()`
+  // therefore authorises *after* it raises the transition and immediately
+  // before the write it authorised: the granting and the spending are adjacent,
+  // which is what "one act" has to mean.
   function allowWritingAgain() {
     _writable = true
+    _replaceAuthorised = false
   }
 
   // Somebody has decided the file this object is refusing to touch may be

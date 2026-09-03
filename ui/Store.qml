@@ -818,7 +818,8 @@ QtObject {
   //      its own record of the decision a person just made and is the only
   //      thing that can stand its "before the file had been read" and "over an
   //      unreadable save file" refusals down.
-  //   2. `changed()` goes before `flush()`. The wiring in TurboTables.qml acts
+  //   2. `changed()` goes before `flush()`, and the authorisation goes between
+  //      them. The wiring in TurboTables.qml acts
   //      on the quarantine *clearing* -- that transition is how the file layer
   //      learns it may write again -- and a flush that ran first was refused,
   //      and the refusal dropped the payload it was carrying, so nothing was
@@ -835,22 +836,43 @@ QtObject {
     // quarantine stands. Saying so is the whole point of this round.
     if (!backend || typeof backend.save !== "function") return false
 
-    // 1. The file layer's own refusals, which are the ones that matter.
-    if (typeof backend.replaceUnreadableFile === "function") {
-      try {
-        backend.replaceUnreadableFile()
-      } catch (e) {
-        return false
-      }
-    }
-
     quarantined = false
     quarantineIssues = []
     quarantineReason = ""
     quarantineKind = ""
 
-    // 2. The transition first, then the write it re-armed.
+    // 1. The transition, which is how the wiring in TurboTables.qml learns the
+    //    file layer may write again. It has to come before the flush -- a flush
+    //    that ran first was refused, and the refusal dropped the payload it was
+    //    carrying, so nothing was ever written even when the second write would
+    //    have succeeded.
     changed()
+
+    // 2. The file layer's own refusals, which are the ones that matter, told
+    //    rather than merely asked. `replaceUnreadableFile()` is its record of
+    //    the decision a person just made and is the only thing that can stand
+    //    its "before the file had been read" and "over an unreadable save file"
+    //    refusals down.
+    //
+    //    It is granted HERE -- after the transition above, immediately before
+    //    the write below -- and the order is load-bearing rather than tidy. The
+    //    transition runs `allowWritingAgain()`, which ends any authorisation
+    //    standing at the time, because an authorisation still standing when a
+    //    quarantine clears belongs to some earlier act and the write that would
+    //    spend it is a write nobody asked for. Granting before the transition
+    //    put those two the wrong way round. One act means the granting and the
+    //    spending are adjacent, with nothing between them that could hand the
+    //    decision to a different write.
+    if (typeof backend.replaceUnreadableFile === "function") {
+      try {
+        backend.replaceUnreadableFile()
+      } catch (e) {
+        stopWriting([{ "path": "", "problem": "the save file could not be replaced: " + e }])
+        return false
+      }
+    }
+
+    // 3. The write it re-armed.
     flush()
 
     // Land it now rather than at the end of the file layer's debounce, so what
@@ -866,7 +888,11 @@ QtObject {
       }
     }
 
-    // 3. The truth. A refusal anywhere above has re-quarantined this store.
+    // 4. The truth. A refusal anywhere above has re-quarantined this store --
+    //    including the file layer's newest one, which is that the file it was
+    //    authorised to replace can be read again. That is not a failure of this
+    //    button; it is the one answer nobody had been asking for, and the strip
+    //    now carries it.
     return !quarantined
   }
 

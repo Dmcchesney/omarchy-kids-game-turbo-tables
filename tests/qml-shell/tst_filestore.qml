@@ -543,6 +543,208 @@ Item {
       compare(FakeFs.textAt(root.savePath), suite.aSave)
     }
 
+    // ===================================================================
+    // 6. THE LOOK AN AUTHORISED REPLACEMENT TAKES
+    //
+    // Round 5. The authorised write was the only write in the file that put a
+    // byte on disk having taken no look at all, and the two cases it lost are
+    // the two the whole file exists for: a condition that resolves on its own
+    // between the read at shell start and the moment the family presses.
+    // ===================================================================
+
+    // The chmod 000 save that becomes readable. The screen the family pressed
+    // on says the file cannot be read; by the time the write lands it can be,
+    // and a save is sitting there.
+    function test_26_an_authorised_write_refuses_a_file_that_reads_again() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.savePath, { "readable": false })
+      var store = suite.aStore()
+      try { store.load() } catch (error) { /* expected */ }
+      compare(store.verdict, "unreadable")
+
+      store.replaceUnreadableFile()
+      FakeFs.chmod(root.savePath, { "readable": true })     // the permission is fixed
+      store.save(suite.anotherSave)
+      store.flushNow()
+
+      compare(FakeFs.textAt(root.savePath), suite.aSave,
+              "an authorised write replaced a save it never looked at")
+      compare(suite.wroteCount, 0)
+      compare(store.writable, false)
+      compare(suite.refusals.length, 1, "the refusal was silent")
+      verify(suite.refusals[0].indexOf("can be read now") >= 0, suite.refusals[0])
+      verify(suite.refusals[0].indexOf("close the game and open it again") >= 0,
+             "the refusal does not name what recovers the garage: " + suite.refusals[0])
+      compare(store.replaceAuthorised, false, "the refused act left its authorisation behind")
+    }
+
+    // The same, through the other door the header names: a home directory that
+    // was shut when the shell started and has unlocked since. The verdict is
+    // "absent", the strip says the file was not found, and there is a real save
+    // behind it.
+    function test_27_an_authorised_write_refuses_a_save_behind_a_home_that_unlocked() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      var store = suite.aStore()
+      var threw = false
+      try { store.load() } catch (error) { threw = true }
+      verify(threw, "a shut directory was answered for")
+      compare(store.verdict, "absent")
+      compare(store.absenceProven, false)
+
+      store.replaceUnreadableFile()
+      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+      store.save(suite.anotherSave)
+      store.flushNow()
+
+      compare(FakeFs.textAt(root.savePath), suite.aSave,
+              "an authorised write replaced a save behind a directory that had unlocked")
+      compare(suite.wroteCount, 0)
+      compare(suite.refusals.length, 1, "the refusal was silent")
+      verify(suite.refusals[0].indexOf("can be read now") >= 0, suite.refusals[0])
+    }
+
+    // And the case the button exists for still works: still unreadable at the
+    // moment of the write, so there is nothing to lose by replacing it. Without
+    // this, "refuse everything" would pass the two rows above.
+    function test_28_an_authorised_write_still_replaces_a_file_that_stayed_shut() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.savePath, { "readable": false })
+      var store = suite.aStore()
+      try { store.load() } catch (error) { /* expected */ }
+
+      store.replaceUnreadableFile()
+      store.save(suite.anotherSave)
+      store.flushNow()
+
+      compare(FakeFs.textAt(root.savePath), suite.anotherSave, "the way out wrote nothing")
+      compare(suite.refusals.length, 0, JSON.stringify(suite.refusals))
+      compare(suite.wroteCount, 1)
+    }
+
+    // ===================================================================
+    // 7. ONE ACT, NOT ONE LANDED WRITE
+    // ===================================================================
+
+    // It used to be consumed only by a write that landed, so a write that
+    // failed left it standing for the life of the object.
+    function test_29_a_failed_write_spends_the_authorisation() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.savePath, { "readable": false, "writable": false })
+      var store = suite.aStore()
+      try { store.load() } catch (error) { /* expected */ }
+
+      store.replaceUnreadableFile()
+      store.save(suite.anotherSave)
+      store.flushNow()
+      compare(suite.wroteCount, 0, "the write landed, so this test proves nothing")
+      compare(store.replaceAuthorised, false,
+              "a write that failed left the decision a person made standing")
+
+      // Which is what used to let an ordinary keystroke spend it: the wiring
+      // lifts the write latch on the quarantine-clear transition, and the very
+      // next change would have gone past every refusal in the file.
+      FakeFs.chmod(root.savePath, { "writable": true })
+      store.allowWritingAgain()
+      store.save(suite.anotherSave)
+      store.flushNow()
+      compare(FakeFs.textAt(root.savePath), suite.aSave,
+              "an ordinary keystroke rode a stale authorisation over a save")
+      compare(store.writable, false)
+    }
+
+    // A read that comes back retires it, and a proved absence is a read that
+    // came back. That branch used to be the one that did not, and it is the one
+    // that mattered: an authorisation standing over an "absent" verdict skips
+    // the absence re-proof and writes over whatever has appeared since.
+    function test_30_a_proved_absence_retires_an_unspent_authorisation() {
+      FakeFs.dirs(root.dataDir)
+      var store = suite.aStore()
+      store.replaceUnreadableFile()
+      compare(store.load(), null)
+      compare(store.absenceProven, true)
+      compare(store.replaceAuthorised, false,
+              "a read that came back saying nothing is there left an authorisation standing")
+
+      // And now the file appears, exactly as it does when a directory unlocks.
+      FakeFs.file(root.savePath, suite.aSave)
+      store.save(suite.anotherSave)
+      store.flushNow()
+      compare(FakeFs.textAt(root.savePath), suite.aSave,
+              "a save that appeared was written over on a stale authorisation")
+      compare(store.writable, false)
+    }
+
+    // `allowWritingAgain()` lifts the latch a failed write set, and ends any
+    // authorisation standing at the time. `TurboTables.qml` calls it on every
+    // quarantine-clear transition, so an authorisation still standing when it
+    // runs belongs to an earlier act.
+    function test_31_lifting_the_write_latch_ends_any_standing_authorisation() {
+      suite.withASaveOnDisk()
+      var store = suite.aStore()
+      store.load()
+      store.replaceUnreadableFile()
+      compare(store.replaceAuthorised, true)
+      store.allowWritingAgain()
+      compare(store.replaceAuthorised, false)
+    }
+
+    // ===================================================================
+    // 8. THE TWO GUARDS NOTHING WAS CHECKING
+    //
+    // Both survived deletion against all 134 committed tests. They are the two
+    // the whole design rests on.
+    // ===================================================================
+
+    // Step 0 of `_absenceIsProven`: the proof re-reads the *path itself*, not
+    // only its ancestors. Without it, a not-found verdict taken while the home
+    // was locked, combined with a traversability proof taken after it unlocked,
+    // answers `null` -- "fresh install" -- for a real, readable save.
+    function test_32_a_proof_of_absence_re_reads_the_file_itself() {
+      suite.withASaveOnDisk()
+      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      var store = suite.aStore()
+      var threw = false
+      try { store.load() } catch (error) { threw = true }
+      verify(threw, "a shut directory was answered for")
+      compare(store.verdict, "absent")            // the verdict is sticky, and stale
+
+      // The home unlocks. The ancestors now prove out perfectly; only the
+      // re-read of the path itself stands between that and "fresh install".
+      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+
+      var answer = store.load()
+      compare(answer, suite.aSave,
+              "a readable save behind a directory that unlocked was answered for as absent")
+      compare(store.absenceProven, false, "absence was proven over a file that is there")
+      compare(store.verdict, "present")
+    }
+
+    // The same proof, worn inside refusal 4. The file was read, then it cannot
+    // be found -- which a directory shutting answers exactly like a deletion.
+    // Proved gone, the write may go ahead; unproved, this session no longer
+    // knows what is on disk, and the reason it gives has to say which.
+    function test_33_refusal_four_proves_an_absence_before_it_allows_a_write() {
+      suite.withASaveOnDisk()
+      var store = suite.aStore()
+      compare(store.load(), suite.aSave)
+
+      // Not deleted: hidden. Every read below it now answers FileNotFound.
+      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      store.save(suite.anotherSave)
+      store.flushNow()
+
+      compare(store.writable, false, "a write went ahead over an unproved absence")
+      compare(suite.wroteCount, 0)
+      compare(suite.refusals.length, 1, "the refusal was silent")
+      verify(suite.refusals[0].indexOf("could not be found or shown to be absent") >= 0,
+             "the refusal blamed the wrong thing: " + suite.refusals[0])
+
+      // The file is still there, untouched, behind the directory.
+      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+      compare(FakeFs.textAt(root.savePath), suite.aSave)
+    }
+
     // The design's Data row, built from the environment rather than hard-coded.
     function test_25_the_path_is_the_designs_data_row() {
       var store = storeComponent.createObject(root)

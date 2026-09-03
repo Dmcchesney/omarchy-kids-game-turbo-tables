@@ -148,19 +148,36 @@ FocusScope {
       return "Every fact goes back to never attempted and the mastery lamps go out. "
              + "Settings and records are not touched. There is no undo."
     // The one way out of a quarantine, and the only place it can be reached
-    // from. It names what is lost, because what is lost is everything: the
-    // unreadable file is still on the disk right now, and saying yes writes
-    // over it with this session's defaults. Nothing else in the plugin calls
+    // from. Nothing else in the plugin calls
     // `Store.discardQuarantinedFile()`.
+    //
+    // The two halves say opposite things because the two halves DO opposite
+    // things, and for a round this screen said the read-side sentence to both.
+    //
+    //   read side   nothing in this session was ever read off that file, so
+    //               what the write puts there is the defaults, and every best
+    //               time and every fact on the disk goes. That is the truth,
+    //               and it is why the question is asked at all.
+    //   write side  the file read perfectly and could not be written to, so
+    //               the session is still holding the child's records and their
+    //               fact history and that is exactly what gets written.
+    //               Measured on the way out of a write-side quarantine: 1
+    //               record and 48 facts kept, which is what
+    //               `test_46_recovering_from_a_write_side_quarantine_keeps_the_session`
+    //               asserts. Telling a parent they will lose everything on the
+    //               one screen with no undo makes KEEP the sensible answer, and
+    //               keeps a family locked for nothing.
     if (pending === "discard")
-      return (settings.writeSide
-              ? "The save file on this computer could not be written to, so nothing since "
-                + "then has been saved. "
-              : "The save file on this computer cannot be read, so it has been left alone and "
-                + "nothing has been written to it. ")
-             + "Saying yes writes over it: every best time "
-             + "and every fact in it goes, and the game starts a new file from today's "
-             + "settings. Saying no keeps it exactly as it is. There is no undo."
+      return settings.writeSide
+          ? "The save file on this computer could not be written to, so nothing since then "
+            + "has been saved. Nothing you have done today is lost: saying yes writes what "
+            + "this game is holding right now -- today's best times and fact history "
+            + "included -- over the file that could not be written to. Saying no keeps the "
+            + "file exactly as it is. There is no undo."
+          : "The save file on this computer cannot be read, so it has been left alone and "
+            + "nothing has been written to it. Saying yes writes over it: every best time "
+            + "and every fact in it goes, and the game starts a new file from today's "
+            + "settings. Saying no keeps it exactly as it is. There is no undo."
     return ""
   }
 
