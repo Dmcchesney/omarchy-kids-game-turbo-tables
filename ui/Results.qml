@@ -56,6 +56,34 @@ FocusScope {
   property string racerId: ""
   property int seed: 42
 
+  // ---------------------------------------------------- what the file did
+  //
+  // `CommitResult` from `Engine.commitRace`, handed down by `ui/Game.qml`,
+  // which banked the race at the flag. This screen still writes nothing -- it
+  // reads what the save file already decided.
+  //
+  // Design, Modes: "Time trial and ghost set records; Grand Prix never does."
+  // That decision is `commitRace`'s and nothing here re-derives it: a Grand
+  // Prix comes back with `recordUpdated` false and `record` null, and a run
+  // that tied comes back with `recordUpdated` false and the standing record,
+  // which is the difference this screen is allowed to show.
+  //
+  // Null means no race was banked -- the demo race below, or a screen opened
+  // straight out of the harness -- and then the line says nothing at all rather
+  // than guessing.
+  property var commitResult: null
+
+  readonly property bool recordSet: commitResult !== null
+                                    && commitResult.recordUpdated === true
+  readonly property var standingRecord: commitResult !== null && commitResult.record
+                                        ? commitResult.record : null
+  // A race whose answers did not reach the file. It is the honest half of the
+  // quarantine: the mastery lamps the child is looking at moved in memory and
+  // will not be there tomorrow, and this screen is where they are looking.
+  readonly property bool notSaved: Store.quarantined
+                                   || (commitResult !== null
+                                       && commitResult.factsUpdated !== true)
+
   // A results screen with no race behind it would have nothing true to say, so
   // rather than invent numbers it plays one. `demoRace()` below runs a real
   // race through the real engine -- the same reducer, the same rivals, the same
@@ -715,18 +743,61 @@ FocusScope {
     }
 
     // Nothing is written from this screen. Records and the fact history are the
-    // race's business and are committed by whoever owned the race; the design
-    // says so in as many words and this file keeps to it.
-    Text {
+    // race's business and are committed by whoever owned the race -- `ui/Game.qml`
+    // banks it at the flag, through `Store.commit()`, through
+    // `save.ts`'s `commitRace`. What is drawn here is what that call answered.
+    Column {
       anchors.right: parent.right
       anchors.rightMargin: page.pad
       anchors.verticalCenter: actions.verticalCenter
-      textFormat: Text.PlainText
-      text: "THIS RACE ONLY"
-      color: Theme.textLabel
-      font.family: Theme.mono
-      font.pixelSize: results.fs(15)
-      font.letterSpacing: results.px(2)
+      spacing: results.px(4)
+
+      Text {
+        anchors.right: parent.right
+        textFormat: Text.PlainText
+        text: results.recordSet ? "NEW GARAGE RECORD" : "THIS RACE ONLY"
+        color: results.recordSet ? Theme.amber : Theme.textLabel
+        font.family: Theme.mono
+        font.bold: results.recordSet
+        font.pixelSize: results.fs(15)
+        font.letterSpacing: results.px(2)
+        Accessible.role: Accessible.StaticText
+        Accessible.name: text
+      }
+
+      // The record that stands for this preset now, whether or not this run set
+      // it. A run that tied keeps the old one -- `beatsRecord` is a strict `<`
+      // -- and saying which time stands is the only way the difference between
+      // "you tied" and "nothing happened" reaches the child.
+      Text {
+        anchors.right: parent.right
+        visible: results.standingRecord !== null
+        textFormat: Text.PlainText
+        text: results.standingRecord
+              ? "BEST FOR THIS SET  " + results.clockText(results.standingRecord.timeMs)
+              : ""
+        color: Theme.textLabel
+        font.family: Theme.mono
+        font.pixelSize: results.fs(14)
+        font.letterSpacing: results.px(1)
+      }
+
+      // The quarantine, on the screen the child is actually looking at when
+      // their answers were counted. `ui/Game.qml` carries the full notice; this
+      // is the one sentence that belongs beside the numbers it is about.
+      Text {
+        anchors.right: parent.right
+        visible: results.notSaved && results.commitResult !== null
+        textFormat: Text.PlainText
+        text: "NOT SAVED TO THE GARAGE"
+        color: Theme.urgent
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: results.fs(14)
+        font.letterSpacing: results.px(1)
+        Accessible.role: Accessible.StaticText
+        Accessible.name: "This race was not saved to the garage"
+      }
     }
   }
 }

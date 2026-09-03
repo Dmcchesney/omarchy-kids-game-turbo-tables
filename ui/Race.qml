@@ -43,6 +43,28 @@ FocusScope {
   property int warmupPaceMs: 4000
   // Forces the CanvasRoad fallback, for a side-by-side with the shader.
   property alias forceCanvas: track.forceCanvas
+
+  // ----------------------------------------------------- the save-file seam
+  //
+  // The load half of the fact history. `RaceConfig.factHistory` is the engine's
+  // own seam (`src/engine/race.ts`): the child's saved per-fact record goes in
+  // here and `factHistoryOf(state)` hands it back at the flag. The host reads it
+  // off `Store.factHistoryForRace()`, which remembers the same array as the
+  // baseline it will later declare -- and `commitRace` refuses any commit whose
+  // baseline is not the file it is being folded into, so a race that is not
+  // seeded from the file cannot be banked at all. A race created without it is
+  // exactly the race it was before the seam existed, which is what the harness
+  // and the screenshot runs still get.
+  property var factHistory: []
+
+  // The write half of the record. Design, Data, `records`: "per preset: best
+  // clean time, correct, attempted, answer timeline for the ghost." The
+  // timeline is the ghost, and it can only be built while the race is running,
+  // one sample per answer, so it is accumulated here through the engine's own
+  // `recordStep` and read off by the host at the flag. Nothing on this screen
+  // writes it anywhere.
+  readonly property var ghostTimeline: race.timeline
+  property var timeline: Engine.emptyTimeline()
   // The road, exposed so a host can pause it when the overlay closes and so a
   // test can ask it which path it took. Nothing outside drives it in play: the
   // lurch and the pull-back come from the engine's events.
@@ -146,12 +168,14 @@ FocusScope {
       }
     }
 
+    race.timeline = Engine.emptyTimeline()
     var built = Engine.createRace({
       "seed": race.seed,
       "mode": race.mode,
       "preset": race.preset,
       "racers": seats,
-      "humanId": "you"
+      "humanId": "you",
+      "factHistory": (race.factHistory instanceof Array) ? race.factHistory : []
     })
     var started = Engine.step(built, { "kind": "start" }, 0)
     built = started.state
@@ -253,6 +277,10 @@ FocusScope {
     if (!events || events.length === 0)
       return
     var me = state.humanId
+    // One ghost sample per answer of the child's, taken from the state the
+    // answer produced. `recordStep` filters the events by racer itself, so the
+    // rivals' steps come through here and add nothing.
+    race.timeline = Engine.recordStep(race.timeline, race.state, events, me)
     for (var i = 0; i < events.length; i++) {
       var e = events[i]
       switch (e.type) {

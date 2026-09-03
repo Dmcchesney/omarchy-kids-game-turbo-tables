@@ -108,6 +108,14 @@ FocusScope {
   // tells the shell the game closed itself.
   signal leaveRequested()
 
+  // The quarantine notice, read back off the notice itself rather than off a
+  // second copy of its text. A walkthrough that asserted its own string would
+  // not be checking the screen, and "a screen says so" is exactly the claim
+  // four rounds of review could not verify because nothing said anything.
+  readonly property bool noticeVisible: quarantineNotice.visible
+  readonly property string noticeSays: noticeText.text
+  readonly property string noticeWhy: noticeWhy_.text
+
   // --------------------------------------------------------------- scaling
   readonly property real s: Math.max(0.42, Math.min(width / 1920, height / 1080))
   function px(v) { return Math.round(v * s) }
@@ -130,6 +138,42 @@ FocusScope {
   // The finished `RaceState` the results screen reads. Held here rather than in
   // the results screen so the race can be destroyed the moment it is over.
   property var finishedRace: null
+
+  // ---------------------------------------------------------- the save seam
+  //
+  // This file is the only thing in `ui/` that owns a race from start to flag,
+  // so it is the only thing that can honestly bank one. Design, Data: `records`
+  // and `facts` are the two keys a race writes, and `src/engine/save.ts` is the
+  // only code allowed to decide what goes into them -- so the flow calls
+  // `Store.factHistoryForRace()` on the way in and `Store.commit()` on the way
+  // out, and never assembles a record or a fact count itself.
+  //
+  // The engine's rule, and it is why the two calls are a pair:
+  // `commitRace` refuses any commit whose declared baseline is not the file it
+  // is being folded into. `Store` remembers the array it handed out and
+  // declares that one, and re-points it at the file after every commit -- so
+  // committing the same race twice is refused by construction rather than
+  // doubling a child's counts, and there is no path here that can pass the
+  // wrong baseline because there is no path here that chooses one.
+  //
+  // The commit happens once, at the flag, before the results screen is built.
+  // Not on leaving results, not on RACE AGAIN: those are the second calls the
+  // engine would have to refuse, and a screen that has to be refused to be
+  // correct is a screen waiting for its refusal to regress.
+  property var lastCommit: null
+
+  // The array the running race was seeded with, read fresh from the save file
+  // at the countdown rather than held across races.
+  property var raceFactHistory: []
+
+  function seedRace() {
+    game.raceFactHistory = Store.factHistoryForRace()
+  }
+
+  function bankRace(state, timeline) {
+    game.lastCommit = Store.commit(state, timeline)
+    return game.lastCommit
+  }
   // Digits the child typed on the countdown's GO beat, carried into the race.
   property var carriedDigits: []
   // Where to put focus when the garage comes back. -1 means READY UP, which is
@@ -204,6 +248,12 @@ FocusScope {
 
   function startRace() {
     game.carriedDigits = []
+    game.lastCommit = null
+    // Seeded here rather than in the race screen: the array the race is created
+    // with has to be the same array the commit declares as its baseline, and
+    // the Store is what holds that. Reading it at the countdown means a reset
+    // made on the settings screen a moment ago is already in it.
+    game.seedRace()
     game.go("countdown")
   }
 
@@ -213,8 +263,13 @@ FocusScope {
     game.go("race")
   }
 
-  function raceIsOver(board) {
+  function raceIsOver(board, timeline) {
     game.finishedRace = board
+    // Banked once, here, before the results screen exists. The ghost timeline
+    // comes off the race that recorded it; `recordFromRace` is what turns the
+    // two into a record, and `commitRace` is what decides whether the design
+    // allows one -- Grand Prix never does.
+    game.bankRace(board, timeline)
     game.go("results")
   }
 
@@ -294,14 +349,21 @@ FocusScope {
     visible: active
     sourceComponent: Component {
       Race {
+        id: liveRace
         seed: game.seed
         mode: game.mode
         preset: game.preset
         rivalLevel: game.level
+        // The child's saved per-fact record, straight from the save file. It
+        // has to be the array the Store handed out, because that is the one the
+        // commit will declare as its baseline.
+        factHistory: game.raceFactHistory
         // `finished(var board)` already hands out the live `RaceState`, which
         // is exactly what `Results.raceState` wants. No conversion, no second
-        // copy of the numbers.
-        onFinished: function (board) { game.raceIsOver(board) }
+        // copy of the numbers. The ghost timeline is read off the race that
+        // recorded it, in the same breath, so the two cannot come from
+        // different runs.
+        onFinished: function (board) { game.raceIsOver(board, liveRace.ghostTimeline) }
         onLeaveRequested: game.backToGarage(-1)
       }
     }
@@ -323,6 +385,10 @@ FocusScope {
       Results {
         seed: game.seed
         raceState: game.finishedRace
+        // What the save file did with the race that just ended, handed down
+        // rather than recomputed: the results screen must not be able to
+        // disagree with the file about whether a record was set.
+        commitResult: game.lastCommit
         onRaceAgainRequested: game.raceAgain()
         onGarageRequested: game.backToGarage(-1)
       }
@@ -342,6 +408,87 @@ FocusScope {
       }
     }
     onLoaded: Qt.callLater(game.pushFocus)
+  }
+
+  // ------------------------------------------------- the quarantine notice
+  //
+  // A quarantine used to be invisible. `Store` kept the child's file safe on
+  // disk and ran the session from memory, which is right -- and nothing in
+  // `ui/` read `quarantined`, so what the child saw was a garage that looked
+  // factory-reset and whose every change silently failed to stick, forever,
+  // with the only explanation on stderr. Four review rounds went past that.
+  //
+  // This is the screen half of it, and it is here rather than on one screen
+  // because the condition is not a property of any one of them: the file is
+  // unreadable for the whole session, so the notice is up for the whole
+  // session. Two lines, in the order the two readers need them:
+  //
+  //   the child   one sentence they can act on -- fetch a grown-up. No jargon,
+  //               no path, no error number. It does not say "corrupt": nothing
+  //               of theirs has been lost, and the file is still on the disk.
+  //   the parent  `Store.quarantineReason`, the schema's own `path: problem`
+  //               line, which is the sentence that tells them what to look at.
+  //
+  // It needs no keystroke, takes no focus stop and is never dismissible: a
+  // notice a child can close is a notice the parent never sees. It is hidden
+  // during the countdown and the race, where nothing is being written anyway
+  // and a banner over the question would be a fairness problem, and it comes
+  // straight back on the results screen.
+  Rectangle {
+    id: quarantineNotice
+    visible: Store.quarantined
+             && (game.screen === "garage" || game.screen === "results"
+                 || game.screen === "settings")
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: noticeText.implicitHeight + noticeWhy_.implicitHeight + game.px(30)
+    color: Qt.rgba(Theme.urgent.r, Theme.urgent.g, Theme.urgent.b, 0.16)
+    border.width: Math.max(1, game.px(2))
+    border.color: Theme.urgent
+
+    Accessible.role: Accessible.StaticText
+    Accessible.name: "Your garage is safe but locked"
+    Accessible.description: noticeText.text + " " + noticeWhy_.text
+
+    Column {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: game.px(26)
+      anchors.rightMargin: game.px(26)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: game.px(5)
+
+      Text {
+        id: noticeText
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        text: "YOUR GARAGE IS SAFE BUT LOCKED  ·  ask a grown-up. "
+              + "Nothing you have won has been lost, and today's changes will not be kept."
+        color: Theme.cream
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: Math.max(13, game.fs(19))
+        font.letterSpacing: game.px(1)
+      }
+
+      // For the grown-up the child fetches. It is the schema's own words,
+      // unedited, because a reworded error is one a maintainer cannot search
+      // for.
+      Text {
+        id: noticeWhy_
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        text: "For a grown-up: " + Store.quarantineReason
+              + "  ·  The save file has been left exactly as it is. "
+              + "Press S for settings to start a new one."
+        color: Theme.textLabel
+        font.family: Theme.mono
+        font.pixelSize: Math.max(11, game.fs(15))
+      }
+    }
   }
 
   // ------------------------------------------------------- the settings key

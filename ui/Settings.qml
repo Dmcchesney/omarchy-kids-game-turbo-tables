@@ -1,6 +1,5 @@
 import QtQuick
 import "parts"
-import "../engine/engine.mjs" as Engine
 
 // Settings, and the three doors out of the save file.
 //
@@ -66,87 +65,36 @@ FocusScope {
 
   // ------------------------------------------------------------ the resets
   //
-  // A save file in the engine's own shape, assembled from what the Store holds.
-  // The settings half is deliberately left at the engine's defaults: none of
-  // the three operations reads it -- `resetSettings` replaces it outright and
-  // the other two do not touch it -- so filling it in would be ceremony that
-  // could only be wrong. Records and fact history are carried across because a
-  // reset of one must leave the others provably alone, and this is the object
-  // that gets to prove it.
-  function saveFileFromStore() {
-    var file = Engine.emptySave()
-    try {
-      if (Store.records && typeof Store.records === "object")
-        file.records = Store.records
-      if (Store.facts instanceof Array)
-        file.facts = Store.facts
-    } catch (error) {
-      // A file the engine cannot read is a file this screen still has to be
-      // able to clear. The empty one it started with does that.
-      console.warn("Settings: the save file could not be read for a reset: " + error)
-    }
-    return file
-  }
-
-  // ROUND 2 -- ONE WRITE, AND IT SAYS SO WHEN THERE WAS NONE.
+  // ROUND 3 -- THE RESETS ARE THE ENGINE'S, AND THIS SCREEN ONLY ASKS.
   //
-  // Two things were wrong with the version this replaces and both were found by
-  // watching the file rather than the screen's own view of it.
+  // This screen used to assemble a save file by hand, call the engine on it,
+  // and then write the one key it thought had changed back into the Store
+  // itself. Every version of that is a second copy of the rule "a reset touches
+  // exactly its own key" -- and the whole reason the design's Data table has a
+  // "Reset by" column is that a child clearing a leaderboard must not lose the
+  // mastery the fact history holds. A second copy of a rule is a rule that can
+  // drift, and it drifted twice already.
   //
-  //   - A confirmed RESET SETTINGS patched nine keys through `Store.setSetting`,
-  //     and every one of those flushes the whole save file. Nine atomic writes
-  //     for one button press, and each of the eight intermediate ones left a
-  //     half-reset settings object on disk. The new settings object is built in
-  //     full here and written once, which is what the other two resets already
-  //     did.
-  //   - `Store.setSetting` refuses every write while `Store.loaded` is false,
-  //     which `TurboTables.qml` documents as a real outcome for a save file it
-  //     cannot read. The old code ignored the return value and the banner said
-  //     SETTINGS ARE BACK TO HOW THEY STARTED over a file that had not changed.
-  //     Every path now returns whether anything was written, and `answer()`
-  //     says NOTHING WAS CHANGED when the answer is no.
+  // So the three operations are now `Store.resetSettings()`,
+  // `Store.resetRecords()` and `Store.resetFacts()`, each of which calls
+  // `save.ts`'s own reset of the same name, takes *every* key back off the file
+  // that came out of it, and writes once. Nothing here builds a settings object,
+  // touches `Store.records`, or knows the engine's vocabulary. The arithmetic
+  // is `npm test`'s; the confirmation is this screen's.
   //
-  // Returns true when the save file was actually written.
+  // Each returns true only when the save file was actually written -- false
+  // while the Store has not loaded, and false while the file is quarantined,
+  // which is a real outcome and not a theoretical one. `answer()` says NOTHING
+  // WAS CHANGED for both, because a banner that claims a reset over a file that
+  // did not change is the one lie this screen must never tell.
   function applyReset(which) {
-    if (!Store.loaded)
-      return false
-    var file = saveFileFromStore()
-    if (which === "settings") {
-      var fresh = Engine.resetSettings(file).settings
-      // Back into the Store's own key names. The engine counts the kart body
-      // and paint from one and names the rival level; the garage indexes both
-      // from zero, which is the seam `migrateLegacyGarageSettings` crosses in
-      // the other direction.
-      var next = {}
-      for (var key in Store.settings)
-        next[key] = Store.settings[key]
-      next["sound"] = fresh.sound
-      next["reducedMotion"] = fresh.reducedMotion
-      next["scanlines"] = fresh.scanlines
-      next["kartBody"] = fresh.kart - 1
-      next["kartPaint"] = fresh.paint - 1
-      next["kartNumber"] = fresh.number
-      next["rivalLevel"] = Math.max(0, Engine.RIVAL_LEVEL_ORDER.indexOf(fresh.rivalLevel))
-      // Race mode and math set are the garage's two choices and the engine's
-      // settings shape has no column for them, so their reset value is the
-      // Store's own default rather than something invented here.
-      next["raceMode"] = Store.defaultSettings["raceMode"]
-      next["mathSet"] = Store.defaultSettings["mathSet"]
-      Store.settings = next
-      Store.flush()
-      Store.changed()
-      return true
-    }
-    if (which === "records") {
-      Store.records = Engine.resetRecords(file).records
-      Store.flush()
-      Store.changed()
-      return true
-    }
-    Store.facts = Engine.resetFacts(file).facts
-    Store.flush()
-    Store.changed()
-    return true
+    if (which === "settings")
+      return Store.resetSettings()
+    if (which === "records")
+      return Store.resetRecords()
+    if (which === "discard")
+      return Store.discardQuarantinedFile()
+    return Store.resetFacts()
   }
 
   function ask(which) {
@@ -172,6 +120,8 @@ FocusScope {
       return "SETTINGS ARE BACK TO HOW THEY STARTED"
     if (which === "records")
       return "GARAGE RECORDS CLEARED"
+    if (which === "discard")
+      return "A NEW SAVE FILE HAS BEEN STARTED"
     return "FACT HISTORY CLEARED"
   }
 
@@ -182,6 +132,8 @@ FocusScope {
       return "RESET GARAGE RECORDS?"
     if (pending === "facts")
       return "RESET FACT HISTORY?"
+    if (pending === "discard")
+      return "START A NEW SAVE FILE?"
     return ""
   }
   readonly property string askDetail: {
@@ -195,18 +147,47 @@ FocusScope {
     if (pending === "facts")
       return "Every fact goes back to never attempted and the mastery lamps go out. "
              + "Settings and records are not touched. There is no undo."
+    // The one way out of a quarantine, and the only place it can be reached
+    // from. It names what is lost, because what is lost is everything: the
+    // unreadable file is still on the disk right now, and saying yes writes
+    // over it with this session's defaults. Nothing else in the plugin calls
+    // `Store.discardQuarantinedFile()`.
+    if (pending === "discard")
+      return "The save file on this computer cannot be read, so it has been left alone and "
+             + "nothing has been written to it. Saying yes writes over it: every best time "
+             + "and every fact in it goes, and the game starts a new file from today's "
+             + "settings. Saying no keeps it exactly as it is. There is no undo."
     return ""
   }
+
+  // -------------------------------------------------------- the quarantine
+  //
+  // Design, Data: the file is "human-readable, so a parent can see exactly what
+  // is kept". When it cannot be read at all, that promise turns into this
+  // screen's job -- say so where a parent will look, in the schema's own words,
+  // and offer exactly one action behind the same question the resets ask.
+  readonly property bool quarantined: Store.quarantined
+  readonly property string quarantineReason: Store.quarantineReason
 
   // ---------------------------------------------------------- focus chain
   // Reading order, top to bottom and left to right: the five rows that can
   // change, then the three resets, then the way out. The TIMER row is not in
   // it, for the same reason the garage's TRACK and GOAL rows are not: a stop
   // that cannot act is a dead press.
-  readonly property var stops: [soundRow.focusItem, motionRow.focusItem, scanRow.focusItem,
-                                rivalRow.focusItem,
-                                resetSettingsButton, resetRecordsButton, resetFactsButton,
-                                backButton]
+  //
+  // START A NEW SAVE FILE is in the chain only while there is a quarantine to
+  // act on. A stop that cannot do anything is a dead press -- the same rule
+  // that keeps the TIMER row out -- and a permanent button offering to
+  // overwrite a save file that is perfectly fine is worse than dead.
+  readonly property var stops: {
+    var list = [soundRow.focusItem, motionRow.focusItem, scanRow.focusItem,
+                rivalRow.focusItem,
+                resetSettingsButton, resetRecordsButton, resetFactsButton]
+    if (settings.quarantined)
+      list.push(discardButton)
+    list.push(backButton)
+    return list
+  }
 
   function stopIndex() {
     for (var i = 0; i < stops.length; i++)
@@ -573,19 +554,50 @@ FocusScope {
                                   + " It asks before it does it."
           onActivated: settings.ask("facts")
         }
+
+        // Only while there is a quarantine. See `stops` above.
+        ActionButton {
+          id: discardButton
+          visible: settings.quarantined
+          width: parent.width
+          height: visible ? settings.px(122) : 0
+          art: Glyphs.exit
+          tone: "quit"
+          variant: "secondary"
+          label: "START A NEW SAVE FILE"
+          sublabel: "ASKS FIRST"
+          labelSize: settings.fs(23)
+          sublabelSize: settings.fs(14)
+          iconSize: settings.px(28)
+          Accessible.name: "Start a new save file"
+          Accessible.description: "The save file on this computer cannot be read and has been"
+                                  + " left alone. This writes over it and starts again."
+                                  + " It asks before it does it."
+          onActivated: settings.ask("discard")
+        }
       }
 
+      // What this screen has to say about the file itself. On a healthy file it
+      // is the design's own promise in the child's words; on a quarantined one
+      // it is the schema's own sentence, unedited, for the grown-up who came to
+      // look -- and it is the only place in the plugin that sentence is written
+      // down for a reader rather than for stderr.
       Text {
         x: settings.px(22)
         width: parent.width - settings.px(44)
         y: parent.height - settings.px(24) - height
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        text: "This computer keeps one file: what you chose, your best times, "
-              + "and how each fact has gone. Each reset above clears its own part "
-              + "and leaves the other two alone."
-        color: Theme.textLabel
+        text: settings.quarantined
+              ? ("THE SAVE FILE COULD NOT BE READ.  " + settings.quarantineReason
+                 + "  ·  It is still on this computer, exactly as it was, and nothing has been"
+                 + " written to it. The three resets above cannot run until it is dealt with.")
+              : ("This computer keeps one file: what you chose, your best times, "
+                 + "and how each fact has gone. Each reset above clears its own part "
+                 + "and leaves the other two alone.")
+        color: settings.quarantined ? Theme.urgent : Theme.textLabel
         font.family: Theme.mono
+        font.bold: settings.quarantined
         font.pixelSize: settings.fs(15)
         lineHeight: 1.3
       }
@@ -633,7 +645,7 @@ FocusScope {
     scaleUnit: settings.s
     question: settings.askQuestion
     detail: settings.askDetail
-    confirmLabel: "RESET"
+    confirmLabel: settings.pending === "discard" ? "START OVER" : "RESET"
     cancelLabel: "KEEP"
     onConfirmed: settings.answer(true)
     onCancelled: settings.answer(false)
