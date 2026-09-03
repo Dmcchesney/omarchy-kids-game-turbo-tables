@@ -65,6 +65,40 @@ Item {
   // the karts.
   readonly property real playerZ: 3.20
   readonly property real kartWorldWidth: 1.36
+  // THE SHEET IS NOT THE KART, AND ROUND TWO MEASURED THE SHEET.
+  //
+  // TrackSprite draws a kart into a 192 x 128 sheet whose model box is 62 world
+  // units across; the kart itself, wheel to wheel, is 37 of them. Scaling the
+  // SHEET to `kartWorldWidth` therefore drew a kart 37/62 = 0.60 of the width
+  // it claimed to be. Round two's report said "the furthest kart on the road is
+  // at z = 41.2 and about 43 px wide, over the ~28 px floor a number plate
+  // needs": its own `sizeAt` says 21.4 px of SHEET at that depth, and the
+  // rendered green body measured 12 x 6 px. The claim was wrong by 2x against
+  // the arithmetic and by 3.5x against the pixels, and it was the second round
+  // running that a number was asserted about a picture that did not contain it.
+  //
+  // So the scale is taken off the kart rather than off the sheet it is drawn
+  // in, which is a correction, not a fudge: `kartWorldWidth` now means roughly
+  // what it says, and a kart is about 1.36 world units on a 3.80-unit road.
+  //
+  // ROUGHLY, and the slack is stated rather than hidden. 62/37 is the model
+  // box: the sheet spans 62 units and the wheels 37. Rendered, the yaw widens
+  // it -- the buggy body measures 124 px of 192 (0.646) on its own sheet, where
+  // the model geometry alone predicts 0.597 -- and the six bodies differ from
+  // one another besides. So a drawn kart is within about 8% of its nominal
+  // width, not exactly on it. Every kart size quoted in the evidence is a
+  // pixel measurement of the rendered frame, not this arithmetic.
+  readonly property real kartSheetSpan: 62 / 37
+  // AND THEN A FLOOR, WHICH IS A DELIBERATE BREAK IN THE PERSPECTIVE.
+  //
+  // Even corrected, the saturating tail puts the leader of a Grand Prix at
+  // z = 41.2 and 21 px wide. A leader that reads is worth more than a leader
+  // that scales, so the kart stops shrinking at 2.8% of the window height --
+  // 30 px at 1080p, 21 px at 768. Past z = 29 every kart is that size, which is
+  // the far tail the distance compression has already crushed together: over
+  // that range the sprite's y position moves 11 px, so nothing that was in
+  // front of something else stops being in front of it.
+  readonly property real kartMinPixels: Math.max(18, height * 0.028)
   // World units per question of effective progress, near the child.
   readonly property real unitsPerQuestion: 4.0
   // How far ahead the compressed distance is allowed to reach. Round one let
@@ -72,8 +106,8 @@ Item {
   // child came out 17 px and 13 px wide -- the karts you most need to read
   // were the ones you could not. The tail now saturates: `farSpan` is the most
   // any rival can ever be pushed past the four-question near zone, so the
-  // furthest kart on the road is 41 world units away and about 43 px wide,
-  // which is over the ~28 px floor a number plate needs to be legible.
+  // furthest kart on the road is 41.2 world units away. What it MEASURES at
+  // that depth is in the evidence and not asserted here.
   readonly property real farSpan: 22.0
   readonly property real farSoftness: 13.0
 
@@ -171,15 +205,37 @@ Item {
     return worldWidth * focal * height / (2 * Math.max(0.05, z))
   }
 
+  // How wide a kart's SHEET is drawn at depth z: the kart at true perspective
+  // scale, floored so it never falls below `kartMinPixels` of actual kart.
+  function kartSheetPixels(z) {
+    return Math.max(kartMinPixels * kartSheetSpan,
+                    sizeAt(kartWorldWidth * kartSheetSpan, z))
+  }
+
   // Compressed distance for a kart `delta` questions ahead of the child.
   //
   // The first four questions are true scale, so the kart you are actually
   // fighting moves the way it should. Past that the gap is squashed through a
   // saturating exponential rather than a linear 0.30: the leader of a Grand
   // Prix can be seventy questions up the road, and 70 x 4 x 0.30 put it 87
-  // world units away and 20 px wide. It now saturates at `farSpan`, so the
-  // furthest kart on the road is at z = 41.2 and 43 px wide, and the child can
-  // still see who is winning.
+  // world units away. It now saturates at `farSpan`, so the furthest kart on
+  // the road is at z = 41.2, and `kartSheetPixels` decides how big that is.
+  //
+  // A NEGATIVE DELTA RETURNS A z BEHIND THE CAMERA, AND THAT IS CORRECT.
+  //
+  // `zForDelta(-1)` is 3.2 - 4.0 = -0.8. The camera sits behind the child's
+  // kart, so a rival even one question back really is behind the lens and
+  // there is no honest place on this road to draw it. Round two stopped there,
+  // and the consequence was the whole of the round's remaining gap: with the
+  // child answering at a steady pace on seed 42, 1516 of 1875 frames of a
+  // thirty-second run -- 81% -- carried NO rival sprite at all, the longest
+  // unbroken run being 1217 frames, about nineteen seconds of empty road while
+  // a race was going on. The plates went with the karts, so a child in the
+  // lead was told nothing about the field at all.
+  //
+  // The answer is not to drag the kart back onto the road at a depth it is not
+  // at. It is the chaser rail at the bottom of this file, which draws the
+  // rivals behind the child where they actually are: behind.
   function zForDelta(delta) {
     var a = Math.abs(delta)
     var near = Math.min(a, 4) * unitsPerQuestion
@@ -193,8 +249,19 @@ Item {
   // on the dashed centre line, so it never read as being *in* a lane. It sits
   // a third of a lane off and drifts to the outside of a corner, which is the
   // only steering in a game where the child does not steer.
-  readonly property real heroLane: 0.34 - curve * 13.0
-  readonly property var lanes: [0.0, -0.98, 0.98, -0.42]
+  //
+  // THE LANES WIDENED WHEN THE KARTS DID. Correcting the sprite scale made a
+  // kart 1.36 world units wide instead of about 0.8, and on the start line --
+  // where all four are at exactly `playerZ` -- lanes 0.98 apart put PISTON
+  // almost entirely behind the child's kart, number plate and all. Four karts
+  // of 1.36 cannot be four abreast on a 3.80-unit road however they are
+  // arranged, so the pack still overlaps; these numbers are the widest that
+  // keep every kart's own number plate clear of its neighbour, and the outer
+  // two ride the rumble strip at the start, which is what a four-wide first
+  // row looks like. The hero's drift with the corner is gentler for the same
+  // reason: at 13.0 it crossed into PISTON's lane on a hard left.
+  readonly property real heroLane: 0.30 - curve * 8.0
+  readonly property var lanes: [0.0, -1.34, 1.34, -0.60]
   function laneOf(seat) {
     var s = ((seat % 4) + 4) % 4
     return s === 0 ? heroLane : lanes[s]
@@ -258,7 +325,37 @@ Item {
       kartModel.setProperty(i, "kartProgress", v[i])
       if (haveExact)
         kartModel.setProperty(i, "kartGap", Math.round(exact[i] - mine))
+      // EVERY DEPTH IS MEASURED FROM THIS NUMBER, SO IT HAS TO BE THE SAME
+      // NUMBER THE OTHERS WERE PROJECTED WITH.
+      //
+      // The caller sets `humanProgress` from the UNPROJECTED value one line
+      // before it calls this, and every rival's depth is `kartProgress -
+      // humanProgress`. That mixes a projected numerator with an unprojected
+      // reference, and in the case the projection exists for -- a rival passing
+      // the child, where it is the child's own smoothed value that has to come
+      // down -- the two disagree and the rival is drawn behind. Round two's
+      // critic forced it once in about fifteen thousand frames, at a magnitude
+      // of 5e-5 questions; my own watch forced it once in 1875 on seed 11. It
+      // is a seam rather than a defect, and reading the reference back off the
+      // array that was just projected closes it without the caller changing.
+      if (order && kartModel.get(i).isHuman)
+        humanProgress = v[i]
     }
+  }
+
+  // What the model actually STORES for kart `index`, and the depth the
+  // delegate therefore binds to. Exposed for the same reason `Minimap.drawnT`
+  // is: the picture and its inputs came apart once already, and a test that
+  // asserts the inputs proves nothing about the frame.
+  function drawnProgress(index) {
+    return (index >= 0 && index < kartModel.count)
+           ? kartModel.get(index).kartProgress : -1
+  }
+  function drawnZ(index) {
+    if (index < 0 || index >= kartModel.count)
+      return -1
+    var k = kartModel.get(index)
+    return k.isHuman ? playerZ : zForDelta(k.kartProgress - humanProgress)
   }
 
   // WHY THE DRAWN POSITIONS ARE PROJECTED ONTO THE ENGINE'S ORDER.
@@ -719,7 +816,7 @@ Item {
       readonly property color paintCol: kartPaint
       readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
       readonly property real zed: isHuman ? view.playerZ : view.zForDelta(delta)
-      readonly property real sc: view.sizeAt(view.kartWorldWidth, zed) / kartArt.sheetW
+      readonly property real sc: view.kartSheetPixels(zed) / kartArt.sheetW
       readonly property real spriteH: kartArt.sheetH * sc
       // The child's kart bobs a little with speed: the one thing on screen
       // that says the engine is running while the child is thinking.
@@ -731,7 +828,11 @@ Item {
       y: view.vAt(zed) * view.height + view.shakeY + bob
       width: 0
       height: 0
-      z: 1000 - zed
+      // Depth, with a tie-break, because at the start line all four karts are
+      // at exactly `playerZ` and `1000 - zed` is then the same number four
+      // times -- an undefined stacking order that can flicker between frames.
+      // The child's own kart wins the tie; the rest fall back on their seat.
+      z: 1000 - zed + (isHuman ? 0.002 : kartSeat * 0.0004)
       visible: zed > view.nearDistance && zed < view.drawDistance
                && x > -view.width * 0.6 && x < view.width * 1.6
 
@@ -767,7 +868,7 @@ Item {
   //
   // The gap is in questions and comes from the same effective progress the
   // engine ranks by, so a plate can never disagree with the place readout.
-  function kartSpriteH(z) { return sizeAt(kartWorldWidth, z) * 128 / 192 }
+  function kartSpriteH(z) { return kartSheetPixels(z) * 128 / 192 }
 
   Repeater {
     model: kartModel
@@ -781,8 +882,11 @@ Item {
       readonly property int gapQuestions: kartGap
       readonly property int tagSize: Math.max(13, Math.min(19, Math.round(spriteH * 0.16)))
 
-      visible: !isHuman && !isGhost && zed > view.playerZ + 1.0
-               && zed < view.drawDistance
+      // Ahead of the child, and only ahead: a rival level with or behind them
+      // is on the chaser rail below instead. Round two gated this on
+      // `zed > playerZ + 1.0`, which left a rival a fifth of a question ahead
+      // with no plate at all while its sprite filled a third of the screen.
+      visible: !isHuman && !isGhost && delta > 0 && zed < view.drawDistance
       width: tag.implicitWidth + tagGap.implicitWidth + 14
       height: tag.implicitHeight + 6
       z: 2000
@@ -856,6 +960,134 @@ Item {
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: badge.tagSize
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------- the chaser rail
+  //
+  // WHO IS BEHIND YOU. The other half of the race, and until now the missing
+  // half.
+  //
+  // The camera sits behind the child's kart, so a rival even one question back
+  // is behind the lens: `zForDelta(-1)` is -0.8, below `nearDistance`, and the
+  // sprite is culled -- correctly, because there is nowhere on this road that a
+  // kart behind the camera honestly goes. Round two left it there, and the
+  // whole picture of the race went dark the moment the child took the lead.
+  // Measured on the drawn geometry, with the child answering steadily: 1516 of
+  // 1875 frames on seed 42 carried no rival at all, 1398 of 1875 on seed 3,
+  // 1062 of 1875 on seed 11 -- and the longest unbroken run of empty road was
+  // 1217 frames, about nineteen seconds. `PLACE 1st` and an 18 px map were the
+  // entire report on three other karts.
+  //
+  // So the rivals behind are drawn as a rail across the near edge of the road,
+  // under the child's own kart, each in its own lane so left and right still
+  // mean left and right, closest at the bottom. It is the ahead-plate turned
+  // round: the same black plate, the same paint border, the same name, and the
+  // gap with its own sign -- `BOLT -3` reads against `PISTON +7` without
+  // anything new to learn. The chevron says which way the number points.
+  //
+  // It is not the deleted standings ladder and it must not become one. It never
+  // ranks the field, never says who is last and never labels the child; it
+  // states, of one named rival, how far back that rival is -- which is exactly
+  // and only what the plate on the road already states for a rival in front.
+  readonly property real chaserSize: Math.max(13, Math.round(height * 0.017))
+
+  Repeater {
+    model: kartModel
+
+    Item {
+      id: chaser
+      readonly property color paintCol: kartPaint
+      readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
+      readonly property int gapQuestions: kartGap
+      // Level counts as behind: a rival that has drawn alongside is one the
+      // child cannot see out of the back of their own kart either.
+      visible: !isHuman && !isGhost && delta <= 0
+
+      // Closest chaser at the bottom, which is the one arriving. Reading
+      // `kartProgress` first is what makes this a live binding, the same
+      // reason `plateRow` above reads it first.
+      readonly property int chaserRow: {
+        var mine = kartProgress
+        var rank = 0
+        for (var i = 0; i < kartModel.count; i++) {
+          var k = kartModel.get(i)
+          if (k.isHuman || k.kartProgress > view.humanProgress)
+            continue
+          if (k.kartProgress > mine
+              || (k.kartProgress === mine && k.kartSeat < kartSeat))
+            rank += 1
+        }
+        return rank
+      }
+
+      width: chaserRow0.implicitWidth + 14
+      height: chaserRow0.implicitHeight + 8
+      z: 2000
+
+      // The lane the rival is in, projected at the child's own depth, so a kart
+      // coming up the inside is drawn on the inside. Clamped into the view so a
+      // wide lane in a hard corner cannot push a plate off the edge.
+      x: Math.max(6, Math.min(view.width - width - 6,
+                              view.uAt(view.laneOf(kartSeat), view.playerZ) * view.width
+                              + view.shakeX - width / 2))
+      // Under the child's kart, stacking downward, closest first. The child's
+      // kart stands on `vAt(playerZ)` and nothing else is drawn below it.
+      y: Math.min(view.height - height - 6,
+                  view.vAt(view.playerZ) * view.height + view.shakeY + 10
+                  + chaserRow * (height + 4))
+
+      Rectangle {
+        anchors.fill: parent
+        radius: 3
+        color: Qt.rgba(0, 0, 0, 0.80)
+        // Two pixels of border when the rival is within one question: the
+        // child is about to be passed and the plate says so without a word.
+        border.width: (view.haveExact && chaser.gapQuestions >= -1) ? 2 : 1
+        border.color: Qt.rgba(chaser.paintCol.r, chaser.paintCol.g,
+                              chaser.paintCol.b, 0.95)
+      }
+
+      Row {
+        id: chaserRow0
+        anchors.centerIn: parent
+        spacing: 6
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: "▼"
+          color: Qt.rgba(chaser.paintCol.r, chaser.paintCol.g, chaser.paintCol.b, 1)
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: view.chaserSize
+        }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: kartName
+          color: Theme.textBright
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: view.chaserSize
+          font.letterSpacing: 1
+        }
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          // Only when the caller supplied the engine's exact progress. Rounding
+          // the smoothed delta instead is wrong on a sixth of frames, and a
+          // plate that disagrees with the HUD is two sources of truth for one
+          // number -- the same rule the ahead-plate is held to.
+          text: view.haveExact ? String(chaser.gapQuestions) : ""
+          color: Theme.teal
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: view.chaserSize
         }
       }
     }

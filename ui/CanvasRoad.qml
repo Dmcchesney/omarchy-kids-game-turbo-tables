@@ -52,6 +52,12 @@ Canvas {
   // How far down the track to draw. Past this the fog has closed anyway.
   property real drawDistance: 190
   property real nearDistance: 2.0
+  // Where road.frag's `smoothstep(52.0, 16.0, z)` has finished: past this the
+  // rumble alternation has dissolved into its own average and a band's colour
+  // no longer depends on which stripe it is. The same two numbers appear in
+  // `detail` below, and the sample ladder uses this one to know when it is
+  // allowed to stop landing on stripe boundaries.
+  readonly property real detailEnd: 52.0
 
   renderStrategy: Canvas.Immediate
   renderTarget: Canvas.Image
@@ -98,24 +104,46 @@ Canvas {
     ctx.fillRect(0, Math.max(0, hy - h * 0.07), w, Math.min(h * 0.07, hy))
 
     // ------------------------------------------------- the sample ladder
-    // Cut at half-stripe boundaries so the rumble bands never crawl, and
-    // subdivide near the camera so the kerbs do not kink.
-    var half = stripe * 0.5
+    //
+    // A BAND IS ONE FILLED QUAD, SO IT MUST NOT STRADDLE A COLOUR BOUNDARY.
+    //
+    // The rumble colour flips every `stripe` world units and road.frag decides
+    // that per pixel; here one band is painted one colour. Round two snapped
+    // the ladder to HALF-stripe boundaries and took strides of `z * 0.18`, so
+    // from about z = 8 outward a single band covered a whole stripe or more and
+    // was painted a single colour across boundaries the shader draws. That is
+    // the coarse, wrong zebra pitch the fallback has been shipping.
+    //
+    // Two rules now, and they are the ones that make the two pictures the same:
+    //
+    //   * inside `detailEnd`, no band may cross a multiple of `stripe`, so every
+    //     band is one colour run and the pitch is the shader's exactly;
+    //   * near the camera a band is subdivided further still, because between
+    //     two z samples this draws a straight edge where the true projection
+    //     curves, and close to the eye that is a visible kink in the kerb.
+    //
+    // Past `detailEnd` the alternation has already dissolved to its average, so
+    // the ladder is free to stride geometrically and the band count stays down.
     var zs = []
     var z = drawDistance
     zs.push(z)
     var guard = 0
-    while (z > nearDistance && ++guard < 200) {
-      // The next sample is at least a fifth of the way closer -- which is what
-      // keeps the band count logarithmic rather than proportional to the draw
-      // distance -- and is then snapped down onto a half-stripe boundary, so
-      // the rumble bands never crawl. Far away that skips whole stripes, and
-      // it does not matter: the fog has closed over them.
-      var target = z - Math.max(0.30, z * 0.18)
-      var snapped = Math.floor((target + travel) / half) * half - travel
-      if (snapped >= z - 1e-6)
-        snapped = z - half
-      z = Math.max(nearDistance, snapped)
+    while (z > nearDistance && ++guard < 240) {
+      var step = Math.max(0.30, z * 0.18)
+      var next
+      if (z > detailEnd) {
+        next = z - Math.max(stripe, step)
+      } else {
+        next = z - Math.min(stripe, step)
+        var edge = Math.floor((z + travel) / stripe) * stripe - travel
+        if (edge >= z - 1e-6)
+          edge -= stripe
+        if (next < edge)
+          next = edge
+      }
+      if (next >= z - 1e-6)
+        next = z - 0.30
+      z = Math.max(nearDistance, next)
       zs.push(z)
     }
 
@@ -185,36 +213,65 @@ Canvas {
         ctx.globalAlpha = alpha
         ctx.fillStyle = gridColor
 
-        // longitudinal: only the columns that can land on the plane at this
-        // depth, so the fill count stays flat instead of growing with the
-        // draw distance.
-        var span = (aspect * zFar / focal) * 1.3 + Math.abs(curve) * zFar * zFar
-        var columns = Math.min(o === 0 ? 9 : 26, Math.ceil(span / period))
-        for (var g = -columns; g <= columns; g++) {
-          if (o > 0 && (g % 4) === 0)
-            continue
-          var gx = g * period
-          if (Math.abs(gx) < roadHalf + rumbleHalf)
-            continue
-          var gf = uAt(gx, zFar) * w
-          var gn = uAt(gx, zNear) * w
-          if ((gf < -0.05 * w && gn < -0.05 * w) || (gf > 1.05 * w && gn > 1.05 * w))
-            continue
-          var wf = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zFar) * 40))
-          var wn = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zNear) * 40))
-          quad(gf - wf, yFar, gf + wf, yFar, gn + wn, yNear + 1, gn - wn, yNear + 1)
+        // LONGITUDINAL: THE COLUMNS THAT CAN ACTUALLY LAND ON THE SCREEN.
+        //
+        // Round two counted columns outward from x = 0 and capped the count at
+        // nine for the coarse octave. In a corner the road is not near x = 0:
+        // at z = 190 with curve 0.0255 the visible world-x runs from -1201 to
+        // -638, and not one of columns -9..9 falls inside it. So the far floor
+        // carried no longitudinal lines at all and what survived was a handful
+        // of near columns swept into thick arcs -- the "fuzzy diagonal arcs"
+        // the fallback has been drawing where road.frag draws a lattice.
+        //
+        // The range is now solved rather than guessed. u in [0,1] means
+        // x + curve z^2 in [-z aspect / focal, +z aspect / focal].
+        var reach = zFar * aspect / focal
+        var mid0 = -curve * zFar * zFar
+        // A column pitch under about three plane pixels is a moire rather than
+        // a grid. road.frag's derivative term fades those to the average; this
+        // skips them, which is the same picture for much less fill, and is what
+        // keeps the honest range from costing what the guessed one saved.
+        var pitchPx = (period * focal * w) / (2 * zFar * aspect)
+        var gLo = Math.ceil((mid0 - reach) / period)
+        var gHi = Math.floor((mid0 + reach) / period)
+        if (pitchPx >= 3.0 && gHi - gLo <= 220) {
+          for (var g = gLo; g <= gHi; g++) {
+            if (o > 0 && (g % 4) === 0)
+              continue
+            var gx = g * period
+            if (Math.abs(gx) < roadHalf + rumbleHalf)
+              continue
+            var gf = uAt(gx, zFar) * w
+            var gn = uAt(gx, zNear) * w
+            if ((gf < -0.05 * w && gn < -0.05 * w) || (gf > 1.05 * w && gn > 1.05 * w))
+              continue
+            // A hairline, not a smear. This plane is 480 px wide and is scaled
+            // up with a nearest-neighbour filter, so one plane pixel is already
+            // four on a 1920 screen. Round two's width expression hit its own
+            // 2.4 cap at every depth inside z = 24 and drew the grid as
+            // five-plane-pixel bars -- twenty screen pixels, measured, which is
+            // most of why the floor read as a contour map.
+            quad(gf - 0.5, yFar, gf + 0.5, yFar,
+                 gn + 0.5, yNear + 1, gn - 0.5, yNear + 1)
+          }
         }
 
-        // transverse: every grid boundary this band crosses, not just the
-        // first one. Near the camera one band spans several fine boundaries.
-        var kFar = Math.floor(sFar / period)
-        var kNear = Math.floor(sNear / period)
-        for (var k = kFar; k <= kNear && k - kFar < 24; k++) {
-          if (k === kFar && kFar === kNear)
-            break
-          if (o > 0 && (k % 4) === 0)
+        // TRANSVERSE: every grid boundary this band crosses.
+        //
+        // Round two ran this loop from the FAR index up to the NEAR one, and
+        // the near index is the SMALLER of the two -- `sNear < sFar` -- so
+        // `k <= kNear` was false on entry and the body never executed, on any
+        // band, at any depth, on any frame. The fallback's floor has been
+        // carrying no transverse lines whatever, which is exactly why round
+        // two's critic measured "only longitudinal lines at roughly 45 degrees,
+        // no cross-hatch anywhere in the bottom 260 px" and read it as
+        // corduroy. road.frag has drawn both directions all along.
+        var mLo = Math.ceil(sNear / period)
+        var mHi = Math.floor(sFar / period)
+        for (var m2 = mLo; m2 <= mHi && m2 - mLo < 24; m2++) {
+          if (o > 0 && (m2 % 4) === 0)
             continue
-          var zLine = (k + 1) * period - travel
+          var zLine = m2 * period - travel
           if (zLine <= zNear || zLine >= zFar)
             continue
           var yLine = vAt(zLine) * h
@@ -251,7 +308,7 @@ Canvas {
       // black-and-cream alternation there reads as speckle rather than as fog,
       // so the alternations dissolve toward their own average with distance.
       // The shader does the same thing with the same two numbers.
-      var detail = fade(mid, 52.0, 16.0)
+      var detail = fade(mid, detailEnd, 16.0)
       var soft = 0.5 + (band - 0.5) * detail
 
       ctx.fillStyle = blend(rumbleColor, rumbleAlt, soft)

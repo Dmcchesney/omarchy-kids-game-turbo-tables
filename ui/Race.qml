@@ -1088,7 +1088,18 @@ FocusScope {
       values.push(Math.max(0, Math.min(1, held / Math.max(1, length))))
       flags.push(state.racers[i].finished)
     }
-    minimap.setProgress(values)
+    // The engine's order goes to the map for the same reason it goes to the
+    // track view on line 490. It was threaded into one and not the other, and
+    // the map spent up to half of every run drawing the field in an order the
+    // callouts and the road disagreed with. The map takes it as indices into
+    // `values`, because a dot has no kart id.
+    var order = Engine.raceOrder(state)
+    var rank = []
+    for (var k = 0; k < order.length; k++)
+      for (var r = 0; r < state.racers.length; r++)
+        if (state.racers[r].id === order[k])
+          rank.push(r)
+    minimap.setProgress(values, rank)
     minimap.setFinished(flags)
   }
 
