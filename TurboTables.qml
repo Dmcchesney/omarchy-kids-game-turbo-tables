@@ -67,14 +67,52 @@ import "shell"
 //     matters: five keys struck the instant the summon returned, three trials,
 //     counted where they landed.
 //
-//       keys delivered to the desktop instead of the game
-//         this file, window rebuilt per summon    5 of 5, in 5 of 5 trials
-//         this file as it stands                  0 of 5, in 32 of 32 trials
-//         omarchy.emojis                          2 to 5 of 5, every trial
+//       keys delivered to the desktop instead of the game, five struck per
+//       trial, cold and warm counted separately because they differ and an
+//       earlier round of this comment quoted only the warm one:
 //
+//                                              first summon    later summons
+//                                              of a session    in that session
+//         this file, window rebuilt per summon   5 of 5          5 of 5
+//         this file at round 2                   1-3 of 5        0 of 5
+//         this file as it stands                 0 of 5          0 of 5
+//         omarchy.emojis                         5 of 5          5 of 5
+//
+//     Trial counts, all on the real host, all on the same oracle: ours 0 of
+//     175 over 35 cold starts under the standard protocol, plus 0 of 30 over
+//     6 more with the Qt pipeline and compiled-QML caches cleared first, so a
+//     shell as cold as a machine that has never run the game -- 0 of 205 over
+//     41 cold starts in total -- and 0 of 85 over 17 warm summons; the reference
+//     50 of 50 over 10 cold starts and 80 of 80 over 16 warm ones; this file
+//     with the startup warm-up taken back out again, in the same session,
+//     3 of 25 over 5 cold starts. The round-2 figure "0 of 5, in 32 of 32
+//     trials" was measured on a warm shell and read as if it covered both.
+//
+
 //     A key struck in that window was not dropped -- it was typed into whatever
 //     application had the keyboard, a terminal in the critic's reproduction,
 //     which is worse than losing it.
+//
+//     Keeping the surface is only half of it. The other half is that the
+//     *first* full-size frame is expensive wherever it is paid, and until
+//     round 3 it was paid at the child's first summon: a critic measured 12 of
+//     13 first-summons-of-a-session putting 1 to 3 keys in the window
+//     underneath, on the real host after every `omarchy-restart-shell`, while
+//     the same shell warm leaked 0 of 50. The 1x1 surface was not the cause --
+//     a full-screen-always variant leaked on its first summon too -- so it is
+//     the first build and commit of the game's own scene at full size, and the
+//     compositor is still routing the keyboard elsewhere while that happens.
+//
+//     So this file pays it at startup instead, where nobody is typing at the
+//     game yet. `keepLoaded: true` means this item is constructed long before
+//     it is first summoned; `warmingUp` below holds the window at full size
+//     with the game rendered into it for a moment at plugin load, behind the
+//     same empty input mask and with `WlrKeyboardFocus.None` throughout, then
+//     lets it shrink back to one pixel. Nothing is shown -- the content is
+//     rendered at an opacity of 1/255 rather than at 0, because Qt Quick skips
+//     a subtree whose opacity node is fully transparent and a subtree that is
+//     skipped is a subtree that was never built. Measured, same oracle, same
+//     host: see the evidence file's cold-versus-warm table.
 //
 //     A surface that outlives the summon has to earn its keep, and the way it
 //     does that is by being one pixel. While the overlay is closed the window
@@ -100,11 +138,20 @@ import "shell"
 //     The one-pixel form is deliberate belt-and-braces. `mask: Region {}` is
 //     the pattern Omarchy's own OSD uses for exactly this, and its own comment
 //     says so -- but the OSD is only mapped while it is on screen, and this
-//     window is mapped all session. There is no pointer-injection tool in the
-//     development VM, so the empty input region could not be proved with a
-//     real click; sizing the closed surface to one pixel means that if the
-//     mask ever stopped working, what it could swallow is one pixel at 0,0
-//     rather than the whole screen.
+//     window is mapped all session, so sizing the closed surface to one pixel
+//     means that if the mask ever stopped working, what it could swallow is
+//     one pixel at 0,0 rather than the whole screen.
+//
+//     An earlier round of this comment said the empty input region could not
+//     be proved with a real click, because there is no pointer-injection tool
+//     in the development VM. That was true of the packaged tools and false of
+//     the guest: a critic built a client for this Hyprland's
+//     `zwlr_virtual_pointer_manager_v1` and injected real motion and real
+//     buttons. The mask holds -- a click at (0,0) reaches the window below
+//     with the mask on and is swallowed with it off -- and the hedge is
+//     vindicated rather than merely argued: with the mask removed, the
+//     full-screen-always variant swallows a click at (100,100) as well, which
+//     is the difference between one pixel and the whole desktop.
 //   - `open()` puts focus on the key catcher and then hands it straight down
 //     to the hosted screen's own `focusTarget`, on `Qt.callLater` so it lands
 //     after the layer surface is mapped. No click is needed and none is
@@ -138,6 +185,30 @@ Item {
 
   property bool opened: false
 
+  // True for a moment at plugin load, while the window is held at full size
+  // with the game rendered into it so that the first expensive frame is paid
+  // before any child is waiting on it. The header says why. It never makes the
+  // overlay interactive: the input mask stays empty and the keyboard focus
+  // stays `None` for the whole of it, and everything that reads "is the game
+  // up" reads `opened`, which stays false.
+  property bool warmingUp: false
+
+  // How long the warm-up holds the window at full size *after the window is
+  // actually at full size*, which is not the same moment as the plugin being
+  // constructed: measured in the VM, the layer surface takes about 0.8 s from
+  // `Component.onCompleted` to being mapped at all, so a plain timer from
+  // construction spent most of its length on a window that had not appeared
+  // yet. The timer below is restarted when the window's width first grows, so
+  // this is a real window-at-full-size interval either way. It costs a
+  // transparent, input-inert surface for that long, once, at shell start.
+  readonly property int warmUpMs: 1500
+
+  // 1/255. Not zero: `QSGOpacityNode` treats a fully transparent subtree as
+  // blocked and never renders it, so an opacity of 0 would warm nothing. One
+  // 8-bit level over a transparent window is not visible, and it is only up
+  // for `warmUpMs`.
+  readonly property real warmUpOpacity: 0.004
+
   // The id the host knows us by. From the injected manifest when there is one,
   // and from the manifest's own id when there is not, because a `hide()` call
   // with an empty id leaves the host believing the overlay is still up.
@@ -155,6 +226,12 @@ Item {
     // The payload is accepted and ignored. There is nothing a caller can ask
     // this game to do differently, and a summon must not be able to fail on a
     // malformed one.
+
+    // A summon during the warm-up is the real thing and takes it over, so that
+    // "warming up" and "open" are never both true and nothing has to reason
+    // about the pair.
+    warmUp.stop()
+    root.warmingUp = false
     root.opened = true
     Qt.callLater(root.takeFocus)
   }
@@ -190,11 +267,15 @@ Item {
   }
 
   // The save adapter, held untyped on purpose. `ui/Store` is a plain adapter
-  // whose surface is still moving: the version in the tree today reads parsed
-  // objects and has no quarantine, and the reviewed replacement reads the
-  // file's own text and does. This file works with either and asks which it
-  // has rather than assuming, so the two optional members below are looked up
-  // rather than named against a type that would only be right for one of them.
+  // whose surface has moved twice under this file: the version this wiring was
+  // first written against read parsed objects and had no quarantine, and the
+  // one in the tree now reads the file's own text, quarantines, and declares
+  // `writeFailed`. Every optional member is therefore looked up rather than
+  // named against a type that would only be right for one of them -- which is
+  // also why a comment here may not describe a Store that is not in the tree:
+  // a round-2 critic caught this file's own comments describing one that had
+  // not landed yet, and the safety argument in this plugin lives in its
+  // comments.
   readonly property var saveAdapter: Store
 
   // ------------------------------------------------------------ the theme
@@ -210,8 +291,18 @@ Item {
       // A FileView reports a failed write by signal, so the Store's own `try`
       // around `save()` never sees it and has to be told, or it would keep
       // handing changes to a file that is not taking them.
+      //
+      // The Store in the tree now declares `writeFailed(string)` for exactly
+      // this, and documents it as the shape this signal arrives in, so that is
+      // what is called when it is there. `stopWriting(issues)` is the older
+      // spelling and is still accepted: this file works with whichever Store
+      // it is given rather than assuming one.
       var store = root.saveAdapter
-      if (store && typeof store.stopWriting === "function")
+      if (!store)
+        return
+      if (typeof store.writeFailed === "function")
+        store.writeFailed(reason)
+      else if (typeof store.stopWriting === "function")
         store.stopWriting([{ "path": "", "problem": reason }])
     }
   }
@@ -226,10 +317,36 @@ Item {
   // raises `changed()` whenever anything it holds moves, which can be.
   property bool soundOn: true
 
+  // The quarantine the Store was in the last time it said anything. A
+  // quarantine that clears is the one Store transition this file has to act
+  // on, and a bool is the only way to see a transition in a signal that only
+  // ever says "something moved".
+  property bool storeQuarantined: false
+
   Connections {
     target: Store
     function onChanged() {
       root.soundOn = Store.setting("sound") !== false
+
+      // The way out of a quarantine, wired up. When the child decides through
+      // Settings that the unreadable file may be replaced, the Store clears
+      // its own refusal -- but `shell/FileStore.qml` has a refusal of its own,
+      // set when the write failed, and it would go on refusing for the rest of
+      // the session. `allowWritingAgain()` existed for this and had no caller;
+      // this is the only place both halves are visible, which is the same
+      // reason the format decision below lives here.
+      //
+      // What it does not do is write immediately: the Store's own flush runs
+      // before it says anything, so it is refused, and the file layer's
+      // pending payload was dropped when it stopped writing. The session
+      // starts saving again from the child's next change. And because the
+      // re-proof in `writeNow()` is now worn on every write over a path
+      // believed absent rather than once, that next write is guarded rather
+      // than taken on trust.
+      var quarantined = (typeof Store.quarantined === "boolean") ? Store.quarantined : false
+      if (root.storeQuarantined && !quarantined)
+        saveFile.allowWritingAgain()
+      root.storeQuarantined = quarantined
     }
   }
 
@@ -256,6 +373,19 @@ Item {
     }
 
     root.soundOn = Store.setting("sound") !== false
+    root.storeQuarantined = (typeof Store.quarantined === "boolean") ? Store.quarantined : false
+
+    // Pay the first full-size frame now rather than at the child's first
+    // summon. See the header: this is the whole of the cold-start key leak.
+    root.warmingUp = true
+    warmUp.start()
+  }
+
+  property Timer warmUp: Timer {
+    interval: root.warmUpMs
+    repeat: false
+    running: false
+    onTriggered: root.warmingUp = false
   }
 
   Component.onDestruction: saveFile.flushNow()
@@ -283,14 +413,31 @@ Item {
     // anchored to two it is `implicitWidth` by `implicitHeight`. So a closed
     // overlay is one transparent pixel in the corner and an open one is the
     // screen, and the surface itself is never destroyed in between.
+    //
+    // `warmingUp` is the third state and it is the first one that happens: at
+    // plugin load the window goes to full size with the game rendered into it
+    // once, so that the first full-size commit is not the one the child is
+    // waiting on. Note what does *not* change with it -- the mask below stays
+    // empty and `keyboardFocus` below stays `None`, both keyed on `opened`
+    // alone, so a warming window is exactly as inert as a closed one.
     anchors {
       top: true
-      bottom: root.opened
+      bottom: root.opened || root.warmingUp
       left: true
-      right: root.opened
+      right: root.opened || root.warmingUp
     }
     implicitWidth: 1
     implicitHeight: 1
+
+    // The warm-up is only worth anything while this window is really at full
+    // size, and that lags the anchor change: the surface has to be created and
+    // mapped first. Restarting the timer the moment the width grows is what
+    // makes `warmUpMs` an interval of full-size rendering rather than an
+    // interval that mostly elapsed before the window existed.
+    onWidthChanged: {
+      if (root.warmingUp && width > 1)
+        root.warmUp.restart()
+    }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "turbo-tables"
@@ -304,7 +451,8 @@ Item {
     // is the game's own dark rather than the desktop showing through.
     Rectangle {
       anchors.fill: parent
-      visible: root.opened
+      visible: root.opened || root.warmingUp
+      opacity: root.opened ? 1 : root.warmUpOpacity
       color: Theme.ground
     }
 
@@ -331,8 +479,17 @@ Item {
       // on `Qt.callLater`, by which time this scope and the game under it can
       // hold focus -- measured at 35 ms from the summon, with the game
       // holding the focus, which is one frame and change.
-      visible: root.opened
+      //
+      // It is also visible during the startup warm-up, at 1/255 opacity and
+      // with the window's input region still empty and its keyboard focus
+      // still `None`. That is the point of the warm-up: the scene under here
+      // is what costs the first full-size frame, so it is the scene that has
+      // to be built. `focus` follows `opened` rather than visibility, so a
+      // warming key catcher never asks for the keyboard.
+      visible: root.opened || root.warmingUp
+      opacity: root.opened ? 1 : root.warmUpOpacity
       focus: true
+      enabled: root.opened
       Keys.priority: Keys.BeforeItem
 
       Keys.onPressed: function (event) {

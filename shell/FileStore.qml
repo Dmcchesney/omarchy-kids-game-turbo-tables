@@ -76,6 +76,12 @@ import Quickshell.Io
 // Absence is therefore *earned*, by `_absenceIsProven()`, and the proof is
 // positive rather than inferential:
 //
+//   0. Ask about the path itself, again, with a fresh view. A proof of absence
+//      that reuses an older reading is not a proof: the reading and the proof
+//      would then have been taken under different conditions, and the gap
+//      between them is exactly where a directory unlocks. Anything but
+//      "not found" -- a file that reads, a permissions error, silence --
+//      ends the proof here.
 //   1. Walk up from the path. For each ancestor directory, ask FileView what
 //      it is. `NotAFile` means "this exists and is not a regular file" -- the
 //      directory is there.
@@ -90,13 +96,26 @@ import Quickshell.Io
 //      ancestor that turns out to be a regular file, a walk that runs out of
 //      steps -- is "I could not find out", which is a throw.
 //
-// And because a directory can unlock between the read and the first write --
-// which is precisely how the save was destroyed: locked when the shell
-// started, open by the time the child pressed a key -- the proof is taken
-// again, from scratch, immediately before the first write over a path this
-// object believes is absent. If that second look finds a readable file where
-// there was supposed to be nothing, the write is refused and the session
-// stops writing. A save that reappears is a save, not an empty slot.
+// Step 0 is round 3's, and it closes a door a critic opened by asking for the
+// same file twice. The verdict below is sticky, and `_absenceIsProven()` used
+// to interrogate only the ancestors -- so a not-found reading taken while the
+// directory was shut, combined with a traversability proof taken after it
+// opened, answered `null` with `absenceProven` true for a path holding a
+// readable save. The verdict outlived the conditions it was taken under.
+// Nothing reached the disk, because the write side probed again, but the whole
+// claim of this file is that absence is established rather than inherited, and
+// in that case it was inherited. A proof now re-establishes every reading it
+// rests on, including the one it started from.
+//
+// And because a directory can unlock between the read and the write -- which
+// is precisely how the save was destroyed: locked when the shell started, open
+// by the time the child pressed a key -- the proof is taken again, from
+// scratch, before *every* write over a path this object believes is absent and
+// has not itself written. If that second look finds a readable file where
+// there was supposed to be nothing, the write is refused and the session stops
+// writing. A save that reappears is a save, not an empty slot. That re-proof
+// used to latch after one pass; it does not any more, because the pass that
+// matters is not necessarily the first one.
 //
 // ---------------------------------------------------------------------------
 // WRITING
@@ -148,7 +167,7 @@ QtObject {
     _lastErrorName = ""
     _everLoaded = false
     _absenceProven = false
-    _absenceReproven = false
+    _wroteTheFile = false
     _writable = true
     _hasPending = false
     _pending = ""
@@ -205,9 +224,15 @@ QtObject {
   readonly property bool absenceProven: _absenceProven
   property bool _absenceProven: false
 
-  // The first write over a path believed absent re-proves it. Set once that
-  // second proof has passed, so the walk is not repeated on every keystroke.
-  property bool _absenceReproven: false
+  // True once this object has written the file itself. Only then may a write
+  // over an "absent" verdict skip the re-proof -- because from that point the
+  // file this object would find is the one it put there.
+  //
+  // This used to be `_absenceReproven`, set by the first re-proof that passed,
+  // which made the guard a single shot. It is the only guard standing between
+  // a stale absence and a real save, so it is now worn on every write until
+  // this object owns the file.
+  property bool _wroteTheFile: false
 
   // How many directory levels the walk may climb before it gives up and calls
   // the answer "I could not find out". A save path is four levels below the
@@ -285,7 +310,20 @@ QtObject {
 
   // Positive proof that nothing lives at `targetPath`. See the header for why
   // a not-found verdict is only ever the beginning of this question.
+  //
+  // Every reading this answer rests on is taken here, now, including the
+  // reading of the file itself. Absence is a claim about a moment, and a claim
+  // about a moment may not be assembled out of readings taken at two different
+  // ones: the store's `absent` verdict may have been recorded seconds ago,
+  // while the home directory was still locked, and a caller that trusted it
+  // and only checked the ancestors would call an unlocked directory holding a
+  // real save "empty".
   function _absenceIsProven(targetPath) {
+    // Step 0. The file itself, from a fresh view with no cache to serve from.
+    var here = _probe(targetPath)
+    if (here !== FileViewError.FileNotFound)
+      return false
+
     var child = targetPath
     for (var step = 0; step < maxAncestorProbes; step++) {
       var parent = _parentOf(child)
@@ -356,32 +394,38 @@ QtObject {
 
     if (_verdict === "present") {
       _everLoaded = true
-      if (format === "text")
-        return text
-      // The object protocol still refuses to guess: a file that does not parse
-      // is a throw, which the Store turns into a quarantine, not a null that
-      // it would read as "fresh install".
-      var parsed = null
-      try {
-        parsed = JSON.parse(text)
-      } catch (error) {
-        throw new Error("the save file at " + path + " is not JSON: " + error)
-      }
-      // `typeof [] === "object"`, so the array has to be named or a JSON
-      // array walks straight through a check whose message says it did not.
-      // A Store handed an array reads every key off it as undefined, adopts
-      // the defaults, and writes them over the file on the next keystroke --
-      // the same destruction with different bytes in front of it.
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error("the save file at " + path + " is not a JSON object")
-      return parsed
+      return _decode(text)
     }
 
     if (_verdict === "absent") {
       // The one case that may mean "fresh install" -- and the one case that
       // has to be earned, because FileView answers FileNotFound both for a
       // path that is not there and for a path it was not allowed to look at.
+      // `_absenceIsProven` re-reads the path itself as well as its ancestors,
+      // so this is a claim about now rather than about whenever the verdict
+      // above was recorded.
       if (!_absenceIsProven(path)) {
+        // It failed for one of two very different reasons and the caller is
+        // owed the right one. Either an ancestor could not be read into, or
+        // the verdict is older than the file: a directory that was shut when
+        // this store first looked can be open by the time it is asked again,
+        // and behind it is a real save. That case is not an error at all --
+        // the file is there and readable, so it is read.
+        var again = _probeRead(path)
+        if (again.outcome === -1) {
+          _verdict = "present"
+          _lastError = -1
+          _lastErrorName = ""
+          _everLoaded = true
+          return _decode(again.text)
+        }
+        if (again.outcome >= 0 && again.outcome !== FileViewError.FileNotFound) {
+          _verdict = "unreadable"
+          _lastError = again.outcome
+          _lastErrorName = FileViewError.toString(again.outcome)
+          throw new Error("the save file at " + path + " could not be read: "
+                          + _lastErrorName)
+        }
         throw new Error("the save file at " + path + " was not found, and its absence"
                         + " could not be established: a directory above it could not be"
                         + " read into. Refusing to treat this as a fresh install.")
@@ -395,6 +439,31 @@ QtObject {
       throw new Error("the save file at " + path + " could not be read: " + _lastErrorName)
 
     throw new Error("the save file at " + path + " could not be read: the read produced no result")
+  }
+
+  // The file's own bytes, in whichever protocol the Store speaks. Shared by
+  // the two ways a present file can be reached: the ordinary read, and a read
+  // that had to correct a stale "absent" verdict.
+  function _decode(text) {
+    if (format === "text")
+      return text
+    // The object protocol still refuses to guess: a file that does not parse
+    // is a throw, which the Store turns into a quarantine, not a null that
+    // it would read as "fresh install".
+    var parsed = null
+    try {
+      parsed = JSON.parse(text)
+    } catch (error) {
+      throw new Error("the save file at " + path + " is not JSON: " + error)
+    }
+    // `typeof [] === "object"`, so the array has to be named or a JSON array
+    // walks straight through a check whose message says it did not. A Store
+    // handed an array reads every key off it as undefined, adopts the
+    // defaults, and writes them over the file on the next keystroke -- the
+    // same destruction with different bytes in front of it.
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error("the save file at " + path + " is not a JSON object")
+    return parsed
   }
 
   // --------------------------------------------------------------- writing
@@ -443,7 +512,14 @@ QtObject {
   // Write whatever is waiting, now. Called when the overlay closes and when
   // this object is destroyed, so the last change before Escape is on disk.
   function flushNow() {
-    debounce.stop()
+    // `Component.onDestruction` calls this, and by then the object's own
+    // children may already be gone: an unguarded `debounce.stop()` raises
+    // "TypeError: Cannot read property 'stop' of null" out of every teardown.
+    // It was harmless -- the exception escapes after the last write is
+    // irrelevant -- but a file whose argument is made of its own log lines
+    // should not be printing a TypeError on the way out.
+    if (debounce)
+      debounce.stop()
     writeNow()
   }
 
@@ -454,14 +530,19 @@ QtObject {
     _hasPending = false
     _pending = ""
 
-    // The last look before the first byte lands on a path this object was
-    // told is empty. The save that was destroyed in the VM was destroyed in
-    // exactly this gap: the directory was shut when the shell started and
-    // open by the time the child pressed a key, so the read said "nothing
-    // here" and the write found a real file to land on. A fresh probe costs
-    // one stat and closes it. It runs once -- after the first write this
-    // object owns the file it is writing.
-    if (_verdict === "absent" && !_absenceReproven) {
+    // The last look before a byte lands on a path this object was told is
+    // empty. The save that was destroyed in the VM was destroyed in exactly
+    // this gap: the directory was shut when the shell started and open by the
+    // time the child pressed a key, so the read said "nothing here" and the
+    // write found a real file to land on.
+    //
+    // This runs before *every* such write, not once. It used to latch on the
+    // first pass, on the reasoning that after one write this object owns the
+    // file -- but the thing that makes that true is the write, not the proof,
+    // and a first write that never landed left the guard spent and the second
+    // write unguarded. `_wroteTheFile` is set below, by a write that did not
+    // fail, which is the condition the reasoning actually wanted.
+    if (_verdict === "absent" && !_wroteTheFile) {
       var second = _probe(path)
       if (second === -1) {
         stopWriting("the save file at " + path + " was not found when the game started"
@@ -475,7 +556,6 @@ QtObject {
                     + " Refusing to write over it")
         return
       }
-      _absenceReproven = true
     }
 
     var failuresBefore = _saveFailures
@@ -490,6 +570,18 @@ QtObject {
       stopWriting("the save file at " + path + " could not be written: " + _lastSaveErrorName)
       return
     }
+
+    // A write that did not fail is what makes "this object owns the file" true,
+    // and it is the only thing that may retire the re-proof above. Note that it
+    // is deliberately not conditioned on `_saves` moving: an unchanged file
+    // writes nothing and raises neither signal, and a write that put nothing
+    // new on disk is still a write this object made over this path.
+    //
+    // `_verdict` is left alone. It records what a *read* said, and no read has
+    // happened; inferring "present" from a write would be the same shape of
+    // reasoning this file exists to refuse.
+    _wroteTheFile = true
+
     if (_saves > savesBefore)
       wrote()
   }
