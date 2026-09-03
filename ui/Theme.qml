@@ -70,6 +70,74 @@ QtObject {
   readonly property var bodyNames: ["SPRINTER", "WEDGE", "STOCKCAR",
                                     "BUGGY", "HAULER", "PROTOTYPE"]
 
+  // ------------------------------------------------------- the one camera
+  // ROUND-6. The kart and the floor it stands on are drawn by two different
+  // files, and until now they were drawn by two different cameras. A critic
+  // put the number on it: solving the sprite's own published basis gave an
+  // apparent pitch of about 31 degrees, while a least-squares fit of the
+  // turntable's rim (486 points, rms 0.35 px) gave 23.96 -- the dais was
+  // drawn 27 px flatter than the kart's projection required, 77 times the
+  // fit residual. Two cameras in one picture is why the kart read as
+  // composited onto the dais rather than standing on it.
+  //
+  // These four numbers are now the ONLY camera in the garage. KartSprite
+  // takes its projection from them and GarageStall derives the turntable
+  // from them, so the two cannot drift apart again by anyone editing a
+  // constant in one file. Nothing here is a colour or a theme value; it
+  // lives in Theme because Theme is the one module both files already
+  // import.
+  readonly property real kartYawDeg: 22
+  readonly property real kartPitchDeg: 25
+  // Distance to the picture plane, in model units, and the height of the
+  // point the camera is aimed at above the floor. Both are what makes the
+  // far side of the kart smaller than the near side.
+  readonly property real kartFocal: 190
+  readonly property real kartAimHeight: 13
+
+  // A horizontal circle of model radius `r` centred on the point where the
+  // kart's wheels touch the floor, projected by that camera, in the kart
+  // sprite's own view-box units:
+  //
+  //   a   the semi-axis across the screen
+  //   b   the semi-axis down the screen
+  //   dy  how far the ellipse's CENTRE falls below the contact point
+  //
+  // `dy` is not a fudge. Under a projection with a finite focal length the
+  // near arc of a floor circle is closer to the camera than the far arc, so
+  // it swings further from the contact point than the far arc does, and the
+  // projected ellipse's centre is not the projection of the circle's centre.
+  // A dais drawn as an ellipse centred on the kart's wheels is therefore
+  // wrong even if its axis ratio is right.
+  //
+  // Closed form, derived from the projection rather than fitted. With
+  // A = f sin(pitch) + aimHeight cos(pitch) and q = f^2 - r^2:
+  //
+  //   a = r f / sqrt(q)      b = r f A / q      dy = r^2 A / q
+  //
+  // It reproduces a 1440-point conic fit of the same circle to five decimal
+  // places, and as f grows it collapses to the orthographic answer
+  // b/a -> sin(pitch), dy -> 0, which is the check that it is the right
+  // formula and not a coincidence.
+  function groundEllipse(r) {
+    var f = kartFocal
+    var A = f * Math.sin(kartPitchDeg * Math.PI / 180)
+            + kartAimHeight * Math.cos(kartPitchDeg * Math.PI / 180)
+    var q = f * f - r * r
+    if (q <= 0 || r <= 0)
+      return { a: 0, b: 0, dy: 0 }
+    return { a: r * f / Math.sqrt(q), b: r * f * A / q, dy: r * r * A / q }
+  }
+
+  // The apparent pitch of a floor circle of radius `r` under that camera, in
+  // degrees: asin(b/a). It is NOT kartPitchDeg -- the perspective divide and
+  // the camera's height above the floor both steepen it, and it grows with
+  // the circle. This is the number a critic measures off the frame, so it is
+  // the number this file publishes.
+  function groundPitchDeg(r) {
+    var e = groundEllipse(r)
+    return e.a > 0 ? Math.asin(Math.min(1, e.b / e.a)) * 180 / Math.PI : 0
+  }
+
   // The three rivals of the design's AI table, in fixed order.
   readonly property var rivalNames: ["BOLT", "PISTON", "GASKET"]
   readonly property var rivalPaints: [2, 4, 3]

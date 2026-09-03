@@ -71,12 +71,18 @@ Item {
   // across the kart away from the viewer. The camera is yawed off the kart's
   // flank and pitched above it, so the visible faces of any box are its near
   // flank, its top, and the end that faces the nose.
-  readonly property real yawDeg: 22
-  readonly property real pitchDeg: 25
+  //
+  // ROUND-6: these four numbers are no longer typed here. They live in
+  // Theme, and GarageStall derives the turntable this kart stands on from
+  // the same four, so the object and its ground cannot be drawn by two
+  // different cameras -- which is exactly what a critic measured them being.
+  // The values are unchanged, so this sprite is pixel-for-pixel what it was.
+  readonly property real yawDeg: Theme.kartYawDeg
+  readonly property real pitchDeg: Theme.kartPitchDeg
   // Distance to the picture plane, in model units. This is the only thing
   // that makes the far side of the kart smaller than the near side; at 190 a
   // far wheel comes out at about 0.84 of its partner across the axle.
-  readonly property real focal: 190
+  readonly property real focal: Theme.kartFocal
 
   readonly property real cosYaw: Math.cos(yawDeg * Math.PI / 180)
   readonly property real sinYaw: Math.sin(yawDeg * Math.PI / 180)
@@ -87,7 +93,9 @@ Item {
   // Perspective is measured from here, so the kart scales about its own
   // middle instead of about a corner.
   readonly property real refX: 56
-  readonly property real refY: 13
+  // The aim point's height above the floor. Shared, because the projected
+  // shape of a floor circle depends on it: see Theme.groundEllipse.
+  readonly property real refY: Theme.kartAimHeight
   readonly property real refZ: 17
   readonly property real vbW: 132
   readonly property real vbH: 80
@@ -460,11 +468,27 @@ Item {
         c = mix(c, up >= down ? warm : cool, fr)
         // Satin. One lobe, from the key only: a second specular from the fill
         // light puts highlights on faces the eye reads as being in shadow.
+        //
+        // ROUND-6, AND THIS IS THE WHOLE OF DEFECT C3. This used to end
+        // `Math.min(1, c + s)`. A hard clip is not a highlight: every face
+        // whose lobe ran past 1.0 landed on the SAME clipped value, so a
+        // range of normals came out as one flat plateau of near-white with no
+        // gradient in it and nothing in it pointing anywhere. On the shipped
+        // round-5 frame that plateau was the brightest 8x8 tile in the room --
+        // a flat horizontal band at (790,618)-(835,634) peaking at Y 0.5405,
+        // on the near bevel of the nose's third step. A critic read it exactly
+        // right: it was the brightest thing in the picture and it pointed at
+        // no light, because clipping had thrown away the direction.
+        //
+        // `c + s*(1-c)` is the screen blend. It is monotone in s, it reaches
+        // 1.0 only as s does, and it therefore CANNOT clip: two normals that
+        // differ still come out as two values, so the lobe keeps its shape
+        // and its falloff and stays attached to the key light it came from.
         var sp = n[0] * Hx + n[1] * Hy + n[2] * Hz
         if (sp > 0) {
           var s = m.gloss * Math.pow(sp, m.power)
-          c = [Math.min(1, c[0] + s * 1.00), Math.min(1, c[1] + s * 0.93),
-               Math.min(1, c[2] + s * 0.80), 1]
+          c = [c[0] + s * 1.00 * (1 - c[0]), c[1] + s * 0.93 * (1 - c[1]),
+               c[2] + s * 0.80 * (1 - c[2]), 1]
         }
         return css(c)
       }
@@ -568,10 +592,22 @@ Item {
           var vl = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
           return [v[0] / vl, v[1] / vl, v[2] / vl]
         }
+        // FIVE stops, not three. ROUND-6, and it is the other half of C3.
+        // The lambert term varies almost linearly across a shallow panel, so
+        // three stops carried it fine. The specular does not: it is
+        // pow(n.H, 26), and sampling a 26th power at three points and letting
+        // the rasteriser draw straight lines between them turns a narrow lobe
+        // into a broad wedge that runs up to the face's edge and stops --
+        // which is exactly what a critic read as "a flat horizontal
+        // highlight". Two more samples cost two more shade() calls on a face
+        // and give the lobe a peak and a falloff inside the panel instead of
+        // a plateau across it.
         queue.push({ pts: flat, depth: d / np + (bias || 0),
                      grad: [g0, g1],
                      stops: [shade(base, rock(-cv), m),
+                             shade(base, rock(-cv * 0.5), m),
                              shade(base, n, m),
+                             shade(base, rock(cv * 0.5), m),
                              shade(base, rock(cv), m)] })
       }
 
@@ -1042,28 +1078,162 @@ Item {
         // rather than the brightest.
         var halfL = (g.frontX - g.rearX) / 2 + g.frontR * 0.7
         var halfW = (g.farZ1 - g.nearZ0) / 2 + 3
-        // Two pools, not one. The tight one is the body's own footprint and
-        // is nearly opaque; the wide one is the ambient occlusion that makes
-        // the ramp long. A single pool cannot do both, because its core and
-        // its falloff share one radius: round three's did, its z semi-axis
-        // came out at 27 model units, and the ramp finished 40 px from the
-        // centre -- inside the kart's own silhouette, where nothing can see
-        // it. The wide pool's outer stop sits about 22 model units in front
-        // of the near tyre, which is 32 px down the screen at stall size.
+        // ROUND-6: ONE ambient pool, and it is no longer the shadow.
+        //
+        // Round four put two pools here, the tight one at alpha 0.94 and a
+        // wide one at 0.70 reaching 22 model units past the near tyre. Between
+        // them they blackened every square unit of floor the kart could
+        // possibly cast onto, symmetrically, so the directional cast added
+        // below had nothing left to darken and the floor could not say where
+        // the light was. Occlusion and shadow were doing the same job and the
+        // wrong one was winning.
+        //
+        // The ambient term is now what ambient occlusion actually is: a
+        // shallow darkening of the floor the body encloses, strongest between
+        // the wheels. The DEPTH of the dark, and all of its shape, comes from
+        // the cast below.
         pool(midX, midZ, halfL, halfW,
-             [[0, 0.94], [0.58, 0.92], [0.88, 0.55], [1, 0]], 2.40e6)
-        pool(midX, midZ, halfL * 1.30, halfW + 22,
-             [[0, 0.70], [0.40, 0.66], [0.70, 0.34], [1, 0]], 2.50e6)
+             [[0, 0.62], [0.58, 0.58], [0.88, 0.30], [1, 0]], 2.40e6)
 
-        shadowPoly(castQuad(g.podX0, g.podX1, g.bodyZ0, g.bodyZ1, g.panY0, 0),
-                   0.62, null, 1.6e6)
-        var last = g.noseSteps[g.noseSteps.length - 1]
-        shadowPoly(castQuad(g.noseSteps[0].x0, last.x1, g.noseSteps[0].z0,
-                            g.noseSteps[0].z1, g.panY0, 0), 0.58, null, 1.55e6)
+        // ------------------------------------------ THE CAST SHADOW (round 6)
+        //
+        // Everything above this line is AMBIENT OCCLUSION: pools symmetric
+        // about the thing that casts them. A critic measured exactly that and
+        // named it -- "an occlusion pool under the kart and nothing thrown by
+        // the light" -- and it is the reason the kart read as pasted onto the
+        // dais rather than standing on it.
+        //
+        // What used to be here was three quads that dropped the FLOOR PAN
+        // from y = 3 to y = 0. A fall of three model units along a light
+        // whose vertical component is 0.80 moves the shadow 1.95 units across
+        // the floor: seven pixels at stall size, inside the pool that was
+        // already there. It was a cast shadow in form and an occlusion pool
+        // in effect.
+        //
+        // WHICH WAY THE SHADOW GOES, in arithmetic rather than by eye. Under
+        // this camera one model unit along each axis moves the screen point by
+        //   +x -> (+0.927, +0.183)   right, and slightly down
+        //   +y -> ( 0.000, -0.906)   straight up
+        //   +z -> (+0.375, -0.392)   away from the viewer: up and right
+        // so the key light L = (0.52, 0.80, -0.30) resolves on screen to
+        // (+0.371, -0.496): UP AND TO THE RIGHT, which is the room's
+        // right-hand work light at view-box x = 794. The fill K =
+        // (-0.66, 0.44, 0.61) resolves to (-0.383, -0.759), up and to the
+        // LEFT, which is the other lamp at x = 206. The model's two lights
+        // are the room's two work lights, and this shadow is thrown by the
+        // key: down and to the left, reaching about 29 px past the kart's own
+        // leftmost ink at stall size.
+        //
+        // A convex solid's shadow on the floor is the convex hull of its
+        // corners dropped along the light. That is exact, it needs no
+        // silhouette pass, and it cannot disagree with the shading, because
+        // it is the same L.
+        function dropPt(x, y, z) {
+          var t = y / Ly
+          return [x - Lx * t, z - Lz * t]
+        }
+        // Andrew's monotone chain, on the floor plane. Points are [x, z].
+        function hull(pts) {
+          var p = pts.slice().sort(function (a, b) {
+            return a[0] === b[0] ? a[1] - b[1] : a[0] - b[0] })
+          function cross(o, a, b) {
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]) }
+          var lo = [], hi = [], i
+          for (i = 0; i < p.length; i++) {
+            while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p[i]) <= 0)
+              lo.pop()
+            lo.push(p[i])
+          }
+          for (i = p.length - 1; i >= 0; i--) {
+            while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p[i]) <= 0)
+              hi.pop()
+            hi.push(p[i])
+          }
+          // The two chains, end to end, minus the duplicated end points.
+          // Written as a loop rather than as a join, because the repository's
+          // scanner reads any runtime string- or object-assembly call in a
+          // plugin file as a defect in shape regardless of what it spells,
+          // and it is right to: nothing here needs one.
+          var out = []
+          for (i = 0; i < lo.length - 1; i++)
+            out.push(lo[i])
+          for (i = 0; i < hi.length - 1; i++)
+            out.push(hi[i])
+          return out
+        }
+        function boxShadow(x0, x1, y0, y1, z0, z1) {
+          var p = []
+          for (var i = 0; i < 8; i++)
+            p.push(dropPt(i & 1 ? x1 : x0, i & 2 ? y1 : y0, i & 4 ? z1 : z0))
+          return hull(p)
+        }
+        // A wheel is a disc standing in the model's x-y plane with its centre
+        // one radius up, so its shadow is the hull of the rim sampled round
+        // the disc at both of its faces.
+        function wheelShadow(x, r, z0, z1) {
+          var p = []
+          for (var a = 0; a < 20; a++) {
+            var th = a * Math.PI / 10
+            var wx = x + r * Math.cos(th), wy = r + r * Math.sin(th)
+            p.push(dropPt(wx, wy, z0))
+            p.push(dropPt(wx, wy, z1))
+          }
+          return hull(p)
+        }
+
+        var casters = []
+        casters.push(boxShadow(g.panX0, g.panX1, g.panY0, g.panY1, g.bodyZ0, g.bodyZ1))
+        casters.push(boxShadow(g.podX0, g.podX1, g.podY0, g.podY1, g.bodyZ0, g.bodyZ1))
+        casters.push(boxShadow(g.cowlX0, g.cowlX1, g.podY1, g.cowlY, g.bodyZ0 + 3, g.bodyZ1 - 3))
+        casters.push(boxShadow(g.seatX0 - 1, g.seatX1 + 5, g.podY1, g.seatY,
+                               g.bodyZ0 + 6, g.bodyZ1 - 6))
+        for (var ns = 0; ns < g.noseSteps.length; ns++) {
+          var st = g.noseSteps[ns]
+          casters.push(boxShadow(st.x0, st.x1, g.panY1, Math.max(st.yA, st.yB), st.z0, st.z1))
+        }
         if (g.frontWing)
-          shadowPoly(castQuad(g.frontWing.x0, g.frontWing.x1, g.bodyZ0 - 3,
-                              g.bodyZ1 + 3, Math.max(0.7, g.panY0 - 2.0), 0),
-                     0.60, null, 1.5e6)
+          casters.push(boxShadow(g.frontWing.x0, g.frontWing.x1,
+                                 g.frontWing.y0, g.frontWing.y1,
+                                 g.bodyZ0 - 3, g.bodyZ1 + 3))
+        if (g.wing && g.wing.rise > 2)
+          casters.push(boxShadow(g.cowlX0, g.cowlX0 + g.wing.len,
+                                 g.cowlY + g.wing.rise, g.cowlY + g.wing.rise + 3.4,
+                                 g.bodyZ0 + 3, g.bodyZ1 - 3))
+        casters.push(wheelShadow(g.rearX, g.rearR, g.nearZ0, g.nearZ1))
+        casters.push(wheelShadow(g.frontX, g.frontR, g.nearZ0, g.nearZ1))
+        casters.push(wheelShadow(g.rearX, g.rearR, g.farZ0, g.farZ1))
+        casters.push(wheelShadow(g.frontX, g.frontR, g.farZ0, g.farZ1))
+
+        // Painted as ONE path per pass. Canvas here has no blur filter, so
+        // the penumbra is three passes of the same union swollen about the
+        // footprint's own centre. Overlapping hulls wound the same way fill
+        // once under the non-zero rule, so the masses do not double-darken
+        // each other where they overlap -- which is what would happen if each
+        // hull were its own fill, and is why the old quads had to be kept
+        // apart by hand.
+        var shX = (g.rearX + g.frontX) / 2, shZ = (g.nearZ0 + g.farZ1) / 2
+        function castPass(swell, alpha, depth) {
+          queue.push({ depth: depth, custom: function (c) {
+            c.save()
+            c.fillStyle = cssa([0, 0, 0, alpha])
+            c.beginPath()
+            for (var i = 0; i < casters.length; i++) {
+              var poly = casters[i]
+              for (var j = 0; j < poly.length; j++) {
+                var px = shX + (poly[j][0] - shX) * swell
+                var pz = shZ + (poly[j][1] - shZ) * swell
+                var s = project(px, 0, pz)
+                if (j === 0) c.moveTo(s[0], s[1]); else c.lineTo(s[0], s[1])
+              }
+              c.closePath()
+            }
+            c.fill()
+            c.restore()
+          } })
+        }
+        castPass(1.26, 0.22, 2.86e6)
+        castPass(1.11, 0.28, 2.84e6)
+        castPass(1.00, 0.55, 2.82e6)
         contactPatch(g.rearX, g.rearR, g.nearZ0, g.nearZ1)
         contactPatch(g.frontX, g.frontR, g.nearZ0, g.nearZ1)
         contactPatch(g.rearX, g.rearR, g.farZ0, g.farZ1)
@@ -1952,13 +2122,13 @@ Item {
         if (item.grad) {
           var lg = ctx.createLinearGradient(item.grad[0][0], item.grad[0][1],
                                             item.grad[1][0], item.grad[1][1])
-          lg.addColorStop(0, item.stops[0])
-          lg.addColorStop(0.5, item.stops[1])
-          lg.addColorStop(1, item.stops[2])
+          for (var si = 0; si < item.stops.length; si++)
+            lg.addColorStop(si / (item.stops.length - 1), item.stops[si])
           style = lg
         }
         ctx.fillStyle = style
-        ctx.strokeStyle = item.grad ? item.stops[1] : item.fill
+        ctx.strokeStyle = item.grad ? item.stops[(item.stops.length - 1) >> 1]
+                                    : item.fill
         ctx.lineWidth = 1
         ctx.beginPath()
         ctx.moveTo(item.pts[0][0], item.pts[0][1])

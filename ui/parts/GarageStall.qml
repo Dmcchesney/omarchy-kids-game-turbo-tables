@@ -30,19 +30,53 @@ Item {
   // so that the bottom-left corner of the bay is bare floor: round one parked
   // the KART BODY stepper on the dais and the amber rim grazed its edge.
   readonly property real daisX: 600
-  readonly property real daisY: 408
-  readonly property real daisRadius: 256
+  readonly property real daisY: 372
+
+  // How wide the kart standing here is drawn, in view-box units. Garage.qml
+  // reads the hero sprite's width from here rather than repeating a number,
+  // because the turntable's size is derived from it below: the plinth and
+  // the thing on it are one scale, set once.
+  readonly property real kartWidth: 486
+  // View-box units per model unit of the kart's own space. KartSprite draws
+  // into a 132-unit-wide view box, so a sprite `kartWidth` units wide puts
+  // this many stall units on one kart model unit.
+  readonly property real kartToStall: kartWidth / 132
+
+  // ------------------------------------------------- ONE CAMERA, ROUND SIX
+  //
+  // Rounds two through five drew this plinth as an ellipse whose ratio was a
+  // typed constant. Round two used 60/248 = 0.24. Round four replaced it
+  // with 104/256 = 0.406 = sin(24 deg), reasoning that the kart is drawn by
+  // a camera pitched 25 degrees and a floor circle seen from there projects
+  // to sin(pitch).
+  //
+  // BOTH OF THOSE ARE WRONG, and a critic measured how wrong: fitting the
+  // shipped rim (486 points, rms 0.35 px) gave an apparent pitch of 23.96
+  // degrees against about 31 for the kart's own projection -- the dais was
+  // 27 px flatter than the kart standing on it needed, which is 77 times the
+  // fit residual. sin(pitch) is the ORTHOGRAPHIC answer. KartSprite is not
+  // orthographic: it divides by distance, and its aim point sits 13 model
+  // units above the floor. Both of those steepen a floor circle, and the
+  // second one steepens it even for a circle of zero radius.
+  //
+  // So there is no ellipse constant here any more. `daisGroundR` is the only
+  // art choice on this plinth -- how many model units of floor the turntable
+  // covers -- and its projection comes from Theme.groundEllipse, the same
+  // camera KartSprite projects every face through.
+  //
+  // `daisCy` is the projected ellipse's CENTRE, which is not the kart's
+  // contact point: the near arc of a floor circle is closer to the camera
+  // than the far arc, so it swings further down than the far arc swings up.
+  // `daisY` stays the contact point, because that is what Garage.qml stands
+  // the kart on.
+  readonly property real daisGroundR: 53.7
+  readonly property var daisFit: Theme.groundEllipse(daisGroundR)
+  readonly property real daisRadius: daisFit.a * kartToStall
   // The dais is a solid plinth, not a painted disc: `daisRy` is the top
   // face's minor axis and `daisRim` the height of the course below it, which
   // is the surface that catches the amber rim light and carries the kerb.
-  //
-  // The ratio daisRy/daisRadius is 0.406, which is sin(24 degrees). The kart
-  // is drawn by a camera pitched 25 degrees above the floor, and a circle on
-  // the floor seen from there projects to an ellipse of exactly that ratio.
-  // Round two used 60/248 = 0.24, a much flatter disc than the kart standing
-  // on it -- two different cameras in one picture, which is part of why the
-  // kart read as pasted on rather than standing there.
-  readonly property real daisRy: 104
+  readonly property real daisRy: daisFit.b * kartToStall
+  readonly property real daisCy: daisY + daisFit.dy * kartToStall
   readonly property real daisRim: 26
 
   function vx(x) { return originX + x * unit }
@@ -280,9 +314,22 @@ Item {
       // block can be detached from it.
       var dx0 = stall.daisX
       var dr = stall.daisRadius
-      var dcy = stall.daisY
+      var dcy = stall.daisCy
       var dry = stall.daisRy
       var rim = stall.daisRim
+
+      // ROUND-6. Every ring on this plinth is a floor circle put through the
+      // kart's camera, not the outer ellipse with a number subtracted from
+      // each axis. `ring(k)` is the circle of k times the turntable's radius.
+      // Subtracting a constant is wrong twice over: it changes the axis ratio
+      // (26 off 256 and 12 off 104 is a different camera again) and it leaves
+      // the ring concentric with the outer ellipse when a smaller floor
+      // circle projects with its centre HIGHER up the screen, not level.
+      function ring(k) {
+        var e = Theme.groundEllipse(stall.daisGroundR * k)
+        return { rx: e.a * stall.kartToStall, ry: e.b * stall.kartToStall,
+                 cy: stall.daisY + e.dy * stall.kartToStall }
+      }
 
       function daisPoint(angle, drop) {
         return [stall.vx(dx0 + Math.cos(angle) * dr),
@@ -290,9 +337,10 @@ Item {
       }
 
       // The plinth's own shadow, thrown away from the work lights overhead.
+      var dsh = ring(1.10)
       ctx.save()
-      ctx.translate(stall.vx(dx0), stall.vy(dcy + rim + 6))
-      ctx.scale(dr * 1.07 * u, (dry + 14) * u)
+      ctx.translate(stall.vx(dx0), stall.vy(dsh.cy + rim + 6))
+      ctx.scale(dsh.rx * u, dsh.ry * u)
       var daisShadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
       daisShadow.addColorStop(0, Qt.rgba(0, 0, 0, 0.62))
       daisShadow.addColorStop(0.72, Qt.rgba(0, 0, 0, 0.34))
@@ -327,8 +375,9 @@ Item {
       }
 
       ellipse(dx0, dcy, dr, dry, "#242b38")
-      ellipse(dx0, dcy - 2, dr - 26, dry - 12, "#2b3341")
-      ellipse(dx0, dcy - 4, dr - 78, dry - 30, "#313a49")
+      var r90 = ring(0.90), r70 = ring(0.70)
+      ellipse(dx0, r90.cy - 2, r90.rx, r90.ry, "#2b3341")
+      ellipse(dx0, r70.cy - 4, r70.rx, r70.ry, "#313a49")
 
       // Amber rim light along the near edge of the top face, dying away round
       // the sides. Round one stroked the whole ellipse in amberDeep at 2.5

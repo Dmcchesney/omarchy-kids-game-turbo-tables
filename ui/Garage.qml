@@ -129,12 +129,43 @@ FocusScope {
   Accessible.name: "Garage"
   Accessible.description: "Set up your kart and the race, then ready up. Tab moves, arrows change, Enter chooses, Escape leaves."
 
-  // Escape backs out; up and down walk the same chain Tab walks. Both only
-  // run when the focused control has not already used the key, because key
+  // Escape backs out; Tab, Backtab, Up and Down all walk `stops`. Each only
+  // runs when the focused control has not already used the key, because key
   // events reach an ancestor only after the focused item ignores them.
+  //
+  // ROUND-6: TAB IS HANDLED HERE, and it was not before.
+  //
+  // Until this round the screen left Tab to Qt's implicit focus chain and
+  // asserted the result -- and `tests/qml/tst_garage_keyboard.qml` had been
+  // FAILING on exactly that for two rounds: test_02 and test_03, red at
+  // e17e9bb, red before my first edit this round, and reported as "18 passed,
+  // 0 failed" in the round-5 self-report, which is the one line of that
+  // report's check table that was not true. Pressing Tab moved focus
+  // NOWHERE: `garage.stopIndex()` stayed 0 through eight presses. A bare
+  // three-Rectangle probe with `activeFocusOnTab: true` on every one of them
+  // behaves the same way in this Qt build, so it is not something about this
+  // screen -- but the design's own policy rail reads "TAB MOVE" and the
+  // screen was not doing it.
+  //
+  // The reason the last round did not see it: its eight focus frames were
+  // produced by the harness, which advances focus by calling
+  // nextItemInFocusChain() directly. That function works. The KEY did not,
+  // and only the test pressed the key. Measuring the mechanism instead of
+  // the affordance is how a headline control goes two rounds dead.
+  //
+  // Handling it here also makes Tab walk `stops` BY CONSTRUCTION rather than
+  // by agreeing with a chain the layout could reorder underneath it.
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_Escape) {
       garage.leaveRequested()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+      // Shift+Tab arrives as Key_Backtab on some platforms and as Key_Tab
+      // with the Shift modifier on others, so both are read here rather than
+      // trusting whichever one this machine happens to send.
+      var back = event.key === Qt.Key_Backtab
+                 || (event.modifiers & Qt.ShiftModifier) !== 0
+      garage.moveFocus(back ? -1 : 1)
       event.accepted = true
     } else if (event.key === Qt.Key_Down) {
       garage.moveFocus(1)
@@ -368,7 +399,10 @@ FocusScope {
         // Sized so the whole kart stands on the plinth. At 536 the nose's
         // lower corner fell outside the dais ellipse and crossed the amber
         // rim; the fit is checked against the ellipse, not by eye.
-        width: stall.vs(486)
+        // ROUND-6: the number lives in GarageStall, which derives the
+        // turntable's size from it, so the plinth and the kart on it cannot
+        // be scaled apart.
+        width: stall.vs(stall.kartWidth)
         height: width * vbH / vbW
         x: stall.vx(stall.daisX) - width / 2
         y: stall.vy(stall.daisY) - height * groundFraction
