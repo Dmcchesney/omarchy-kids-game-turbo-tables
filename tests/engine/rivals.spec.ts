@@ -28,6 +28,7 @@ export function spec(E: typeof EngineModule, label: string): void {
       ATTACK_CARDS,
       BOOST_CARDS,
       HALF_LAP,
+      NICE_RUN_CHANCE,
       POLICY_INTERVAL,
       RIVAL_FLOOR_MS,
       RIVAL_LEVELS,
@@ -271,7 +272,7 @@ export function spec(E: typeof EngineModule, label: string): void {
       answerRight(harness, "you");
       const choice = choosePlay(harness.state, mind)!;
       assert.equal(choice.rule, "boost");
-      assert.equal(choice.card, "turbo", "the stronger boost when the hand holds both");
+      assert.equal(choice.card, "turbo", "the first boost in hand order");
       assert.equal(choice.targetId, "");
       // a boost-only hand is simply held until the gap opens
       const held = withRivals();
@@ -302,6 +303,62 @@ export function spec(E: typeof EngineModule, label: string): void {
       assert.ok(E.raceOrder(harness.state).indexOf("bolt") >= 2, "Bolt is third or fourth");
       racer(harness, "bolt").hand = ["rollCage"];
       assert.equal(choosePlay(harness.state, mind), null);
+    });
+
+    test("rivals: a Roll Cage goes when the rival is second, not only when it is first", () => {
+      // The design's rule is "while in first **or second**". The test above
+      // exercises first and third; this is the "or second" half, which was
+      // otherwise guarded only by the recorded vector transcript -- a mutation
+      // to "first only" survived every named test and died only to a file a
+      // regeneration would have rewritten.
+      const { harness, rivals } = withRivals();
+      const mind = mindOf(rivals, "bolt")!;
+      answerRightTimes(harness, 8, "piston");
+      answerRightTimes(harness, 5, "bolt");
+      answerRightTimes(harness, 2, "gasket");
+      answerRightTimes(harness, 1, "you");
+      const order = E.raceOrder(harness.state);
+      assert.equal(order[0], "piston", "Piston leads, so Bolt is not first");
+      assert.equal(order[1], "bolt", "Bolt is second");
+      racer(harness, "bolt").rollCages = 0;
+      racer(harness, "bolt").hand = ["rollCage"];
+      const choice = choosePlay(harness.state, mind);
+      assert.notEqual(choice, null, "a Roll Cage in second place is spent, not held");
+      assert.equal(choice!.rule, "rollCage");
+      assert.equal(choice!.card, "rollCage");
+      // and with one already up it is held even from second
+      racer(harness, "bolt").rollCages = 1;
+      racer(harness, "bolt").hand = ["rollCage"];
+      assert.equal(choosePlay(harness.state, mind), null, "none active is half the rule");
+    });
+
+    test("rivals: the policy spends the first matching card in hand order, boost or attack", () => {
+      // The design fixes no tie-break here, so neither does the engine, and the
+      // doc comment on `choosePlay` says exactly that. This test is what stops
+      // the comment drifting away from the code again: it pins the behaviour
+      // the comment claims, in the two hands the old comment got wrong.
+      const boost = withRivals();
+      const boostMind = mindOf(boost.rivals, "bolt")!;
+      answerRightTimes(boost.harness, 7, "you");
+      racer(boost.harness, "bolt").hand = ["nitro", "turbo"];
+      const boostChoice = choosePlay(boost.harness.state, boostMind)!;
+      assert.equal(boostChoice.rule, "boost");
+      assert.equal(boostChoice.card, "nitro", "nitro is first in hand, so nitro goes");
+      racer(boost.harness, "bolt").hand = ["turbo", "nitro"];
+      assert.equal(choosePlay(boost.harness.state, boostMind)!.card, "turbo", "and the other way round");
+
+      const attack = withRivals();
+      const attackMind = mindOf(attack.rivals, "piston")!;
+      answerRightTimes(attack.harness, 9, "bolt");
+      answerRightTimes(attack.harness, 6, "piston");
+      answerRightTimes(attack.harness, 3, "gasket");
+      answerRightTimes(attack.harness, 1, "you");
+      racer(attack.harness, "piston").hand = ["towHook", "pileUp"];
+      const attackChoice = choosePlay(attack.harness.state, attackMind)!;
+      assert.equal(attackChoice.rule, "attack");
+      assert.equal(attackChoice.card, "towHook", "a Tow Hook first in hand goes first");
+      racer(attack.harness, "piston").hand = ["pileUp", "towHook"];
+      assert.equal(choosePlay(attack.harness.state, attackMind)!.card, "pileUp");
     });
 
     test("rivals: an attack targets the current leader when the leader is not itself", () => {
@@ -341,7 +398,6 @@ export function spec(E: typeof EngineModule, label: string): void {
       racer(harness, "bolt").hand = ["wrench", "pothole", "rollCage"];
       racer(harness, "bolt").rollCages = 2;
       const mind = mindOf(rivals, "bolt")!;
-      mind.handSize = 3;
       mind.answersSincePolicy = 0;
       assert.equal(choosePlay(harness.state, mind), null, "nothing is legal yet");
       // Three answers later the policy looks again, and by then Piston is clear
@@ -456,64 +512,137 @@ export function spec(E: typeof EngineModule, label: string): void {
 
     // ---- signals ----------------------------------------------------------
 
-    test("rivals: a NICE RUN when the child completes a lap with no mistakes", () => {
-      const harness = startRace({ preset: "2-5" });
+    /**
+     * Drive a clean race of `laps` tables to the flag and collect every signal,
+     * with the lap the child had just finished when it arrived.
+     */
+    function cleanRun(seed: number, laps: number) {
+      const tables: number[] = [];
+      for (let table = 1; table <= laps; table++) tables.push(table);
+      const harness = startRace({ seed, preset: "choose", chosenTables: tables });
       let rivals = createRivals(
         harness.state,
         RIVAL_SEATS.map((seat) => ({ id: seat.id, personality: seat.personality, level: "pro" as const })),
       );
-      const sent: string[] = [];
-      for (let index = 0; index < 12; index++) {
+      const sent: { racerId: string; signal: string; lap: number }[] = [];
+      for (let index = 0; index < 12 * laps; index++) {
         const events = answerRight(harness, "you");
         const observed = rivalObserve(rivals, harness.state, events);
         rivals = observed.rivals;
-        for (const signal of observed.signals) sent.push(signal.signal + ":" + signal.racerId);
+        for (const signal of observed.signals)
+          sent.push({
+            racerId: signal.racerId,
+            signal: signal.signal,
+            lap: racer(harness, "you").lapsComplete,
+          });
       }
-      assert.equal(sent.length, 1, "one signal for one clean lap");
-      assert.equal(sent[0]!.indexOf("niceRun:"), 0);
-      assert.notEqual(sent[0]!.slice("niceRun:".length), "you", "a rival sends it, not the child");
+      return { harness, rivals, sent };
+    }
+
+    test("rivals: a NICE RUN when the child completes a lap with no mistakes", () => {
+      // Twelve clean laps, and the NICE RUNs that arrive all belong to a lap
+      // the child finished clean, one lap at most each, always from a rival.
+      const run = cleanRun(2026, 12);
+      const niceRuns = run.sent.filter((entry) => entry.signal === "niceRun");
+      assert.ok(niceRuns.length >= 1, "twelve clean laps sent no NICE RUN at all");
+      const laps: number[] = [];
+      for (const entry of niceRuns) {
+        assert.notEqual(entry.racerId, "you", "a rival sends it, not the child");
+        assert.equal(laps.indexOf(entry.lap), -1, "two NICE RUNs for one lap");
+        laps.push(entry.lap);
+      }
     });
 
     test("rivals: no NICE RUN for a lap with a mistake in it", () => {
-      const harness = startRace({ preset: "2-5" });
+      // Every lap here carries a wrong answer, so however the "occasionally"
+      // draw falls, not one of them may send a signal.
+      const harness = startRace({ preset: "2-10" });
       let rivals = createRivals(
         harness.state,
         RIVAL_SEATS.map((seat) => ({ id: seat.id, personality: seat.personality, level: "pro" as const })),
       );
       const sent: string[] = [];
-      const mistake = answerWrong(harness, "you");
-      rivals = rivalObserve(rivals, harness.state, mistake).rivals;
-      for (let index = 0; index < 12; index++) {
-        const events = answerRight(harness, "you");
-        const observed = rivalObserve(rivals, harness.state, events);
-        rivals = observed.rivals;
-        for (const signal of observed.signals) sent.push(signal.signal);
+      for (let lap = 0; lap < 6; lap++) {
+        const mistake = answerWrong(harness, "you");
+        rivals = rivalObserve(rivals, harness.state, mistake).rivals;
+        for (let index = 0; index < 12; index++) {
+          const events = answerRight(harness, "you");
+          const observed = rivalObserve(rivals, harness.state, events);
+          rivals = observed.rivals;
+          for (const signal of observed.signals) sent.push(signal.signal);
+        }
       }
+      assert.equal(racer(harness, "you").lapsComplete, 6, "six laps were actually driven");
       assert.deepEqual(sent, [], "a wrong answer costs the lap its NICE RUN");
-      assert.equal(racer(harness, "you").lapsComplete, 1);
     });
 
-    test("rivals: a GOOD GAME at the finish, once from each rival", () => {
+    test("rivals: a NICE RUN is occasional -- a clean lap sends one about one time in three", () => {
+      // Design, AI rivals: "Rivals send preset signals **occasionally**." Before
+      // this rule every clean lap sent one, which is not a frequency at all.
+      assert.equal(NICE_RUN_CHANCE, 1 / 3);
+      let cleanLaps = 0;
+      let niceRuns = 0;
+      for (let seed = 1; seed <= 60; seed++) {
+        const run = cleanRun(seed, 12);
+        cleanLaps += 12;
+        niceRuns += run.sent.filter((entry) => entry.signal === "niceRun").length;
+      }
+      assert.equal(cleanLaps, 720);
+      const rate = niceRuns / cleanLaps;
+      assert.ok(rate > 0.28 && rate < 0.39, "one clean lap in three, measured " + rate);
+      assert.ok(niceRuns < cleanLaps, "a signal on every clean lap is not occasional");
+    });
+
+    test("rivals: a GOOD GAME at the finish, once, from one rival", () => {
+      // Design: "a GOOD GAME at the finish", singular. Three karts sending one
+      // at the same millisecond is not what that sentence describes.
+      const run = cleanRun(4, 1);
+      const goodGames = run.sent.filter((entry) => entry.signal === "goodGame");
+      assert.equal(goodGames.length, 1, "one GOOD GAME, not one from each rival");
+      assert.notEqual(goodGames[0]!.racerId, "you", "a rival sends it");
+      // and never twice
+      const again = rivalObserve(run.rivals, run.harness.state, run.harness.events);
+      assert.deepEqual(again.signals.filter((entry) => entry.signal === "goodGame"), []);
+      // it is a seeded choice rather than a fixed kart: different races, different voices
+      const speakers: string[] = [];
+      for (let seed = 1; seed <= 20; seed++) {
+        const other = cleanRun(seed, 1);
+        const one = other.sent.filter((entry) => entry.signal === "goodGame");
+        assert.equal(one.length, 1, "seed " + seed);
+        if (speakers.indexOf(one[0]!.racerId) === -1) speakers.push(one[0]!.racerId);
+      }
+      assert.ok(speakers.length > 1, "the same kart spoke in every race: " + speakers.join(","));
+    });
+
+    test("rivals: a GOOD GAME still goes when every rival has already finished", () => {
+      // "a GOOD GAME at the finish" is not conditional on anyone still being on
+      // the track, and the child who comes in last -- with all three rivals
+      // already parked -- is the one who most needs it. A speaker rule that
+      // only ever picks a racing rival silences exactly that finish.
       const harness = startRace({ preset: "choose", chosenTables: [2] });
       let rivals = createRivals(
         harness.state,
         RIVAL_SEATS.map((seat) => ({ id: seat.id, personality: seat.personality, level: "pro" as const })),
       );
+      for (const id of ["bolt", "piston", "gasket"]) {
+        for (let index = 0; index < 12; index++) {
+          const events = answerRight(harness, id);
+          rivals = rivalObserve(rivals, harness.state, events).rivals;
+        }
+        assert.equal(racer(harness, id).finished, true, id + " did not finish");
+      }
       const sent: { racerId: string; signal: string }[] = [];
       for (let index = 0; index < 12; index++) {
         const events = answerRight(harness, "you");
         const observed = rivalObserve(rivals, harness.state, events);
         rivals = observed.rivals;
-        for (const signal of observed.signals) sent.push({ racerId: signal.racerId, signal: signal.signal });
+        for (const signal of observed.signals)
+          sent.push({ racerId: signal.racerId, signal: signal.signal });
       }
+      assert.equal(racer(harness, "you").finished, true);
       const goodGames = sent.filter((entry) => entry.signal === "goodGame");
-      assert.deepEqual(
-        goodGames.map((entry) => entry.racerId).sort(),
-        ["bolt", "gasket", "piston"],
-      );
-      // and never twice
-      const again = rivalObserve(rivals, harness.state, harness.events);
-      assert.deepEqual(again.signals.filter((entry) => entry.signal === "goodGame"), []);
+      assert.equal(goodGames.length, 1, "the finish sent no GOOD GAME at all");
+      assert.notEqual(goodGames[0]!.racerId, "you");
     });
 
     test("rivals: every signal comes from the four-signal catalog", () => {

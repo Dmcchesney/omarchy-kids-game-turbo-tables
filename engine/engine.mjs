@@ -1095,6 +1095,7 @@ var RIVAL_FLOOR_MS = 1500;
 var RIVAL_PACE_WINDOW = 12;
 var POLICY_INTERVAL = 3;
 var HALF_LAP = QUESTIONS_PER_LAP / 2;
+var NICE_RUN_CHANCE = 1 / 3;
 var BOOST_CARDS = ["turbo", "nitro"];
 var ATTACK_CARDS = ["pileUp", "pothole", "wrench", "oilSlick", "towHook"];
 function isAttackCard(card) {
@@ -1167,7 +1168,6 @@ function cloneMind(mind) {
     answersTaken: mind.answersTaken,
     answersSincePolicy: mind.answersSincePolicy,
     lastHandAttackedHuman: mind.lastHandAttackedHuman,
-    handSize: mind.handSize,
     sentGoodGame: mind.sentGoodGame
   };
 }
@@ -1180,6 +1180,7 @@ function cloneRivals(rivals) {
     childAnswers: rivals.childAnswers,
     childLapMistakes: rivals.childLapMistakes,
     niceRunLaps: rivals.niceRunLaps.slice(),
+    sentGoodGame: rivals.sentGoodGame,
     rng: cloneRng(rivals.rng)
   };
 }
@@ -1192,6 +1193,7 @@ function createRivals(state, configs) {
     childAnswers: 0,
     childLapMistakes: 0,
     niceRunLaps: [],
+    sentGoodGame: false,
     rng: forkRng(state.seed, "rivals:signals")
   };
   for (const config of configs) {
@@ -1211,7 +1213,6 @@ function createRivals(state, configs) {
       answersTaken: 0,
       answersSincePolicy: 0,
       lastHandAttackedHuman: false,
-      handSize: 0,
       sentGoodGame: false
     };
     schedule(rivals, mind, state.startedAtMs);
@@ -1355,17 +1356,20 @@ function observeInto(rivals, state, events) {
       rivals.childLapMistakes = 0;
       if (clean && rivals.niceRunLaps.indexOf(lap) === -1) {
         rivals.niceRunLaps.push(lap);
-        const speaker = pickSpeaker(rivals, state);
-        if (speaker !== null) signals.push(signalEvent(speaker.id, "niceRun", event.at));
+        if (nextFloat(rivals.rng) < NICE_RUN_CHANCE) {
+          const speaker = pickSpeaker(rivals, state);
+          if (speaker !== null) signals.push(signalEvent(speaker.id, "niceRun", event.at));
+        }
       }
       continue;
     }
     if (event.type === "finished" && event.racerId === rivals.humanId) {
-      for (const mind of rivals.minds) {
-        if (mind.sentGoodGame) continue;
-        mind.sentGoodGame = true;
-        signals.push(signalEvent(mind.id, "goodGame", event.at));
-      }
+      if (rivals.sentGoodGame) continue;
+      const speaker = pickSpeaker(rivals, state);
+      if (speaker === null) continue;
+      rivals.sentGoodGame = true;
+      speaker.sentGoodGame = true;
+      signals.push(signalEvent(speaker.id, "goodGame", event.at));
     }
   }
   return signals;
@@ -1387,6 +1391,7 @@ function pickSpeaker(rivals, state) {
     const racer = racerById(state, mind.id);
     if (racer !== null && !racer.finished) racing.push(mind);
   }
+  if (racing.length === 0) for (const mind of rivals.minds) racing.push(mind);
   if (racing.length === 0) return null;
   return racing[nextInt(rivals.rng, racing.length)];
 }
@@ -1458,7 +1463,6 @@ function rivalStep(state, rivals, now) {
     const after = racerById(next, mind.id);
     const handAfter = after.hand.length;
     const dealt = handBefore === 0 && handAfter > 0;
-    mind.handSize = handAfter;
     if (handAfter > 0 && (dealt || mind.answersSincePolicy >= POLICY_INTERVAL)) {
       mind.answersSincePolicy = 0;
       const choice = choosePlay(next, mind);
@@ -1491,7 +1495,6 @@ function rivalStep(state, rivals, now) {
           attackedHuman
         });
         mind.lastHandAttackedHuman = attackedHuman;
-        mind.handSize = racerById(next, mind.id).hand.length;
       }
     }
   }
@@ -2094,18 +2097,31 @@ function parseSave(text) {
 function factHistoryForRace(file) {
   return cloneFactHistory(file.facts);
 }
-function raceWasSeededFrom(file, history) {
-  for (const saved of file.facts) {
-    let found = false;
-    for (const record of history) {
-      if (record.fact !== saved.fact) continue;
-      found = true;
-      if (record.attempts < saved.attempts || record.correct < saved.correct) return false;
-      break;
-    }
-    if (!found) return false;
+function factHistoryDelta(seededWith, history) {
+  const baseline = seededWith != null ? seededWith : [];
+  const delta = [];
+  for (const record of history) {
+    const before = factRecordOf(baseline, record.fact);
+    const attempts = record.attempts - (before === null ? 0 : before.attempts);
+    const correct = record.correct - (before === null ? 0 : before.correct);
+    if (attempts <= 0) continue;
+    const window = record.lastThree;
+    const kept = attempts >= window.length ? 0 : window.length - attempts;
+    delta.push({
+      fact: record.fact,
+      attempts,
+      correct: correct > 0 ? correct : 0,
+      lastThree: window.slice(kept)
+    });
   }
-  return true;
+  return delta;
+}
+function factHistoryAccounts(state, seededWith, history) {
+  const human = state.racers.find((racer) => racer.id === state.humanId);
+  if (human === void 0) return false;
+  let added = 0;
+  for (const record of factHistoryDelta(seededWith, history)) added += record.attempts;
+  return added === human.attemptCount;
 }
 function withFactHistory(file, history) {
   const next = cloneSave(file);
@@ -2148,29 +2164,44 @@ function mergeFactHistory(base, incoming) {
   }
   return merged;
 }
-function commitRace(file, state, history, candidate) {
-  const next = raceWasSeededFrom(file, history) ? withFactHistory(file, history) : withFactHistory(file, mergeFactHistory(file.facts, history));
-  if (candidate === null) {
-    const key2 = recordKeyOf(state);
-    return {
-      file: next,
-      recordUpdated: false,
-      record: Object.prototype.hasOwnProperty.call(next.records, key2) ? next.records[key2] : null
-    };
-  }
+function recordEntryIssues(key, entry) {
+  if (!isRecordKey(key)) return [{ path: "records." + key, problem: "not a record key" }];
+  const probe = emptySave();
+  probe.records[key] = entry;
+  return validateSave(probe).issues;
+}
+function factHistoryIssues(facts) {
+  const probe = emptySave();
+  probe.facts = facts;
+  return validateSave(probe).issues;
+}
+function commitRace(file, state, history, candidate, seededWith) {
+  const issues = [];
   const key = recordKeyOf(state);
-  const previous = Object.prototype.hasOwnProperty.call(next.records, key) ? next.records[key] : null;
-  const updated = previous === null || candidate.timeMs < previous.timeMs;
-  if (updated) {
-    next.records[key] = {
-      preset: candidate.preset,
-      timeMs: candidate.timeMs,
-      correct: candidate.correct,
-      attempted: candidate.attempted,
-      timeline: cloneTimeline(candidate.timeline)
-    };
+  const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
+  const factIssues = factHistoryIssues(merged);
+  const next = factIssues.length === 0 ? withFactHistory(file, merged) : cloneSave(file);
+  for (const issue of factIssues) issues.push(issue);
+  if (factIssues.length === 0 && !factHistoryAccounts(state, seededWith, history))
+    issues.push({
+      path: "facts",
+      problem: "the declared baseline does not account for this race's answers"
+    });
+  const standing = Object.prototype.hasOwnProperty.call(next.records, key) ? next.records[key] : null;
+  if (candidate === null) return { file: next, recordUpdated: false, record: standing, issues };
+  if (!isRecordEligible(state)) {
+    issues.push({ path: "records." + key, problem: "the race is not one that sets records" });
+    return { file: next, recordUpdated: false, record: standing, issues };
   }
-  return { file: next, recordUpdated: updated, record: next.records[key] };
+  const badEntry = recordEntryIssues(key, candidate);
+  if (badEntry.length > 0) {
+    for (const issue of badEntry) issues.push(issue);
+    return { file: next, recordUpdated: false, record: standing, issues };
+  }
+  if (!beatsRecord(standing, candidate))
+    return { file: next, recordUpdated: false, record: standing, issues };
+  next.records[key] = cloneRecord(candidate);
+  return { file: next, recordUpdated: true, record: next.records[key], issues };
 }
 
 // src/engine/index.ts
@@ -2197,6 +2228,7 @@ export {
   KART_NUMBER_MIN,
   MIGRATIONS,
   NEXT_FACT_MS,
+  NICE_RUN_CHANCE,
   PAINT_SWATCHES,
   PODIUM_SIZE,
   POLICY_INTERVAL,
@@ -2261,8 +2293,11 @@ export {
   emptyTimeline,
   extraQuestions,
   factAnswer,
+  factHistoryAccounts,
+  factHistoryDelta,
   factHistoryEntry,
   factHistoryForRace,
+  factHistoryIssues,
   factHistoryOf,
   factLabel,
   factLeft,
@@ -2306,11 +2341,11 @@ export {
   questionCountForPreset,
   raceLength,
   raceOrder,
-  raceWasSeededFrom,
   racerById,
   racerProgress,
   rankRacers,
   recentSuccesses,
+  recordEntryIssues,
   recordFactOutcome,
   recordFromRace,
   recordKey,

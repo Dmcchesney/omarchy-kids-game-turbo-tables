@@ -34,13 +34,15 @@ export function spec(E: typeof EngineModule, label: string): void {
       emptySave,
       emptyTimeline,
       factAnswer,
+      factHistoryAccounts,
+      factHistoryDelta,
       factHistoryForRace,
       factHistoryOf,
       isRecordKey,
       mergeFactHistory,
       migrateSave,
       parseSave,
-      raceWasSeededFrom,
+      recordEntryIssues,
       recordFromRace,
       recordKey,
       recordKeyOf,
@@ -52,6 +54,27 @@ export function spec(E: typeof EngineModule, label: string): void {
       withFactHistory,
     } = E;
     const { answerRightTimes, answerWrong, apply, racer, startRace } = helpersFor(E);
+
+    /**
+     * Every `commitRace` in this file goes through here, and every one of them
+     * therefore asserts the invariant the function promises: **a file it
+     * returns is a file `parseSave` accepts.** Serialise-then-validate is
+     * closed by construction rather than by one test remembering to check.
+     */
+    function commit(
+      file: EngineModule.SaveFile,
+      state: EngineModule.RaceState,
+      history: readonly EngineModule.FactRecord[],
+      candidate: EngineModule.RecordEntry | null,
+      seededWith: readonly EngineModule.FactRecord[] | null = null,
+    ): EngineModule.CommitResult {
+      const result = commitRace(file, state, history, candidate, seededWith);
+      const loaded = parseSave(serialiseSave(result.file));
+      assert.deepEqual(loaded.issues, [], "commitRace emitted a file its own validator rejects");
+      assert.equal(loaded.ok, true);
+      assert.deepEqual(loaded.file, result.file, "and it does not survive its own round trip");
+      return result;
+    }
 
     /** A clean solo run of one table, with its timeline. */
     function timeTrial(seed: number, gapMs: number, tables: number[] = [2]) {
@@ -389,17 +412,18 @@ export function spec(E: typeof EngineModule, label: string): void {
       let file = emptySave();
       let totals = 0;
       for (let round = 0; round < 3; round++) {
+        const seededWith = factHistoryForRace(file);
         const harness = startRace({
           seed: 100 + round,
           preset: "choose",
           chosenTables: [2],
           racers: [{ id: "you", kind: "human" as const }],
-          factHistory: factHistoryForRace(file),
+          factHistory: seededWith,
         });
         answerRightTimes(harness, 12, "you");
         const history = factHistoryOf(harness.state);
-        assert.equal(raceWasSeededFrom(file, history), true, "round " + round);
-        file = withFactHistory(file, history);
+        assert.equal(factHistoryAccounts(harness.state, seededWith, history), true, "round " + round);
+        file = commit(file, harness.state, history, null, seededWith).file;
         totals += 12;
         let attempts = 0;
         for (const record of file.facts) attempts += record.attempts;
@@ -431,15 +455,145 @@ export function spec(E: typeof EngineModule, label: string): void {
       });
       answerRightTimes(second, 12, "you");
       const history = factHistoryOf(second.state);
-      assert.equal(raceWasSeededFrom(file, history), false, "the twos are missing from it");
-      const merged = mergeFactHistory(file.facts, history);
-      assert.equal(merged.length, 24, "the twos and the threes");
+      const committed = commit(file, second.state, history, null, null);
+      assert.equal(committed.file.facts.length, 24, "the twos and the threes");
       let previous = -1;
-      for (const record of merged) {
+      for (const record of committed.file.facts) {
         assert.ok(record.fact > previous, "merged history stays ascending");
         previous = record.fact;
         assert.equal(record.attempts, 1);
       }
+    });
+
+    test("save: a race that only looks like it came from the file cannot erase the file's counts", () => {
+      // The defect this replaces: `raceWasSeededFrom` returned true whenever
+      // every saved fact turned up in the incoming history with attempts and
+      // correct at least as high, and `commitRace` then *replaced* the saved
+      // counts with the race's own. Two entirely distinct races collide under
+      // that rule as soon as the second one has a mistake in it, and the
+      // child's earned history is silently thrown away.
+      //
+      // The file here holds one clean race of the twos: one attempt, one
+      // correct, per fact. The stranger is a different seed, seeded from
+      // nothing, that got every fact wrong once before getting it right: two
+      // attempts, one correct, per fact. Every saved fact is present with
+      // attempts >= and correct >=, so the old predicate says "seeded" -- and
+      // the child's first race disappears.
+      const clean = startRace({
+        seed: 77,
+        preset: "choose",
+        chosenTables: [2],
+        racers: [{ id: "you", kind: "human" as const }],
+      });
+      answerRightTimes(clean, 12, "you");
+      const file = commit(emptySave(), clean.state, factHistoryOf(clean.state), null, null).file;
+      assert.equal(file.facts.length, 12);
+      for (const record of file.facts) {
+        assert.equal(record.attempts, 1);
+        assert.equal(record.correct, 1);
+      }
+
+      const stranger = startRace({
+        seed: 4242,
+        preset: "choose",
+        chosenTables: [2],
+        racers: [{ id: "you", kind: "human" as const }],
+      });
+      for (let index = 0; index < 12; index++) {
+        answerWrong(stranger, "you");
+        answerRightTimes(stranger, 1, "you");
+      }
+      const history = factHistoryOf(stranger.state);
+      assert.equal(history.length, 12);
+      for (const record of history) {
+        assert.equal(record.attempts, 2, "the stranger looks at least as big as the file");
+        assert.equal(record.correct, 1);
+      }
+
+      // the collision, stated as the old predicate stated it
+      let looksSeeded = true;
+      for (const saved of file.facts) {
+        const there = history.find((record) => record.fact === saved.fact);
+        if (there === undefined || there.attempts < saved.attempts || there.correct < saved.correct)
+          looksSeeded = false;
+      }
+      assert.equal(looksSeeded, true, "the fixture does not reproduce the collision");
+
+      // the identity that replaced it: the race filed 24 outcomes, and 24 is
+      // what the child's attemptCount says, so a baseline of the file's own
+      // facts cannot be what this race started from.
+      assert.equal(racer(stranger, "you").attemptCount, 24);
+      assert.equal(factHistoryAccounts(stranger.state, file.facts, history), false);
+      assert.equal(factHistoryAccounts(stranger.state, null, history), true);
+
+      const committed = commit(file, stranger.state, history, null, null);
+      assert.equal(committed.file.facts.length, 12);
+      for (const record of committed.file.facts) {
+        assert.equal(record.attempts, 3, "one earned plus two, not two");
+        assert.equal(record.correct, 2, "and the clean race's correct answer survives");
+        assert.deepEqual(record.lastThree, ["correct", "wrong", "correct"]);
+      }
+      assert.deepEqual(committed.issues, []);
+    });
+
+    test("save: the delta a race contributes is its own answers and nothing it inherited", () => {
+      // Three races of the twos, each seeded from the one before, so the window
+      // arrives at the fourth race already full: three outcomes per fact.
+      let carried: readonly EngineModule.FactRecord[] = [];
+      for (let round = 0; round < 3; round++) {
+        const earlier = startRace({
+          seed: 11 + round,
+          preset: "choose",
+          chosenTables: [2],
+          racers: [{ id: "you", kind: "human" as const }],
+          factHistory: carried,
+        });
+        answerRightTimes(earlier, 12, "you");
+        carried = factHistoryOf(earlier.state);
+      }
+      assert.equal(carried.length, 12);
+      for (const record of carried) {
+        assert.equal(record.attempts, 3);
+        assert.equal(record.lastThree.length, 3, "the window is full before the race under test");
+      }
+
+      const second = startRace({
+        seed: 99,
+        preset: "choose",
+        chosenTables: [2],
+        racers: [{ id: "you", kind: "human" as const }],
+        factHistory: carried,
+      });
+      answerRightTimes(second, 12, "you");
+      const delta = factHistoryDelta(carried, factHistoryOf(second.state));
+      assert.equal(delta.length, 12);
+      for (const record of delta) {
+        assert.equal(record.attempts, 1, "one answer each, not four");
+        assert.equal(record.correct, 1);
+        assert.deepEqual(record.lastThree, ["correct"], "only the outcome this race filed");
+      }
+      assert.equal(factHistoryAccounts(second.state, carried, factHistoryOf(second.state)), true);
+      // and the wrong baseline is caught rather than believed
+      assert.equal(factHistoryAccounts(second.state, null, factHistoryOf(second.state)), false);
+    });
+
+    test("save: a baseline that does not account for the race is reported, not believed", () => {
+      const file = emptySave();
+      const harness = startRace({
+        seed: 13,
+        preset: "choose",
+        chosenTables: [2],
+        racers: [{ id: "you", kind: "human" as const }],
+      });
+      answerRightTimes(harness, 12, "you");
+      const history = factHistoryOf(harness.state);
+      const wrong = commit(file, harness.state, history, null, history);
+      assert.ok(
+        wrong.issues.some((issue) => issue.path === "facts"),
+        "claiming the race was seeded with its own result must not pass unremarked",
+      );
+      const right = commit(file, harness.state, history, null, null);
+      assert.deepEqual(right.issues, []);
     });
 
     test("save: merging the same race twice sums the attempts and keeps three outcomes", () => {
@@ -467,7 +621,7 @@ export function spec(E: typeof EngineModule, label: string): void {
       const harness = startRace({ preset: "choose", chosenTables: [2] });
       answerRightTimes(harness, 12, "you");
       assert.equal(racer(harness, "you").finished, true);
-      const committed = commitRace(
+      const committed = commit(
         file,
         harness.state,
         factHistoryOf(harness.state),
@@ -479,10 +633,96 @@ export function spec(E: typeof EngineModule, label: string): void {
       assert.deepEqual(recordKeys(committed.file.records), []);
     });
 
+    test("save: a completed Grand Prix writes no record, even when it is handed one", () => {
+      // Design, Modes: "Time trial and ghost set records; Grand Prix never
+      // does", and the Grand Prix row itself: "places and times are shown,
+      // never stored as records."
+      //
+      // The test above only proves the *caller* behaves: `recordFromRace`
+      // returns null for a Grand Prix, so `commitRace` was never asked the
+      // question. This asks it. The candidate here is a real, well-formed
+      // record entry -- it would be filed without a murmur if the mode were
+      // clean -- offered against a finished, powerups-on Grand Prix state.
+      const file = emptySave();
+      const grandPrix = startRace({ preset: "choose", chosenTables: [2] });
+      answerRightTimes(grandPrix, 12, "you");
+      assert.equal(grandPrix.state.mode, "grandPrix");
+      assert.equal(grandPrix.state.powerupsEnabled, true);
+      assert.equal(racer(grandPrix, "you").finished, true);
+      assert.equal(recordFromRace(grandPrix.state, emptyTimeline()), null, "none is built");
+
+      // a candidate forged from a clean run of the same preset: valid in every
+      // way except the race it is being filed against
+      const clean = timeTrial(2026, 4000, [2]);
+      const forged = recordFromRace(clean.state, clean.timeline)!;
+      assert.deepEqual(recordEntryIssues(recordKeyOf(grandPrix.state), forged), [], "the entry itself is sound");
+
+      const committed = commit(
+        file,
+        grandPrix.state,
+        factHistoryOf(grandPrix.state),
+        forged,
+      );
+      assert.equal(committed.recordUpdated, false, "a Grand Prix wrote a record");
+      assert.equal(committed.record, null);
+      assert.deepEqual(recordKeys(committed.file.records), []);
+      assert.ok(
+        committed.issues.some((issue) => issue.problem.indexOf("not one that sets records") !== -1),
+        "and it said so rather than dropping it in silence: " + JSON.stringify(committed.issues),
+      );
+      assert.equal(committed.file.facts.length, 12, "the facts are still kept");
+
+      // Practice is not a clean mode either, and neither is an unfinished run
+      for (const mode of ["practice", "grandPrix"] as const) {
+        const other = startRace({ preset: "choose", chosenTables: [2], mode });
+        answerRightTimes(other, 3, "you");
+        const result = commit(emptySave(), other.state, factHistoryOf(other.state), forged);
+        assert.equal(result.recordUpdated, false, mode + " set a record");
+      }
+    });
+
+    test("save: a record whose preset disagrees with the race it is filed under is refused", () => {
+      // This is the shape that made `commitRace` able to emit a file its own
+      // validator rejects: the key comes from the state and the preset came
+      // from the candidate, and nothing checked that the two agreed. The file
+      // that came out failed on `records.choose:2.preset: does not match the
+      // key it is filed under`. Every `commit` in this file now round-trips
+      // through `parseSave`, so this test would fail on the output even if the
+      // refusal below were removed.
+      const file = emptySave();
+      const run = timeTrial(2026, 4000, [2]);
+      assert.equal(recordKeyOf(run.state), "choose:2");
+      const mismatched = { ...recordFromRace(run.state, run.timeline)!, preset: "2-5" as const };
+      const committed = commit(file, run.state, factHistoryOf(run.state), mismatched);
+      assert.equal(committed.recordUpdated, false);
+      assert.deepEqual(recordKeys(committed.file.records), []);
+      assert.ok(
+        committed.issues.some((issue) => issue.path === "records.choose:2.preset"),
+        JSON.stringify(committed.issues),
+      );
+
+      // and every other way a forged entry could break the file it would go into
+      const base = recordFromRace(run.state, run.timeline)!;
+      const forgeries: [string, EngineModule.RecordEntry][] = [
+        ["more correct than attempted", { ...base, correct: base.attempted + 1 }],
+        ["a negative time", { ...base, timeMs: -1 }],
+        ["a fractional time", { ...base, timeMs: 1.5 }],
+        ["a timeline that runs backwards", {
+          ...base,
+          timeline: { samples: [{ atMs: 9000, progress: 1 }, { atMs: 8000, progress: 2 }] },
+        }],
+      ];
+      for (const [why, entry] of forgeries) {
+        const result = commit(emptySave(), run.state, factHistoryOf(run.state), entry);
+        assert.equal(result.recordUpdated, false, why + " was filed");
+        assert.ok(result.issues.length > 0, why + " was refused without saying why");
+      }
+    });
+
     test("save: a clean run commits a record, and a tie afterwards leaves it standing", () => {
       let file = emptySave();
       const first = timeTrial(2026, 4000);
-      const firstCommit = commitRace(
+      const firstCommit = commit(
         file,
         first.state,
         factHistoryOf(first.state),
@@ -493,7 +733,7 @@ export function spec(E: typeof EngineModule, label: string): void {
       file = firstCommit.file;
 
       const tie = timeTrial(999, 4000);
-      const tieCommit = commitRace(
+      const tieCommit = commit(
         file,
         tie.state,
         factHistoryOf(tie.state),
@@ -504,7 +744,7 @@ export function spec(E: typeof EngineModule, label: string): void {
       assert.deepEqual(tieCommit.record!.timeline, first.timeline, "and its ghost");
 
       const faster = timeTrial(2026, 3000);
-      const fastCommit = commitRace(
+      const fastCommit = commit(
         tieCommit.file,
         faster.state,
         factHistoryOf(faster.state),
@@ -518,9 +758,9 @@ export function spec(E: typeof EngineModule, label: string): void {
     test("save: records are per preset -- one preset's best never displaces another's", () => {
       let file = emptySave();
       const twos = timeTrial(1, 3000, [2]);
-      file = commitRace(file, twos.state, factHistoryOf(twos.state), recordFromRace(twos.state, twos.timeline)).file;
+      file = commit(file, twos.state, factHistoryOf(twos.state), recordFromRace(twos.state, twos.timeline)).file;
       const threes = timeTrial(1, 5000, [3]);
-      const committed = commitRace(
+      const committed = commit(
         file,
         threes.state,
         factHistoryOf(threes.state),
@@ -535,13 +775,53 @@ export function spec(E: typeof EngineModule, label: string): void {
     test("save: a committed file still validates and still holds no date", () => {
       let file = emptySave();
       const run = timeTrial(2026, 4000);
-      file = commitRace(file, run.state, factHistoryOf(run.state), recordFromRace(run.state, run.timeline)).file;
+      file = commit(file, run.state, factHistoryOf(run.state), recordFromRace(run.state, run.timeline)).file;
       const text = serialiseSave(file);
       const loaded = parseSave(text);
       assert.deepEqual(loaded.issues, []);
       assert.deepEqual(loaded.file, file);
       assert.deepEqual(dateLikeKeys(JSON.parse(text)), []);
       assert.equal(text.indexOf("Date"), -1);
+    });
+
+    test("save: every file commitRace can produce parses back clean", () => {
+      // The closure, asserted over the whole matrix rather than one path: four
+      // race shapes x five candidates x a file that is empty, populated, or
+      // already holds a record for the key. `commit` re-reads every result
+      // through `parseSave` and deep-equals it, so a single escape fails here.
+      const clean = timeTrial(2026, 4000, [2]);
+      const goodRecord = recordFromRace(clean.state, clean.timeline)!;
+      const gp = startRace({ preset: "choose", chosenTables: [2] });
+      answerRightTimes(gp, 12, "you");
+      const practice = startRace({ preset: "choose", chosenTables: [2], mode: "practice" });
+      answerRightTimes(practice, 12, "you");
+      const partial = timeTrial(5, 2000, [3]);
+
+      const bases: EngineModule.SaveFile[] = [
+        emptySave(),
+        populated(),
+        commit(emptySave(), clean.state, factHistoryOf(clean.state), goodRecord).file,
+      ];
+      const states = [clean.state, gp.state, practice.state, partial.state];
+      const candidates: (EngineModule.RecordEntry | null)[] = [
+        null,
+        goodRecord,
+        { ...goodRecord, preset: "1-12" as const },
+        { ...goodRecord, correct: 99999, attempted: 1 },
+        { ...goodRecord, timeMs: 3.5 },
+      ];
+      let ran = 0;
+      for (const base of bases) {
+        for (const state of states) {
+          for (const candidate of candidates) {
+            // `commit` asserts the round trip on every one of these
+            const result = commit(base, state, factHistoryOf(state), candidate);
+            assert.equal(typeof result.recordUpdated, "boolean");
+            ran += 1;
+          }
+        }
+      }
+      assert.equal(ran, 3 * 4 * 5, "the matrix did not run");
     });
   });
 }

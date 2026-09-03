@@ -24,8 +24,19 @@
  */
 
 import { PRESET_TABLES, TABLE_MAX, TABLE_MIN, type PresetId } from "./deck.ts";
-import { cloneTimeline, type RecordEntry } from "./ghost.ts";
-import { FACT_HISTORY_WINDOW, cloneFactHistory, type FactRecord } from "./history.ts";
+import {
+  beatsRecord,
+  cloneRecord,
+  cloneTimeline,
+  isRecordEligible,
+  type RecordEntry,
+} from "./ghost.ts";
+import {
+  FACT_HISTORY_WINDOW,
+  cloneFactHistory,
+  factRecordOf,
+  type FactRecord,
+} from "./history.ts";
 import type { RaceState } from "./race.ts";
 import { RIVAL_LEVEL_ORDER, type RivalLevel } from "./rivals.ts";
 import { STREAK_THRESHOLD } from "./streak.ts";
@@ -606,27 +617,77 @@ export function factHistoryForRace(file: SaveFile): FactRecord[] {
 }
 
 /**
- * The save half. The race was seeded from this file, so the history it hands
- * back with `factHistoryOf(state)` already contains everything the file held
- * plus everything this race added: it replaces, it does not merge.
+ * The save half: what one race *added* to the history it was handed.
  *
- * `raceWasSeededFrom` is the precondition, and it is checkable rather than
- * assumed. When it does not hold -- a race created without a history, replayed
- * from a vector, or loaded from a different file -- use `mergeFactHistory`,
- * which adds the two together instead.
+ * `history` is `factHistoryOf(state)`. `seededWith` is exactly what the race
+ * was created with -- the array `factHistoryForRace(file)` returned -- or null
+ * when it was created with nothing (a vector replay, a fresh install, a race
+ * started before the file loaded).
+ *
+ * This exists because the question it answers cannot be asked of the numbers.
+ * The predicate it replaces, `raceWasSeededFrom`, tried to *infer* provenance
+ * by comparing counts: it called a race "seeded from this file" whenever every
+ * saved fact appeared in the incoming history with attempts and correct at
+ * least as high. Unseeded histories satisfy that routinely -- a file holding
+ * one clean race of the twos and a stranger that got every two wrong once
+ * before getting it right look identical to it -- and the caller then took the
+ * *replace* branch and wrote the stranger's counts over the child's, silently
+ * destroying everything the file had earned.
+ *
+ * The real identity condition is not a property of the two histories. It is a
+ * fact about where the race came from, and the only place that fact exists is
+ * in the caller that started it. So the caller carries it, and the merge
+ * becomes arithmetic: the file's counts plus this race's own, always, with no
+ * branch left that can discard anything.
+ *
+ * `lastThree` is the tail of the history's window, cut to the number of
+ * outcomes this race actually filed, so a race that asked a fact once
+ * contributes one outcome rather than re-contributing the two it inherited.
  */
-export function raceWasSeededFrom(file: SaveFile, history: readonly FactRecord[]): boolean {
-  for (const saved of file.facts) {
-    let found = false;
-    for (const record of history) {
-      if (record.fact !== saved.fact) continue;
-      found = true;
-      if (record.attempts < saved.attempts || record.correct < saved.correct) return false;
-      break;
-    }
-    if (!found) return false;
+export function factHistoryDelta(
+  seededWith: readonly FactRecord[] | null,
+  history: readonly FactRecord[],
+): FactRecord[] {
+  const baseline = seededWith ?? [];
+  const delta: FactRecord[] = [];
+  for (const record of history) {
+    const before = factRecordOf(baseline, record.fact);
+    const attempts = record.attempts - (before === null ? 0 : before.attempts);
+    const correct = record.correct - (before === null ? 0 : before.correct);
+    if (attempts <= 0) continue;
+    const window = record.lastThree;
+    const kept = attempts >= window.length ? 0 : window.length - attempts;
+    delta.push({
+      fact: record.fact,
+      attempts,
+      correct: correct > 0 ? correct : 0,
+      lastThree: window.slice(kept),
+    });
   }
-  return true;
+  return delta;
+}
+
+/**
+ * Whether the baseline the caller declared actually accounts for the race.
+ *
+ * `race.ts` files exactly one fact outcome for every answer it counts -- every
+ * `attemptCount += 1` is paired with one `fileOutcome`, on the correct, wrong,
+ * revealed and pit-crew paths alike -- so a race's own contribution to the
+ * history is exactly the child's `attemptCount`, and nothing else can change
+ * it. A caller that hands `commitRace` a baseline that is not what it seeded
+ * with breaks that identity, and this is where it is noticed rather than
+ * assumed.
+ */
+export function factHistoryAccounts(
+  state: RaceState,
+  seededWith: readonly FactRecord[] | null,
+  history: readonly FactRecord[],
+): boolean {
+  const human = state.racers.find((racer) => racer.id === state.humanId);
+  if (human === undefined) return false;
+  let added = 0;
+  for (const record of factHistoryDelta(seededWith, history)) added += record.attempts;
+  return added === human.attemptCount;
 }
 
 export function withFactHistory(file: SaveFile, history: readonly FactRecord[]): SaveFile {
@@ -690,46 +751,103 @@ export interface CommitResult {
   recordUpdated: boolean;
   /** The record that now stands for this race's preset, if there is one. */
   record: RecordEntry | null;
+  /**
+   * Everything this commit refused to write, with the path it would have gone
+   * to. Empty is the normal answer. A record refused because the mode does not
+   * set records is reported here rather than dropped in silence, because a
+   * caller that offers one is either testing the rule or has a bug.
+   */
+  issues: SaveIssue[];
+}
+
+/**
+ * Validate one record entry the only way that cannot drift from the file
+ * format: file it under the key it would really occupy, in a file that is
+ * otherwise known good, and ask `validateSave`.
+ *
+ * This is what closes serialise-then-validate. `commitRace` used to file
+ * `candidate.preset` under `recordKeyOf(state)` without checking the two
+ * agreed, so a caller could hand it a `2-5` record for a `choose:2` race and
+ * get back a file whose own validator rejected it with
+ * `records.choose:2.preset: does not match the key it is filed under`.
+ */
+export function recordEntryIssues(key: string, entry: RecordEntry): SaveIssue[] {
+  if (!isRecordKey(key)) return [{ path: "records." + key, problem: "not a record key" }];
+  const probe = emptySave();
+  (probe.records as Record<string, RecordEntry>)[key] = entry;
+  return validateSave(probe).issues;
+}
+
+/** The same trick for a fact history: would this array survive a write? */
+export function factHistoryIssues(facts: readonly FactRecord[]): SaveIssue[] {
+  const probe = emptySave();
+  probe.facts = facts as FactRecord[];
+  return validateSave(probe).issues;
 }
 
 /**
  * Fold a finished race into the save file: the fact history always, the record
  * only when the design allows one.
  *
- * `history` is `factHistoryOf(state)` and `candidate` is what
- * `recordFromRace(state, timeline)` returned -- null when the design allows no
- * record. Grand Prix changes `facts` and never `records`, which is the settled
- * decision "Records -- Clean modes only" written as code.
+ * `history` is `factHistoryOf(state)`; `seededWith` is what the race was
+ * created with, so the two together say exactly what this race added (see
+ * `factHistoryDelta`); `candidate` is what `recordFromRace(state, timeline)`
+ * returned -- null when the design allows no record.
+ *
+ * Two rules and one invariant:
+ *
+ *   - **Records -- clean modes only.** Design, Modes: "Time trial and ghost set
+ *     records; Grand Prix never does", and Grand Prix's own row: "places and
+ *     times are shown, never stored as records". `recordFromRace` refuses to
+ *     *build* a record for a Grand Prix; this refuses to *file* one, because a
+ *     candidate can reach here from anywhere and the state is right here to
+ *     check. Grand Prix changes `facts` and never `records`.
+ *   - **A tie keeps the old record.** One comparison, `ghost.ts`'s
+ *     `beatsRecord`, called rather than re-implemented -- there is no second
+ *     copy of the rule left to drift.
+ *   - **The file that comes out is a file that goes back in.** Given a `file`
+ *     `parseSave` would accept, the `file` returned is one `parseSave`
+ *     accepts: a record that would not validate is refused, and so is a fact
+ *     history that would not.
  */
 export function commitRace(
   file: SaveFile,
   state: RaceState,
   history: readonly FactRecord[],
   candidate: RecordEntry | null,
+  seededWith: readonly FactRecord[] | null,
 ): CommitResult {
-  const next = raceWasSeededFrom(file, history)
-    ? withFactHistory(file, history)
-    : withFactHistory(file, mergeFactHistory(file.facts, history));
-  if (candidate === null) {
-    const key = recordKeyOf(state);
-    return {
-      file: next,
-      recordUpdated: false,
-      record: Object.prototype.hasOwnProperty.call(next.records, key) ? next.records[key]! : null,
-    };
-  }
+  const issues: SaveIssue[] = [];
   const key = recordKeyOf(state);
-  const previous = Object.prototype.hasOwnProperty.call(next.records, key) ? next.records[key]! : null;
-  // Design, plan, ghost.ts: "a tie keeps the old record."
-  const updated = previous === null || candidate.timeMs < previous.timeMs;
-  if (updated) {
-    next.records[key] = {
-      preset: candidate.preset,
-      timeMs: candidate.timeMs,
-      correct: candidate.correct,
-      attempted: candidate.attempted,
-      timeline: cloneTimeline(candidate.timeline),
-    };
+
+  // ---- the fact history: always merged, never replaced ---------------------
+  const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
+  const factIssues = factHistoryIssues(merged);
+  const next = factIssues.length === 0 ? withFactHistory(file, merged) : cloneSave(file);
+  for (const issue of factIssues) issues.push(issue);
+  if (factIssues.length === 0 && !factHistoryAccounts(state, seededWith, history))
+    issues.push({
+      path: "facts",
+      problem: "the declared baseline does not account for this race's answers",
+    });
+
+  const standing = Object.prototype.hasOwnProperty.call(next.records, key)
+    ? next.records[key]!
+    : null;
+
+  if (candidate === null) return { file: next, recordUpdated: false, record: standing, issues };
+  if (!isRecordEligible(state)) {
+    issues.push({ path: "records." + key, problem: "the race is not one that sets records" });
+    return { file: next, recordUpdated: false, record: standing, issues };
   }
-  return { file: next, recordUpdated: updated, record: next.records[key]! };
+  const badEntry = recordEntryIssues(key, candidate);
+  if (badEntry.length > 0) {
+    for (const issue of badEntry) issues.push(issue);
+    return { file: next, recordUpdated: false, record: standing, issues };
+  }
+  if (!beatsRecord(standing, candidate))
+    return { file: next, recordUpdated: false, record: standing, issues };
+
+  next.records[key] = cloneRecord(candidate);
+  return { file: next, recordUpdated: true, record: next.records[key]!, issues };
 }

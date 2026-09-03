@@ -127,7 +127,23 @@ export const POLICY_INTERVAL = 3;
 /** Design, Rival play policy: "behind the leader by more than half a lap". */
 export const HALF_LAP = QUESTIONS_PER_LAP / 2;
 
-/** The cards the policy treats as a boost, strongest first. */
+/**
+ * Design, AI rivals: "Rivals send preset signals **occasionally**."
+ *
+ * The clean lap is the design's trigger; this is the design's *frequency*, and
+ * the design gives it no number, so one is chosen here and named. One in three
+ * turns a clean twelve-lap race from twelve NICE RUNs -- a signal at the end of
+ * every single lap, which no reader would call occasional -- into about four.
+ * It is drawn from `RivalsState.rng`, the same seeded stream that picks the
+ * speaker, so "everything the rivals do is derived from the race seed" holds.
+ */
+export const NICE_RUN_CHANCE = 1 / 3;
+
+/**
+ * The cards the policy treats as a boost. Membership is all that is ever
+ * consulted -- `choosePlay` spends the first boost in hand order, not the
+ * first in this list -- so the order here carries no meaning.
+ */
 export const BOOST_CARDS: readonly Card[] = ["turbo", "nitro"];
 
 /**
@@ -282,8 +298,7 @@ export interface RivalMind {
   answersSincePolicy: number;
   /** Whether the hand this rival last spent landed on the child. */
   lastHandAttackedHuman: boolean;
-  /** How many cards this rival held at the end of the last answer. */
-  handSize: number;
+  /** True for the one rival that sent the race's GOOD GAME. */
   sentGoodGame: boolean;
 }
 
@@ -296,8 +311,10 @@ export interface RivalsState {
   childAnswers: number;
   /** Wrong and revealed answers on the child's current lap. */
   childLapMistakes: number;
-  /** Laps of the child's that have already drawn a NICE RUN. */
+  /** Laps of the child's that have already offered a NICE RUN. */
   niceRunLaps: number[];
+  /** True once the race's one GOOD GAME has gone. */
+  sentGoodGame: boolean;
   /** The stream that picks which rival speaks. Separate from every mind. */
   rng: Rng;
 }
@@ -318,7 +335,6 @@ export function cloneMind(mind: RivalMind): RivalMind {
     answersTaken: mind.answersTaken,
     answersSincePolicy: mind.answersSincePolicy,
     lastHandAttackedHuman: mind.lastHandAttackedHuman,
-    handSize: mind.handSize,
     sentGoodGame: mind.sentGoodGame,
   };
 }
@@ -332,6 +348,7 @@ export function cloneRivals(rivals: RivalsState): RivalsState {
     childAnswers: rivals.childAnswers,
     childLapMistakes: rivals.childLapMistakes,
     niceRunLaps: rivals.niceRunLaps.slice(),
+    sentGoodGame: rivals.sentGoodGame,
     rng: cloneRng(rivals.rng),
   };
 }
@@ -349,6 +366,7 @@ export function createRivals(state: RaceState, configs: readonly RivalConfig[]):
     childAnswers: 0,
     childLapMistakes: 0,
     niceRunLaps: [],
+    sentGoodGame: false,
     rng: forkRng(state.seed, "rivals:signals"),
   };
   for (const config of configs) {
@@ -368,7 +386,6 @@ export function createRivals(state: RaceState, configs: readonly RivalConfig[]):
       answersTaken: 0,
       answersSincePolicy: 0,
       lastHandAttackedHuman: false,
-      handSize: 0,
       sentGoodGame: false,
     };
     schedule(rivals, mind, state.startedAtMs);
@@ -497,12 +514,15 @@ function handIndexOf(racer: Racer, card: Card): number {
  *   - Holding an attack: target the current leader if it is not itself;
  *     otherwise the closest kart behind.
  *
- * The design fixes the rules and their order but leaves two ties open, and both
- * are resolved here rather than by the shuffle of a hand:
- *
- *   - a hand holding both boosts spends the stronger one (Turbo before Nitro),
- *   - a hand holding several attacks spends the one with the largest question
- *     delta, so a Tow Hook (delta 0) goes only when it is the only attack left.
+ * The design fixes the rules and their order. It says nothing about which card
+ * a hand holding two of a kind should spend, so neither does this: **the first
+ * matching card in hand order goes**, for boosts and for attacks alike. A hand
+ * of `["nitro", "turbo"]` plays Nitro; a hand of `["towHook", "pileUp"]` plays
+ * the Tow Hook. Hand order is itself seeded -- it is the shared round-robin
+ * cursor -- so this is a deterministic rule and not an accident, and it invents
+ * no ordering the design does not have. (An earlier draft of this comment
+ * claimed Turbo before Nitro and largest-question-delta first. The code never
+ * did either.)
  *
  * Returns null when nothing in the hand applies, or when the mercy rules leave
  * an attack with nobody it is allowed to reach. The hand is then held and the
@@ -590,16 +610,31 @@ export function chooseTarget(
 // ---------------------------------------------------------------------------
 
 /**
- * Design, AI rivals: "Rivals send preset signals occasionally: a NICE RUN when
- * the child completes a lap with no mistakes, a GOOD GAME at the finish. From
- * the same four-signal catalog as the multiplayer lobby."
+ * Design, AI rivals: "Rivals send preset signals **occasionally**: a NICE RUN
+ * when the child completes a lap with no mistakes, a GOOD GAME at the finish.
+ * From the same four-signal catalog as the multiplayer lobby."
  *
  * A mistake is a wrong answer or a revealed one. A pit-crew answer is not a
  * mistake: the design's answer loop says the streak "neither grows nor resets",
  * and a child who asked the pit crew still drove a clean lap.
  *
- * NICE RUN comes from one rival, chosen from the seed among the rivals still
- * racing. GOOD GAME comes from each rival once, at the finish.
+ * Three words in that sentence set the frequency, and each is read here:
+ *
+ *   - **"occasionally"** is the only frequency the design gives, and it gives
+ *     no number. A clean lap therefore *offers* a NICE RUN and one goes with
+ *     probability `NICE_RUN_CHANCE`, drawn from the signal stream. Twelve clean
+ *     laps send about four signals rather than twelve. A chance is the smallest
+ *     mechanism that makes the word true, and it needs no new state: the
+ *     stream that already picks the speaker draws it.
+ *   - **"a NICE RUN"**, singular: one rival speaks, not the field.
+ *   - **"a GOOD GAME"**, singular and in the same list, read the same way: one
+ *     rival sends one at the finish. Three simultaneous GOOD GAMEs from three
+ *     karts at the same millisecond is not what "a GOOD GAME, occasionally"
+ *     describes, and the finish is a single moment, so there is nothing for a
+ *     chance to be spread over -- the rule there is the singular, not a draw.
+ *
+ * Everything is still a function of the race seed: `RivalsState.rng` is forked
+ * from it, so the same race sends the same signals at the same moments.
  */
 export function rivalObserve(
   rivals: RivalsState,
@@ -633,17 +668,24 @@ function observeInto(
       rivals.childLapMistakes = 0;
       if (clean && rivals.niceRunLaps.indexOf(lap) === -1) {
         rivals.niceRunLaps.push(lap);
-        const speaker = pickSpeaker(rivals, state);
-        if (speaker !== null) signals.push(signalEvent(speaker.id, "niceRun", event.at));
+        // "occasionally": the lap earns the signal, the draw decides whether it
+        // goes. Drawn before the speaker so a lap that sends nothing costs the
+        // stream one number and not two.
+        if (nextFloat(rivals.rng) < NICE_RUN_CHANCE) {
+          const speaker = pickSpeaker(rivals, state);
+          if (speaker !== null) signals.push(signalEvent(speaker.id, "niceRun", event.at));
+        }
       }
       continue;
     }
     if (event.type === "finished" && event.racerId === rivals.humanId) {
-      for (const mind of rivals.minds) {
-        if (mind.sentGoodGame) continue;
-        mind.sentGoodGame = true;
-        signals.push(signalEvent(mind.id, "goodGame", event.at));
-      }
+      // "a GOOD GAME at the finish": one, from one rival.
+      if (rivals.sentGoodGame) continue;
+      const speaker = pickSpeaker(rivals, state);
+      if (speaker === null) continue;
+      rivals.sentGoodGame = true;
+      speaker.sentGoodGame = true;
+      signals.push(signalEvent(speaker.id, "goodGame", event.at));
     }
   }
   return signals;
@@ -662,12 +704,23 @@ function recordChildAnswer(rivals: RivalsState, state: RaceState, at: number): v
   rivals.childAnswers += 1;
 }
 
+/**
+ * Which rival speaks: one, drawn from the signal stream.
+ *
+ * A rival still on the track is preferred, because a signal from a kart the
+ * child can see beside them is the one the design's lobby vocabulary is for.
+ * When none is left the whole field is eligible instead -- the child crossing
+ * the line last, with all three rivals already parked, is exactly the finish
+ * that most needs its `GOOD GAME`, and a "prefer racing" rule with no fallback
+ * would silence it.
+ */
 function pickSpeaker(rivals: RivalsState, state: RaceState): RivalMind | null {
   const racing: RivalMind[] = [];
   for (const mind of rivals.minds) {
     const racer = racerById(state, mind.id);
     if (racer !== null && !racer.finished) racing.push(mind);
   }
+  if (racing.length === 0) for (const mind of rivals.minds) racing.push(mind);
   if (racing.length === 0) return null;
   return racing[nextInt(rivals.rng, racing.length)]!;
 }
@@ -824,7 +877,6 @@ export function rivalStep(state: RaceState, rivals: RivalsState, now: number): R
     const after = racerById(next, mind.id)!;
     const handAfter = after.hand.length;
     const dealt = handBefore === 0 && handAfter > 0;
-    mind.handSize = handAfter;
     // Design: "evaluated when a hand is dealt and re-evaluated every three
     // answers while it is held."
     if (handAfter > 0 && (dealt || mind.answersSincePolicy >= POLICY_INTERVAL)) {
@@ -860,7 +912,6 @@ export function rivalStep(state: RaceState, rivals: RivalsState, now: number): R
           attackedHuman,
         });
         mind.lastHandAttackedHuman = attackedHuman;
-        mind.handSize = racerById(next, mind.id)!.hand.length;
       }
     }
   }

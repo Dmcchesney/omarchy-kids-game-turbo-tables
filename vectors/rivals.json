@@ -2282,23 +2282,8 @@
       ],
       "signals": [
         {
-          "at": 100000,
-          "racerId": "bolt",
-          "signal": "niceRun"
-        },
-        {
           "at": 256000,
           "racerId": "bolt",
-          "signal": "goodGame"
-        },
-        {
-          "at": 256000,
-          "racerId": "piston",
-          "signal": "goodGame"
-        },
-        {
-          "at": 256000,
-          "racerId": "gasket",
           "signal": "goodGame"
         }
       ],
@@ -4055,16 +4040,6 @@
         }
       ],
       "signals": [
-        {
-          "at": 244038,
-          "racerId": "bolt",
-          "signal": "goodGame"
-        },
-        {
-          "at": 244038,
-          "racerId": "piston",
-          "signal": "goodGame"
-        },
         {
           "at": 244038,
           "racerId": "gasket",
@@ -6002,18 +5977,8 @@
       "signals": [
         {
           "at": 185310,
-          "racerId": "gasket",
-          "signal": "niceRun"
-        },
-        {
-          "at": 229310,
           "racerId": "bolt",
-          "signal": "goodGame"
-        },
-        {
-          "at": 229310,
-          "racerId": "piston",
-          "signal": "goodGame"
+          "signal": "niceRun"
         },
         {
           "at": 229310,
@@ -7815,12 +7780,7 @@
         {
           "at": 208000,
           "racerId": "bolt",
-          "signal": "goodGame"
-        },
-        {
-          "at": 208000,
-          "racerId": "piston",
-          "signal": "goodGame"
+          "signal": "niceRun"
         },
         {
           "at": 208000,
@@ -9689,16 +9649,6 @@
           "at": 217531,
           "racerId": "piston",
           "signal": "niceRun"
-        },
-        {
-          "at": 217531,
-          "racerId": "bolt",
-          "signal": "goodGame"
-        },
-        {
-          "at": 217531,
-          "racerId": "piston",
-          "signal": "goodGame"
         },
         {
           "at": 217531,
