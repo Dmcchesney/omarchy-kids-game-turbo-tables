@@ -45,6 +45,10 @@ export const NOT_WALKED: Exemption[] = [
   { match: "node_modules/", why: "must never exist here at all; check:boundary fails outright if it does" },
   { match: "coverage/", why: "generated coverage output, git-ignored, never committed" },
   { match: "evidence/", why: "generated review evidence, git-ignored, never committed" },
+  {
+    match: ".DS_Store",
+    why: "macOS Finder metadata; git-ignored, never committed, and never cloned onto a child's machine -- listed since round 5, when check:boundary started reading every file's bytes and found three of them",
+  },
 ];
 
 const NOT_WALKED_NAMES = new Set(NOT_WALKED.map((entry) => entry.match.replace(/\/$/, "")));
@@ -195,6 +199,24 @@ export function underInvariants(file: TreeFile): boolean {
  */
 const CODE_EXTENSIONS = new Set([".qml", ".js", ".mjs", ".ts", ".mts", ".frag", ".vert", ".glsl"]);
 
+/**
+ * The languages a Qt/QML session can actually load and run off disk. Round 4 of
+ * the package review found the shape rules in check-readme.ts scoped to `.qml`
+ * alone, and pointed out that `.js` is the format QML imports its libraries from
+ * -- `import "wire.js" as Wire` -- so every shape rule skipped the one file type
+ * an attacker would reach for. Scope for those rules is this set now, not `.qml`.
+ *
+ * `.ts` is deliberately outside it: Qt cannot load TypeScript, and this
+ * repository's own `.ts` under `src/engine` is compiled to `engine/engine.mjs`,
+ * which *is* in the set and is checked here like any other runtime file.
+ */
+const RUNTIME_LANGUAGES = new Set([".qml", ".js", ".mjs"]);
+
+/** True when Omarchy could load this file as code: a plugin file in a runtime language. */
+export function isRuntimeCode(path: string): boolean {
+  return isPluginFile(path) && RUNTIME_LANGUAGES.has(extname(path).toLowerCase());
+}
+
 export function isEvidenceFile(file: TreeFile): boolean {
   if (file.binary) return false;
   if (!isPluginFile(file.path)) return false;
@@ -306,6 +328,61 @@ function pieces(items: string): string[] {
   return [...items.matchAll(/(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map((match) =>
     match[2]!.replace(/\\(.)/g, "$1"),
   );
+}
+
+/**
+ * A name bound exactly once, in this file, to a string literal. Round 4 of the
+ * package review reached the allow-list with two of them --
+ *
+ *     var head = "../de"; var tail = "v/collect.mjs"; import(head + tail)
+ *
+ * -- and `glue()` saw nothing, because `head + tail` are identifiers and glue()
+ * only joins adjacent *literals*. A name bound once to a literal and never
+ * reassigned is that literal, so `fold()` substitutes it before gluing.
+ */
+const STRING_CONSTANT = new RegExp(
+  "(?:^|[;{}(,\\n])\\s*(?:"
+  + "(?:readonly\\s+)?property\\s+(?:string|url|var)\\s+([A-Za-z_$][\\w$]*)\\s*:"
+  + "|(?:var|let|const)\\s+([A-Za-z_$][\\w$]*)\\s*="
+  + ")\\s*(['\"`])((?:\\\\.|(?!\\3)[^\\\\])*)\\3",
+  "g",
+);
+
+/** Every name this file binds exactly once to a string literal, and to what. */
+export function stringConstants(text: string): Map<string, string> {
+  const bound = new Map<string, string>();
+  const rejected = new Set<string>();
+  for (const match of text.matchAll(STRING_CONSTANT)) {
+    const name = (match[1] ?? match[2])!;
+    const value = match[4]!.replace(/\\(.)/g, "$1");
+    if (bound.has(name) && bound.get(name) !== value) rejected.add(name);
+    bound.set(name, value);
+  }
+  for (const name of [...bound.keys()]) {
+    // Bound more than once, anywhere, by any syntax: not a constant.
+    const assignments = text.match(new RegExp(`\\b${name}\\s*(?::|=(?!=))`, "g")) ?? [];
+    if (assignments.length > 1) rejected.add(name);
+  }
+  for (const name of rejected) bound.delete(name);
+  return bound;
+}
+
+/**
+ * `glue()`, plus the file's own single-assignment string constants substituted
+ * first, so a path split across two variables is read as the path it spells.
+ * Deliberately generous about the left-hand side of a dotted reference
+ * (`parent.base` folds as `base` does): over-folding can only turn into a
+ * failure when the folded text spells a path this repository forbids, and no
+ * honest file in it spells one.
+ */
+export function fold(text: string): string {
+  let out = text;
+  for (const [name, value] of stringConstants(text))
+    out = out.replace(
+      new RegExp(`(?<![\\w$])(?:[\\w$]+\\s*\\.\\s*)?${name}(?![\\w$])`, "g"),
+      () => JSON.stringify(value),
+    );
+  return glue(out);
 }
 
 // ---------------------------------------------------------------------------

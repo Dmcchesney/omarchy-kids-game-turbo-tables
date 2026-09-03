@@ -15,11 +15,13 @@ Maintained by Don McChesney (`Dmcchesney`) as a games spoke of the
 | License | MIT |
 
 **Status: in development.** The overlay opens, takes the keyboard, and closes, and the rules engine
-behind it is written and covered by tests. The overlay hosts the garage screen: a parent who installs this today and
-clicks the kart button gets the real garage, and the kart, paint, number and
-race settings they change there are written to one file and are still there
-next time. The other screens in the design are not wired into the overlay
-yet, and there is no sound yet. The settled design and the
+behind it is written and covered by tests. The overlay hosts the flow a child plays through: the
+garage, the countdown, the race, the results and the settings screen, one at a time, each reached
+from the one before it with the keyboard alone, and `Escape` meaning back one everywhere in it. The
+kart, paint, number and race settings a child chooses are written to one file the game owns and are
+still there next time, because the file the engine defines is the file the shell reads and writes.
+When that file cannot be read, the game leaves it exactly as it is and says so on screen for the rest
+of the session instead of quietly starting over. There is no sound yet. The settled design and the
 build plan are in
 [docs/design.md](docs/design.md) and [docs/plan.md](docs/plan.md).
 
@@ -39,14 +41,25 @@ capability is designed but not built, the sentence is in the future tense and sa
   and string literals removed first, so no comment can stand in for an implementation. Lines inside
   fenced code blocks are read the same way, comment markers stripped, so a fence is not a hiding
   place for a sentence.
-- Every key name this README writes in backticks has to be handled by a Qt key identifier in a plugin
+- A key name this README writes in backticks has to be handled by a Qt key identifier in a plugin
   file — `Qt.Key_Name`, `Keys.onNamePressed` or `StandardKey.Name` — whether or not the sentence
-  around it looks like a claim.
+  around it looks like a claim. What counts as a key name is: any single backticked letter or digit,
+  any function key, any of the fifty-odd named keys the gate prints on every run, and — inside a
+  sentence that talks about keys, bindings or shortcuts — any backticked word of twelve characters
+  or fewer. A key name outside all of that is not grounded, and that gap is in the limits below.
+- A screen the settled design names has to exist as a file, in any capitalisation, in any sentence
+  this README does not negate — a bullet with no verb in it counts.
 - A capability sentence it has a vocabulary for but no rule for is a failure, not a pass.
-- A plugin `.qml` file may not assemble a name, a URL or an object at runtime: no `join`, no
-  `globalThis`, no computed member access on a global, no `Qt.createComponent`, no dynamic `import`.
-  String pieces joined by `+` or by an array are read as the string they spell before the token lists
-  run, so spelling `XMLHttpRequest` one character at a time is the same as writing it.
+- A plugin file in a language Qt can load — `.qml`, `.js` or `.mjs` — may not assemble a name, a URL
+  or an object at runtime: no `globalThis`, no `Qt.createComponent`, no character-code arithmetic, no
+  character read straight into a concatenation, no indexing a string constant into one, no computed
+  member access on the result of a call, no `this`, no `new` on anything but a listed type, no
+  dynamic `import`, no `Qt.resolvedUrl` of anything but a literal, and no `Loader` `source` that does
+  not resolve to one. String pieces joined by `+`, by an array, or by two names the gate can
+  constant-fold are read as the string they spell before the token lists run.
+- What that rule deliberately does *not* forbid is an ordinary computed member access. There are 257
+  honest ones in this plugin — `stops[index]`, `Theme.rivalNames[seat]` — so the rule bans assembling
+  a name, not reaching one. The limits below say what that leaves open.
 - It checks the flat things: required sections, content anchors, the plugin id, every install
   command against `git remote`, placeholders, the repository paths named here, the shape of the
   removal command, and the wording used for the one image in `docs/`.
@@ -113,9 +126,15 @@ and records described under Permissions and privacy, and nothing else:
 rm ~/.local/share/turbo-tables-solo/garage.json
 ```
 
-That path holds nothing until the save file is built, so the command is only useful once it exists;
-`rm` will report the file is missing before then. If `XDG_DATA_HOME` is set, the file will be at
+That one file is the whole of what this plugin leaves behind. If `XDG_DATA_HOME` is set, it is at
 `$XDG_DATA_HOME/turbo-tables-solo/garage.json` instead.
+
+An earlier version of this section told a parent the opposite — that the path held nothing until the
+save file was built. That was true when it was written and false from the commit that wired the game
+to its file, which did not touch this document. It is recorded here because it is the exact defect
+this README's gate exists to catch, the gate did not catch it, and a reader is owed the reason the
+list below is shorter and blunter than it was: `npm run check:readme` now fails on that sentence, and
+on the three other ways there are of saying it.
 
 ## Permissions and privacy
 
@@ -166,7 +185,7 @@ runs the whole gate, and each part can be run alone:
 | - | - |
 | `npm test` | the engine's rules, against committed seed-to-sequence vectors |
 | `npm run check:types` | `src/engine` type-checks with no dependencies and no ambient types |
-| `npm run check:boundary` | no symlink, executable, installer-like name, `bin/`, `scripts/` or `node_modules`; the manifest against the marketplace's validator rules; and no shell token in any file except the three that may hold one, read both as written and with string concatenations glued back together |
+| `npm run check:boundary` | no symlink, executable, installer-like name, `bin/`, `scripts/` or `node_modules`; every file opened and its first bytes read, so a `.png` has to be a PNG and no other file may hold binary content; the manifest against the marketplace's validator rules; and no shell token in any file except the three that may hold one, read as written, with string concatenations glued, and with names bound once to a literal folded in |
 | `npm run check:bundle` | `engine/engine.mjs` is the current build of `src/engine`, not a stale copy |
 | `npm run check:readme` | the four safety invariants against the whole tree, this README's disclosure of them, and each present-tense capability claim here against stripped source — the list above |
 | `npm run scan` | the marketplace's own security-baseline rules, run against the working tree, and that the index holds no file the working tree has lost |
@@ -207,31 +226,56 @@ plugin is visible and reviewable before the files land.
 
 ### What this gate does not check
 
-`npm run check:readme` is a text-and-token check, not a program analyser. Its limits, plainly:
+`npm run check:readme` is a text-and-token check, not a program analyser. Four rounds of blind review
+have taken this list apart; round 4 found it inaccurate in five places and silent in five more, which
+is worse than a shorter list that is true. It is shorter now, and every entry is one a reader can
+reproduce.
 
 - It cannot tell whether a capability that exists is *correct*, and it cannot tell whether it is
-  *reachable*. `ui/Garage.qml` existing makes a sentence about the garage screen pass; that the
-  overlay does not yet load that file is something only a person reading `TurboTables.qml` will
-  notice, which is why the status line above says it in words.
+  *reachable*. `ui/Garage.qml` existing is what makes a sentence about the garage pass; that the
+  overlay routes to it is a separate fact, and one only a person reading `ui/Game.qml` can confirm.
 - **Its vocabulary is a closed list.** A capability nobody wrote a row or a keyword for is not
   recognised as a claim at all, so it is neither checked nor reported: accessibility, fonts, colour,
   localisation and performance are all outside it today. "A claim this gate has no rule for fails
   loudly" is true only of claims whose *words* the gate already knows. This is the largest hole left
   in it, it is not closed, and closing it means inverting the test rather than lengthening the list.
-- The runtime-construction rule covers plugin `.qml` files only. A plugin `.mjs` file — the committed
-  bundle at `engine/engine.mjs` is one — may still call `join`, and only the token lists (which do
-  read glued strings) stand behind it there.
+- **The same is true of the four contradiction scans, and they are the part this README calls
+  unconditional.** They are unconditional in *when* they run — over every unit, every run — not in
+  *what* they recognise. Each is a list of words for the thing it forbids, and round 4 walked two
+  everyday synonyms past two of those lists — one about time, one about what a child is called.
+  Both lists are wider now. A synonym nobody has thought of will walk past them again.
+- **An ordinary computed member access is not forbidden, and cannot be.** There are 257 honest ones
+  in this plugin. The runtime-assembly rule catches *building* a name — out of characters, out of a
+  call result, out of `this`, out of a dynamic import — and a payload that obtains a reference to a
+  forbidden object by a route nobody has named here, and then indexes it with a plain variable, is
+  not caught by shape. What stands behind it there is the token search plus `check:boundary`, both of
+  which read concatenated, array-assembled and constant-folded strings.
+- **Only three file types are held to those shape rules: `.qml`, `.js` and `.mjs`** — the languages
+  Qt can load off disk. The TypeScript under `src/engine/` is not, because Qt cannot run it; its output
+  `engine/engine.mjs` is, with three exemptions it needs honestly (`join`, `concat` and
+  `charCodeAt`), and `npm run check:bundle` is what stands behind those: the bundle has to be
+  byte-identical to the current build of `src/engine`, so it cannot hold anything the source does not.
 - Its sense of present tense is a verb list, plus passive-voice and participle detection. Ordinary
   English it does not recognise will slip past that test — a table cell reading
   "a weekly digest, mailed to the address in `garage.json`, listing every fact" carries no verb the
-  list knows, so it is not a claim and no rule grounds it. The four safety invariants do not rest on
-  it: they are unconditional and token-based, and they run whatever this file says.
+  list knows, so it is not a claim. Three things do not rest on it, and run over every unit the README
+  does not negate: the four invariants, the screen grounding, and the keyboard grounding.
+- The screens it grounds are the nine the settled design names. A sentence naming a screen the design
+  does not name is not grounded by anything, and the enumeration rule under the game-rules row only
+  fires on three or more capitalised words in a row.
+- The keyboard rule has a residue, and this is it: a key whose name is more than one character, is not
+  on the list the gate prints, and is written in a sentence that never says key, press, shortcut or
+  binding, is not grounded. Round 4 got `M`, `P` and `Delete` past the old list; all three fail now,
+  the first two because any backticked single character is read as a key, the third because the named
+  list is a whole keyboard rather than a selection from one. An invented long name in a sentence with
+  no keyboard word in it would still pass.
 - Its forbidden-token search uses identifier boundaries, so a token buried inside a longer identifier
   or a longer string literal is not a hit. A single string holding
-  `"XMLHttpRequesthttps://example.com"`, sliced apart at runtime, is invisible to this gate.
-  `npm run check:boundary` catches that one — its layer-boundary grep is a plain substring search over
-  every plugin file, and both greps now read concatenated and array-assembled strings — but
-  `check:readme` alone does not, and the two searches disagree on purpose.
+  `"XMLHttpRequesthttps://example.com"`, sliced apart at runtime, is invisible to `check:readme`, and
+  `npm run check:boundary` is what catches that one: its layer-boundary grep is a plain substring
+  search. That backstop holds for a buried *literal* and no further. Round 4 removed the literal — a
+  scrambled alphabet, arrays of integers, `charAt` — and both greps went silent, which is why the
+  shape rules above exist and why this bullet no longer offers `check:boundary` as a general answer.
 - Its evidence is a token in stripped source, not a call graph. An identifier with the right name and
   nothing behind it counts: a property called `SoundEffect` satisfies the audio rule, and a `FileView`
   that is never instantiated satisfies the save-file rule.
@@ -240,15 +284,20 @@ plugin is visible and reviewable before the files land.
 - The allow-list of files that are not the plugin — `docs/`, `tests/`, `dev/`, `src/tools/`, the build
   configuration and this file — is not examined for capabilities. Every `.qml` file in those
   directories is still held to the four invariants, but a non-QML capability placed there is out of
-  scope by design: a network call in a `.mjs` file under `dev/` passes. What the gate does enforce is
-  that no plugin file refers to an allow-listed path — the reference scan glues concatenated and
-  array-assembled strings back together first, and it covers the single-file entries as well as the
-  directories — so the exemption cannot quietly become an import. The list is short, it is printed on
-  every run, and each entry says why.
-- There is a second list: four directories the walk never descends into at all (`.git/`,
-  `node_modules/`, `coverage/`, `evidence/`). It went undisclosed until round 3 of the package review
-  found it. Both tools now print it with a reason per entry, and a `.qml` file found under any of them
-  is a failure rather than an exemption.
+  scope by design: a network call in a `.mjs` file under `dev/` passes. What the gate enforces instead
+  is that no plugin file refers to an allow-listed path. That scan glues concatenated and
+  array-assembled strings back together and constant-folds names this repository binds once to a
+  literal, so `"../de" + "v/collect.mjs"` and `head + tail` both spell the path they reach; a path
+  built out of anything it cannot fold — a function's return value, a property assigned twice — is
+  beyond it, and the ban on dynamic `import` is the second lock on that door.
+- There is a second list: five names the walk never descends into at all (`.git/`, `node_modules/`,
+  `coverage/`, `evidence/` and `.DS_Store`). It went undisclosed until round 3 of the package review
+  found it. Both tools print it with a reason per entry, and a `.qml` file found under any of them is
+  a failure rather than an exemption.
+- `npm run check:boundary` reads the first bytes of every file, and no filename is trusted: a `.png`
+  has to start with the PNG signature, a `.wav` with a RIFF/WAVE header, a `.qsb` with the header Qt's
+  `qsb` writes, and anything else in the repository has to hold no binary content at all. What it does
+  *not* check is the rest of the file. A genuine PNG with a payload appended to it passes.
 - Nothing here runs Omarchy. The install, open and remove commands are checked for shape rather than
   executed; the Remove section says which of its claims were read from source rather than executed.
 - It does not look at images. The wording used for the one image under `docs/` is checked against
@@ -258,6 +307,11 @@ plugin is visible and reviewable before the files land.
 - It reads the working tree, not the index. A file deleted from the tree but still staged for commit
   would be invisible to it; `npm run scan` refuses to report at all while an unstaged deletion exists,
   which is the only guard against that.
+- One thing that is not a limit of this gate but bounds what `npm run scan` is worth saying: the
+  marketplace security baseline reports `passed` on a plugin file holding a keyboard input, an
+  `XMLHttpRequest` POST to an outside host and a clock reading. That was measured in round 4 of this
+  review, against the pinned marketplace commit, on a planted file. The baseline is a floor, not a
+  proof, and the checks in this repository are the only thing here that would catch that file.
 
 ## License and attributions
 

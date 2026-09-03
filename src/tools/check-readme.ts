@@ -43,12 +43,14 @@ import {
   NOT_THE_PLUGIN,
   NOT_WALKED,
   findToken,
-  glue,
+  fold,
   isEvidenceFile,
   isPluginFile,
   isQml,
+  isRuntimeCode,
   qmlOutsideTheWalk,
   strip,
+  stringConstants,
   stripComments,
   underInvariants,
   walkTree,
@@ -369,8 +371,18 @@ const INVARIANTS: Invariant[] = [
     ],
     disclosure: "no name field, no free-text entry anywhere",
     disclosureText: "Permissions and privacy must state that there is no name field and no free-text entry",
-    contradiction:
-      /\b(?:first name|last name|full name|child's name|childs name|school year|name field|free[- ]text|text (?:box|field|entry)|types? (?:in )?(?:a|their) name|enters? (?:a|their) name)\b/i,
+    // Round 4 walked "each child's chosen display name" straight through a list
+    // that held `child's name` -- a modifier between the possessive and the noun
+    // was enough. The name half is a window now, not a fixed phrase, and
+    // "display name", "nickname" and "who is playing" are spelled out.
+    contradiction: new RegExp(
+      "\\b(?:first name|last name|full name|display name|screen name|user ?name|nick ?name|handle"
+      + "|school year|name field|free[- ]text|text (?:box|field|entry)"
+      + "|types? (?:in )?(?:a|their) name|enters? (?:a|their) name"
+      + "|child(?:'s|s|ren'?s)?\\b[^.]{0,40}\\bnames?\\b"
+      + "|names?\\b[^.]{0,25}\\b(?:of|for) (?:the|each|every|a) child)\\b",
+      "i",
+    ),
     contradictionText: "the README describes collecting a name or free text while promising neither exists",
   },
   {
@@ -381,7 +393,22 @@ const INVARIANTS: Invariant[] = [
     ],
     disclosure: "stores no dates",
     disclosureText: "Permissions and privacy must state that no dates are stored",
-    contradiction: /\b(?:dates\b|the date\b|a date\b|timestamp|birthday|day streak|calendar|ISO 8601)\b/i,
+    // `the date` was here and `the day` was not, so round 4 wrote "the best lap
+    // ... and the day it was set" and the invariant the README calls
+    // unconditional said nothing. A date in ordinary English is a day, and the
+    // words people reach for instead of "date" are listed rather than hoped for.
+    contradiction: new RegExp(
+      "\\b(?:dates\\b|the date\\b|a date\\b|timestamp|birthday|day streak|calendar|ISO 8601"
+      + "|the day\\b|a day\\b|each day\\b|per day\\b|the days\\b"
+      + "|day (?:it|they|that) (?:was|were|happened)"
+      + "|when (?:it|they|that) (?:was|were) (?:set|won|played|run|earned|recorded|scored)"
+      + "|time of day|day and time|date and time"
+      + "|last played|last (?:seen|visited)|daily\\b|weekly\\b|monthly\\b"
+      + "|(?:this|last|next|each|per|every) (?:week|month|year)\\b"
+      + "|history of (?:every|each) (?:race|session|day)"
+      + "|one (?:row|entry|line) per (?:session|race|day))\\b",
+      "i",
+    ),
     contradictionText: "the README describes storing or showing a date while promising none is stored",
   },
 ];
@@ -487,43 +514,174 @@ for (const file of tree.files) {
 }
 
 // ---------------------------------------------------------------------------
-// 3a. A plugin .qml file may not build an identifier or a URL at runtime
+// 3a. A plugin file may not assemble an identifier, a URL or an object at runtime
 // ---------------------------------------------------------------------------
 //
-// The token lists above are a blocklist, and round 3 showed a blocklist is the
-// wrong shape for this: `ui/parts/Ledger.qml` spelled `XMLHttpRequest`,
-// `https://`, `POST` and `toISOString` one character at a time in array literals
-// and reached them through `globalThis?.[...]`, scoring zero hits in check:readme,
-// zero in check:boundary and `passed` from the marketplace scanner. `glue()` now
-// reads those arrays as the strings they spell, but the deeper point is that the
-// *shape* is the defect. This game is arithmetic and a kart. Nothing in it has a
-// reason to assemble a name at runtime, so the assembly itself fails, whatever it
-// spells. Scoped to plugin QML because that is the only language Omarchy runs.
+// This rule has lost two rounds, each time for the same reason: it was written
+// as a list of names, and an attacker only has to pick a name that is not on it.
+//
+// Round 3 spelled `XMLHttpRequest` out of an array of string literals and
+// reached it through `globalThis?.[...]`. glue() closed that.
+//
+// Round 4 removed the last literal. `ui/parts/Ledger.qml` carried a scrambled
+// alphabet and arrays of *integers*, spelled `XMLHttpRequest`,
+// `https://telemetry.example.com/kid` and `toISOString` with `k.charAt(v[i])`,
+// reached the global object with `(function(){return this})()`, indexed it with
+// `top()[n(a)]` and constructed with `new Ctor()`. Four defeats at once: no
+// `.charAt(` on the list, the computed-access pattern matched *optional*
+// chaining only, `new` was matched only on a lower-case identifier, and glue()
+// reads arrays of strings, so an array of numbers spelled nothing for any token
+// scan to find. `npm run check` exited 0 with that file wired into `qmldir` and
+// instantiated in `ui/Garage.qml`.
+//
+// So the rule below is not a longer list. Two things changed in kind.
+//
+//   * SCOPE. It ran on plugin `.qml` only, and `.js` -- the format QML actually
+//     imports libraries from -- was exempt from every shape rule in this file.
+//     It now runs on every plugin file in a language Qt can load: `.qml`, `.js`
+//     and `.mjs` (scope.ts `isRuntimeCode`).
+//
+//   * POLARITY, where a blocklist could not be made honest. `new` is now an
+//     allow-list of type names rather than a pattern that hopes to recognise a
+//     variable; a `Qt.resolvedUrl()` argument must be a literal rather than
+//     "not one of these"; `this` -- the one thing that hands a QML file the
+//     global object without naming it -- is refused outright, and there are
+//     zero honest uses of it in the plugin today.
+//
+// What is deliberately NOT banned, because banning it would be a lie about this
+// tree rather than a rule: a computed member access. There are 257 of them in
+// the plugin and every one is honest -- `stops[index]`, `Theme.rivalNames[i]`,
+// `CARDS[card]`. Round 4's report asked for that inversion; it is not available
+// at this size, and saying so is worth more than a rule nobody could keep. What
+// is banned is *assembly*: turning characters or a call result into a name.
+//
+// The honest counter-example this rule is measured against is
+// `ui/parts/PixelIcon.qml:50`, `var ch = line.charAt(c)` -- reading one
+// character to compare it and look up an ink. Reading a character is fine.
+// Reading a character *into a concatenation* is how a name gets built, and this
+// repository never builds one.
 
-// Note what is *not* here: a plain array literal of strings. `ui/Theme.qml` has
-// several honest ones (paint names, rival names), and glue() already reads any
-// array of string pieces as the string it spells, so the token lists see through
-// them. What is left here is the machinery for turning a string into a name, an
-// object or a module at runtime, which is what has no honest use in this tree.
-const RUNTIME_CONSTRUCTION: { pattern: RegExp; what: string }[] = [
-  { pattern: /\.\s*join\s*\(/, what: "Array.prototype.join" },
-  { pattern: /\.\s*concat\s*\(/, what: "Array.prototype.concat" },
-  { pattern: /\.\s*fromCharCode\b|\.\s*charCodeAt\s*\(|\.\s*codePointAt\s*\(/, what: "character-code arithmetic" },
-  { pattern: /(?:[A-Za-z_$][\w$]*)\s*\?\?\s*\.\s*\[|(?:[A-Za-z_$][\w$]*)\s*\?\.\s*\[/, what: "an optional computed member access" },
-  { pattern: /\bnew\s+[a-z_$][\w$]*\s*\(/, what: "`new` on a lower-case identifier, which is a variable rather than a type" },
-  { pattern: /\bimport\s*\(/, what: "a dynamic import" },
+const NEW_ALLOWED = new Set([
+  "Error", "TypeError", "RangeError", "SyntaxError", "EvalError", "URIError",
+  "Array", "Object", "String", "Number", "Boolean", "Map", "Set", "WeakMap", "WeakSet",
+  "RegExp", "Promise", "ArrayBuffer", "DataView",
+  "Uint8Array", "Int8Array", "Uint16Array", "Int16Array", "Uint32Array", "Int32Array",
+  "Float32Array", "Float64Array",
+]);
+
+/** The generated bundle. Its contents are proved by check:bundle, not by shape. */
+const GENERATED_BUNDLE = "engine/engine.mjs";
+
+type Shape = {
+  what: string;
+  /** Given one line of stripped code and the file's string constants. */
+  test: (line: string, constants: Map<string, string>) => boolean;
+  /** Files this shape does not apply to, and why -- printed on a clean run. */
+  except?: string;
+};
+
+const NAME_ASSEMBLY: Shape[] = [
+  {
+    what: "character-code arithmetic: a character turned into a number, or a number into a character",
+    test: (line) => /\.\s*charCodeAt\s*\(|\.\s*codePointAt\s*\(|\bfromCharCode\b/.test(line),
+    except: GENERATED_BUNDLE,
+  },
+  {
+    what:
+      "a character read straight into a concatenation, which is how a name is spelled one letter at a time"
+      + " (reading a character to compare or index with, as ui/parts/PixelIcon.qml does, is not this)",
+    test: (line) => /\.\s*charAt\s*\(/.test(line) && /\+/.test(line),
+  },
+  {
+    what: "a string constant declared in this file, indexed into a concatenation: a character pool",
+    test: (line, constants) =>
+      /\+/.test(line)
+      && [...constants.keys()].some((name) =>
+        new RegExp(`(?<![\\w$])(?:[\\w$]+\\s*\\.\\s*)?${name}\\s*\\??\\.?\\s*\\[`).test(line),
+      ),
+  },
+  {
+    what: "a computed member access on the result of a call, which is how a named global is reached without naming it",
+    test: (line) => /[A-Za-z_$][\w$]*\s*\((?:[^()]|\([^()]*\))*\)\s*\??\.?\s*\[/.test(line),
+  },
+  {
+    what: "an optional computed member access",
+    test: (line) => /(?:[A-Za-z_$][\w$]*)\s*\?\?\s*\.\s*\[|(?:[A-Za-z_$][\w$]*)\s*\?\.\s*\[/.test(line),
+  },
+  {
+    what:
+      "`new` on something that is not one of the types a plugin file may construct ("
+      + [...NEW_ALLOWED].slice(0, 6).join(", ") + ", ...): a variable, or a parenthesised expression",
+    test: (line) => {
+      for (const match of line.matchAll(/\bnew\s+(?:([A-Za-z_$][\w$]*)|(\())/g))
+        if (!match[1] || !NEW_ALLOWED.has(match[1])) return true;
+      return false;
+    },
+  },
+  {
+    what: "a dynamic import",
+    test: (line) => /\bimport\s*\(/.test(line),
+  },
+  {
+    what:
+      "`this`. QML addresses objects by id, and the plugin uses `this` nowhere;"
+      + " a function that returns it is a way to reach the global object without writing `globalThis`",
+    test: (line) => /\bthis\b/.test(line),
+  },
+  {
+    what: "Qt.resolvedUrl() on something that is not a string literal: a path assembled at runtime",
+    test: (line) => /Qt\.resolvedUrl\s*\(\s*(?!['"`])/.test(line),
+  },
+  {
+    what: "Array.prototype.join",
+    test: (line) => /\.\s*join\s*\(/.test(line),
+    except: GENERATED_BUNDLE,
+  },
+  {
+    what: "Array.prototype.concat",
+    test: (line) => /\.\s*concat\s*\(/.test(line),
+    except: GENERATED_BUNDLE,
+  },
 ];
+
+let shapeFilesScanned = 0;
 for (const file of tree.files) {
-  if (!isQml(file.path) || !isPluginFile(file.path)) continue;
+  if (file.binary || !isRuntimeCode(file.path)) continue;
+  shapeFilesScanned += 1;
+  const constants = stringConstants(file.text);
   const code = strip(file.text).split(/\r?\n/);
   const raw = file.text.split(/\r?\n/);
   for (const [index, line] of code.entries())
-    for (const shape of RUNTIME_CONSTRUCTION)
-      if (shape.pattern.test(line))
-        fail(
-          "runtime construction in a plugin QML file",
-          `${file.path}:${index + 1}: ${shape.what}. A plugin file in this repository has no reason to build a name, a URL or an object at runtime; whatever it spells, the shape is the defect.\n    ${(raw[index] ?? "").trim().slice(0, 120)}`,
-        );
+    for (const shape of NAME_ASSEMBLY) {
+      if (shape.except === file.path) continue;
+      if (!shape.test(line, constants)) continue;
+      fail(
+        "runtime name assembly in a plugin file",
+        `${file.path}:${index + 1}: ${shape.what}. A plugin file in this repository has no reason to build a name, a URL or an object at runtime; whatever it spells, the shape is the defect.\n    ${(raw[index] ?? "").trim().slice(0, 120)}`,
+      );
+    }
+}
+
+// A `Loader` whose `source` is an expression loads whatever that expression
+// spells, and round 4 pointed a `Qt.resolvedUrl(base + tail)` at the allow-list
+// with it. A source has to be a literal, or fold to one: `fold()` substitutes
+// the file's single-assignment string constants before deciding.
+for (const file of tree.files) {
+  if (file.binary || !isQml(file.path) || !isPluginFile(file.path)) continue;
+  const code = strip(file.text);
+  const folded = fold(stripComments(file.text));
+  for (const match of code.matchAll(/(?<![\w$.])source\s*:\s*([^\n]*)/g)) {
+    const line = code.slice(0, match.index).split("\n").length;
+    const value = match[1]!.trim();
+    if (/^(['"`])/.test(value)) continue; // a literal path
+    if (/^Qt\.resolvedUrl\s*\(\s*['"`]/.test(value)) continue; // a literal, resolved
+    const foldedLine = folded.split(/\r?\n/)[line - 1] ?? "";
+    if (/source\s*:\s*(?:Qt\.resolvedUrl\s*\(\s*)?['"`]/.test(foldedLine)) continue; // folds to a literal
+    fail(
+      "runtime name assembly in a plugin file",
+      `${file.path}:${line}: a \`source\` bound to an expression this gate cannot resolve to a string literal. Whatever it names is loaded and run; name it literally.\n    ${(file.text.split(/\r?\n/)[line - 1] ?? "").trim().slice(0, 120)}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -536,12 +694,17 @@ for (const file of tree.files) {
 // lie. This is the check that keeps the allow-list from becoming a hiding place.
 
 // Round 3 defeated this rule with `await import("../de" + "v/collect.mjs")`: it
-// used a literal `includes` while the invariant scanner used `glue()`. It uses
-// `glue()` now, and it covers the exact-path entries as well as the directory
-// ones -- the old `endsWith("/")` guard skipped every single-file exemption.
+// used a literal `includes` while the invariant scanner used `glue()`. Round 4
+// defeated the glue() version by putting the two halves in variables --
+// `var head = "../de"; var tail = "v/collect.mjs"; import(head + tail)` -- and
+// falsified this README's claim about it word for word. `fold()` substitutes
+// every name this file binds exactly once to a string literal before gluing, so
+// the two-variable form spells the path it reaches. (The dynamic `import` in
+// that payload is separately a failure under 3a now, in a `.js` file as much as
+// a `.qml` one.)
 for (const file of tree.files) {
   if (!isEvidenceFile(file)) continue;
-  const lines = glue(stripComments(file.text)).split(/\r?\n/);
+  const lines = fold(stripComments(file.text)).split(/\r?\n/);
   for (const entry of NOT_THE_PLUGIN) {
     const index = lines.findIndex((text) => text.includes(entry.match));
     if (index === -1) continue;
@@ -603,10 +766,30 @@ function screenFileFor(name: string): string | undefined {
   )?.path;
 }
 
-const KEY_NAME = /^(?:Escape|Esc|Enter|Return|Space|Tab|Backspace|Shift|Ctrl|Control|Alt|Super|Meta|F\d{1,2}|Left|Right|Up|Down|PageUp|PageDown|Home|End)$/;
+// The names this gate recognises as keys wherever they appear. Round 4 got
+// `M`, `P` and `Delete` past it -- none of them was on the list, and the list
+// was a subset of a keyboard rather than a keyboard. Two things changed: a
+// backticked *single character* is a key name now, wherever it is written,
+// which is the natural way to name the letter and digit keys and covers all 36
+// of them without naming one; and the named part below is the rest of a
+// standard keyboard rather than a selection from it. The list is printed on
+// every clean run, so what is checked is readable rather than promised.
+const NAMED_KEYS = [
+  "Escape", "Esc", "Enter", "Return", "Space", "Spacebar", "Tab", "Backtab", "Backspace",
+  "Delete", "Del", "Insert", "Ins", "Home", "End", "PageUp", "PageDown",
+  "Left", "Right", "Up", "Down",
+  "Shift", "Ctrl", "Control", "Alt", "AltGr", "Super", "Meta", "Command", "Cmd", "Menu",
+  "CapsLock", "NumLock", "ScrollLock", "PrintScreen", "Print", "SysReq", "Pause", "Break",
+  "Plus", "Minus", "Equal", "Comma", "Period", "Slash", "Backslash", "Semicolon",
+  "Apostrophe", "BracketLeft", "BracketRight", "QuoteLeft", "Asterisk",
+];
+const KEY_NAME = new RegExp(`^(?:${NAMED_KEYS.join("|")}|F\\d{1,2}|[A-Za-z0-9])$`);
 
 /** Qt spells some of these differently from a README. */
-const KEY_ALIASES: Record<string, string> = { Esc: "Escape", Ctrl: "Control", Super: "Meta" };
+const KEY_ALIASES: Record<string, string> = {
+  Esc: "Escape", Ctrl: "Control", Super: "Meta", Command: "Meta", Cmd: "Meta",
+  Del: "Delete", Ins: "Insert", Spacebar: "Space", Break: "Pause", SysReq: "SysReq",
+};
 
 /**
  * A key is handled when a QML file names the Qt identifier that handles it, with
@@ -630,12 +813,38 @@ function keyIsHandled(key: string): boolean {
   });
 }
 
-/** Every backticked key name in a unit, `SUPER + SHIFT + T` split apart. */
+// A unit that is talking about the keyboard at all. Round 4 wrote "`M` mutes
+// the engine note, `Delete` clears the records, and `P` pauses the race" and
+// every one of the three passed, because `KEY_NAME` is a closed list that holds
+// no letters, no digits and no `Delete` -- while README l.42-43 promised that
+// *every* backticked key name is grounded. Rather than lengthen that list one
+// key at a time, the question is asked the other way round: inside a unit that
+// is about the keyboard, any short backticked token is a key name, and has to
+// be handled. `KEY_NAME` survives as the list of names Qt spells differently
+// from a README, not as the list of names that get checked.
+const KEYBOARD_UNIT = new RegExp(
+  "\\bkeyboard\\b|\\bkeys?\\b|\\bkeybinding\\b|\\bshortcut\\b|\\bpress(?:es|ing|ed)?\\b|\\bholding\\b"
+  + "|\\bbinds?\\b|\\bbinding\\b|\\bhotkey\\b|\\barrow keys\\b"
+  + `|\`${KEY_NAME.source.replace(/^\^|\$$/g, "")}\``,
+  "i",
+);
+
+/** A backticked token that reads as a key name rather than a path or a command. */
+const KEY_SHAPED = /^(?:[A-Za-z][A-Za-z0-9]{0,11}|[0-9])$/;
+
+/**
+ * Every backticked key name in a unit, `SUPER + SHIFT + T` split apart. Inside a
+ * keyboard unit that is any short bare token; elsewhere it is only a name from
+ * `KEY_NAME`, so `NOTICE` in a licence sentence is not read as a key.
+ */
 function keysNamedIn(text: string): string[] {
   const keys: string[] = [];
+  const keyboard = KEYBOARD_UNIT.test(text);
   for (const match of text.matchAll(/`([^`\n]+)`/g))
-    for (const part of match[1]!.split(/\s*\+\s*/).map((piece) => piece.trim()))
+    for (const part of match[1]!.split(/\s*\+\s*/).map((piece) => piece.trim())) {
       if (KEY_NAME.test(part)) keys.push(part);
+      else if (keyboard && KEY_SHAPED.test(part)) keys.push(part);
+    }
   return keys;
 }
 
@@ -695,8 +904,11 @@ const ROWS: Row[] = [
       const problems: string[] = [];
       // A design screen named by its own name -- "| Podium | ranks the four
       // racers |" -- needs its file as much as "the podium screen" does.
+      // Round 4 lower-cased the name and the rule went silent: the regex was
+      // built with no `i` flag, and a lower-case screen name in prose is the
+      // *normal* way to write one. It is case-insensitive now.
       for (const name of DESIGN_SCREENS)
-        if (new RegExp(`\\b${name}\\b`).test(unit.text) && !screenFileFor(name))
+        if (new RegExp(`\\b${name}\\b`, "i").test(unit.text) && !screenFileFor(name))
           problems.push(
             `README.md:${unit.line} names "${name}" as something the plugin has, but there is no ui/${name}.qml in the tree`,
           );
@@ -782,8 +994,20 @@ for (const row of ROWS) {
         + `    claim: "${unit.text.slice(0, 160)}"\n    ${row.missing}`,
       );
 
+  // Grounding used to run only over `matching` -- units already classified as
+  // claims by the verb list. Round 4 wrote a verbless bullet ("- Podium -- the
+  // four racers, best lap first") and a sentence whose verb was `orders` rather
+  // than `ranks`, and the screen-grounding rule never ran on either, in the
+  // exact casing, next to a README line advertising the keyboard rule as
+  // unconditional. Naming a screen is a promise however the sentence is shaped,
+  // so grounding runs over every unit the README does not negate -- the same
+  // rule §4a already applies to keys.
   if (row.ground)
-    for (const unit of matching) for (const problem of row.ground(unit)) fail(`capability "${row.name}"`, problem);
+    for (const unit of units) {
+      if (isCanonicalMockSentence(unit.text)) continue;
+      if (NEGATOR.test(unit.text) || FUTURE.test(unit.text)) continue;
+      for (const problem of row.ground(unit)) fail(`capability "${row.name}"`, problem);
+    }
 
   if (!matching.length && evidence && row.disclosure && !row.disclosure.test(readme))
     fail(
@@ -820,6 +1044,11 @@ for (const unit of units) {
   }
 }
 audited.push(`keyboard: ${keysChecked} backticked key name(s) in the README, each grounded in a Qt key identifier`);
+audited.push(
+  `keyboard vocabulary: every backticked single letter or digit, F1-F99, and ${NAMED_KEYS.length} named keys`
+  + ` (${NAMED_KEYS.join(", ")});`
+  + ` plus, inside a unit that talks about keys, any backticked token of 1-12 letters and digits`,
+);
 
 // ---------------------------------------------------------------------------
 // 4b. A denial has to stay true as the tree grows
@@ -830,9 +1059,35 @@ audited.push(`keyboard: ${keysChecked} backticked key name(s) in the README, eac
 // arrives. "No game screen is built yet" is exactly as false as an overclaim
 // once ui/Garage.qml lands, and nothing in round 2 would have noticed.
 
+// Round 4 found the sentence this rule exists to catch, sitting in the README
+// under `## Remove`, shipped: "That path holds nothing until the save file is
+// built, so the command is only useful once it exists; `rm` will report the file
+// is missing before then." True when Piece 6 wrote it; false from the commit
+// that closed the persistence seam, which did not touch README.md. Three
+// phrasings were listed and that was a fourth. A denial about the save file does
+// not have to say "no save file" -- it can say the path is empty, that the file
+// does not exist yet, that nothing has been written there, or that a `rm` will
+// not find it -- so all four shapes are here, and the sentence that was shipped
+// is the second of them.
 const DENIALS: { phrase: RegExp; row: string; message: string }[] = [
   { phrase: /\bno (?:game )?screens? (?:is|are) built\b|\bno screens? exists?\b/i, row: "game screen", message: "a screen from the settled design exists as a file" },
   { phrase: /\bnothing is written to disk\b|\bwrites no files at all\b|\bno save file\b/i, row: "save file", message: "the plugin can write files" },
+  {
+    phrase: new RegExp(
+      "(?:that|the|this)\\s+(?:path|file|directory|folder)\\s+(?:holds|contains|has)\\s+nothing"
+      + "|nothing (?:is|has been|will be) (?:written|saved|stored) (?:there|to that|in that|to it)"
+      + "|(?:the )?save file (?:is|has) not (?:been )?(?:built|created|written)"
+      + "|until the save file (?:is|has been) (?:built|created|written)"
+      + "|(?:the )?(?:save )?file (?:does not|doesn't) exist (?:yet|until)"
+      + "|report(?:s)? (?:that )?the file is missing"
+      + "|there is no (?:save )?file (?:there|yet)",
+      "i",
+    ),
+    row: "save file",
+    message:
+      "the plugin builds that file: it reads and writes its save file through the engine, and this sentence tells a parent"
+      + " their child's settings and records are not on disk when they are",
+  },
   { phrase: /\bthere is no (?:sound|audio)\b|\bno audio loader has been built\b/i, row: "audio", message: "a multimedia token is in the plugin" },
   { phrase: /\bno overlay\b/i, row: "overlay and bar widget", message: "a shell window exists" },
 ];

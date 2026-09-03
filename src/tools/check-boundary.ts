@@ -17,19 +17,58 @@
 
 import { access, lstat, readFile, readdir } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
-import { NOT_THE_PLUGIN, NOT_WALKED, glue, isPluginFile } from "./scope.ts";
+import { NOT_THE_PLUGIN, NOT_WALKED, fold, glue, isPluginFile } from "./scope.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const ignored = new Set(NOT_WALKED.map((entry) => entry.match.replace(/\/$/, "")));
 const forbiddenDirectoryNames = new Set(["bin", "scripts"]);
 const forbiddenFileName = /^(?:install|installer|setup|uninstall)(?:\.|$)/i;
-const allowedBinaryExtensions = new Set([".png", ".wav", ".qsb"]);
-const binaryMagic = [
-  Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
-  Buffer.from([0x4d, 0x5a]),
-  Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
-  Buffer.from([0xfe, 0xed, 0xfa, 0xcf]),
+// Round 4 of the package review renamed a 4 KB ELF binary to
+// `assets/karts/skin-pack.png` and walked it past all three gates, while the
+// same bytes named `.bin` were caught -- because the magic-number test was
+// skipped for precisely the three extensions the allowance is written for. The
+// extension was trusted instead of the content, so the stated rule ("no bundled
+// binaries beyond PNG, WAV and .qsb") was implemented as "no bundled binaries
+// beyond files *named* .png, .wav or .qsb".
+//
+// Every file is opened and its first bytes read now. A file claiming one of the
+// three allowed types has to actually be one; anything else may not begin with
+// an executable header.
+const executableMagic: { magic: Buffer; what: string }[] = [
+  { magic: Buffer.from([0x7f, 0x45, 0x4c, 0x46]), what: "ELF" },
+  { magic: Buffer.from([0x4d, 0x5a]), what: "PE/COFF (MZ)" },
+  { magic: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), what: "Mach-O 64-bit" },
+  { magic: Buffer.from([0xfe, 0xed, 0xfa, 0xcf]), what: "Mach-O 64-bit, big-endian" },
+  { magic: Buffer.from([0xce, 0xfa, 0xed, 0xfe]), what: "Mach-O 32-bit" },
+  { magic: Buffer.from([0xca, 0xfe, 0xba, 0xbe]), what: "Mach-O universal / Java class" },
+  { magic: Buffer.from("#!"), what: "a script with a shebang" },
 ];
+
+/**
+ * The three binary types this repository may ship, each with the header the
+ * file has to actually start with. The `.qsb` prefix is the header Qt 6's `qsb`
+ * writes, read back from `shaders/road.frag.qsb` -- the only one in the tree,
+ * produced by the Homebrew Qt 6 toolchain docs/environment.md names.
+ */
+const allowedBinaryTypes: { extension: string; what: string; ok: (bytes: Buffer) => boolean }[] = [
+  {
+    extension: ".png",
+    what: "the 8-byte PNG signature 89 50 4E 47 0D 0A 1A 0A",
+    ok: (bytes) => bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  {
+    extension: ".wav",
+    what: "a RIFF/WAVE header",
+    ok: (bytes) =>
+      bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WAVE",
+  },
+  {
+    extension: ".qsb",
+    what: "the QSB header 00 00 98 3E",
+    ok: (bytes) => bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x98, 0x3e])),
+  },
+];
+const allowedBinaryExtensions = new Set(allowedBinaryTypes.map((type) => type.extension));
 
 // The only places a shell token is allowed. Everything else in the repository
 // is grepped, except the files scope.ts says are not the plugin at all.
@@ -73,6 +112,7 @@ const importGrepExemptions = new Set([
 const failures: string[] = [];
 let filesWalked = 0;
 let filesGrepped = 0;
+let filesTyped = 0;
 
 /** Everything is held to the layer boundary except layer 3 and the allow-list. */
 function withinLayerBoundary(display: string): boolean {
@@ -99,6 +139,17 @@ function grepImports(display: string, contents: string): void {
         `${display}:${index + 1}: layer boundary: "${token}"${literal ? "" : ", assembled from string fragments,"} is only allowed in TurboTables.qml, BarWidget.qml and shell/ -- ${line.trim().slice(0, 160)}`,
       );
     }
+  }
+  // And once over the whole file with its own single-assignment string
+  // constants substituted in first, so a token split across two variables --
+  // round 4's `var head = "../de"; var tail = "v/collect.mjs"` -- is read as the
+  // string the two of them spell.
+  const folded = fold(contents);
+  for (const token of forbiddenImports) {
+    if (contents.includes(token) || !folded.includes(token)) continue;
+    failures.push(
+      `${display}: layer boundary: "${token}", spelled by string constants this file binds once and joins, is only allowed in TurboTables.qml, BarWidget.qml and shell/`,
+    );
   }
 }
 
@@ -128,21 +179,39 @@ async function walk(directory: string): Promise<void> {
     if ((stat.mode & 0o111) !== 0)
       failures.push(`${display}: executable bit set`);
 
+    // Every file is read. No extension is trusted.
+    const contents = await readFile(path);
+    filesTyped += 1;
     const extension = extname(name).toLowerCase();
-    const binaryByExtension = allowedBinaryExtensions.has(extension);
-    if (!binaryByExtension) {
-      const contents = await readFile(path);
-      const prefix = contents.subarray(0, 4);
-      if (binaryMagic.some((magic) => prefix.subarray(0, magic.length).equals(magic))) {
-        failures.push(`${display}: executable binary`);
-        continue;
-      }
-      if (withinLayerBoundary(display)) grepImports(display, contents.toString("utf8"));
-    } else if (withinLayerBoundary(display) && !inABinaryHome(display)) {
-      failures.push(
-        `${display}: binary asset outside assets/, shaders/, docs/ and the root preview`,
-      );
+    const declaredType = allowedBinaryTypes.find((type) => type.extension === extension);
+
+    const header = executableMagic.find((entry) =>
+      contents.subarray(0, entry.magic.length).equals(entry.magic),
+    );
+    if (header) {
+      failures.push(`${display}: executable binary (${header.what} header)`);
+      continue;
     }
+
+    if (declaredType) {
+      if (!declaredType.ok(contents))
+        failures.push(
+          `${display}: the name says ${declaredType.extension} but the bytes are not: this file does not start with ${declaredType.what}.`
+          + ` The binary allowance is for PNG, WAV and .qsb content, not for those three filename endings.`,
+        );
+      if (withinLayerBoundary(display) && !inABinaryHome(display))
+        failures.push(`${display}: binary asset outside assets/, shaders/, docs/ and the root preview`);
+      continue;
+    }
+
+    if (contents.includes(0)) {
+      failures.push(
+        `${display}: binary content in a file that is not a .png, .wav or .qsb. Those three are the whole binary allowance, by content and not by name.`,
+      );
+      continue;
+    }
+
+    if (withinLayerBoundary(display)) grepImports(display, contents.toString("utf8"));
   }
 }
 
@@ -295,7 +364,12 @@ if (failures.length) {
 } else {
   console.log("Boundary check passed.");
   console.log(
-    `  hygiene: ${filesWalked} files, no symlinks, no executable bits, no installer-like names, no bin/ or scripts/ directory, no unexpected binary, no node_modules`,
+    `  hygiene: ${filesWalked} files, no symlinks, no executable bits, no installer-like names, no bin/ or scripts/ directory, no node_modules`,
+  );
+  console.log(
+    `  content types: ${filesTyped} files opened and their first bytes read -- no extension is trusted. The only binary content allowed is `
+    + allowedBinaryTypes.map((type) => `${type.extension} (${type.what})`).join(", ")
+    + `, and a file named for one of those has to be one.`,
   );
   console.log(
     `  layer imports: ${filesGrepped} files grepped for ${forbiddenImports.map((token) => JSON.stringify(token)).join(", ")} with 0 hits -- every file in the repository except the three that may hold one (${layerThree.join(", ")}) and the allow-list below`,
