@@ -438,17 +438,24 @@ FocusScope {
 
     var lerp = race.reducedMotion ? 1 : Math.min(1, dtMs / 190)
     var values = []
+    var targets = []
     var before = race.viewProgress
     for (var i = 0; i < state.racers.length; i++) {
       var target = Engine.effectiveProgress(state.racers[i], state.questionsPerLap)
       var held = (race.smoothProgress.length > i) ? race.smoothProgress[i] : target
       var next = held + (target - held) * lerp
       values.push(next)
+      targets.push(target)
     }
     race.smoothProgress = values
     race.viewProgress = values.length > 0 ? values[0] : 0
     track.humanProgress = race.viewProgress
-    track.setProgress(values)
+    // The engine's order, not the drawn order. Smoothed progress lags the
+    // truth, so the two disagreed on 402 of 1875 frames -- longest run about
+    // 2.8s, longer than a callout lives -- and the ladder could read
+    // "3rd YOU / 4th GASKET" with Gasket drawn in front. The exact targets go
+    // with it so a distance plate can print a gap that matches the ladder.
+    track.setProgress(values, Engine.raceOrder(state), targets)
 
     // Speed is effective-progress rate, in questions per second, plus the
     // idle roll: the design has the kart rolling while the child is thinking.
@@ -711,7 +718,10 @@ FocusScope {
       GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.55) }
       GradientStop { position: 0.30; color: Qt.rgba(0, 0, 0, 0.06) }
       GradientStop { position: 0.80; color: Qt.rgba(0, 0, 0, 0.0) }
-      GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.42) }
+      // 0.42 here was the whole "per-band brightness sawtooth" a critic
+      // measured on the road: the road alone swings 1.3% within a rumble
+      // band, this vignette took the composited frame to 37.7%.
+      GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.12) }
     }
   }
 
