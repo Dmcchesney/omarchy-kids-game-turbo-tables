@@ -100,6 +100,55 @@ FocusScope {
   // are not an answer the child is in the middle of.
   property bool enterSpends: picker.entryLength === 0
 
+  // ROUND 4 -- THE DEFERRED DIGIT, AND THE KEY THAT WAS NEVER PRINTED.
+  //
+  // On the 23 facts in the 1-12 deck whose answer is a single digit, a card key
+  // is ambiguous in a way no other press is: `1` on `2 x 3` is either "play card
+  // one" or "the answer is 1", and handing it to the engine settles it as a
+  // wrong answer on the spot. `ui/Race.qml` therefore parks the digit -- draws
+  // it in the field, keeps it out of the engine -- and waits for the child to
+  // say which it was. Enter says "it was my answer" and costs the streak.
+  // Backspace says "it was a card" and costs nothing.
+  //
+  // Round three printed only the first of those. The footer read
+  // `FINISH THE ANSWER FIRST      ESC  BACK`, which names the two keys that take
+  // something away and hides the one that does not, and tells the child to do
+  // the single most expensive thing available to them: finishing a one-digit
+  // answer means typing one digit, and that flushes the parked digit as a wrong
+  // answer FIRST -- streak gone, a `missed` entry and a darkened mastery lamp on
+  // a fact the child then gets right on the very next keystroke. Backspace
+  // appeared in no string on this panel, in its `Accessible.description`, or
+  // anywhere else in the game. On 16% of the deck a child holding a hand had no
+  // discoverable way to spend it.
+  //
+  // The host tells us the parked digit, because the field belongs to the race
+  // and not to this panel. "" means there is none. Everything below is printing:
+  // the arbitration in `ui/Race.qml` is unchanged by it.
+  property string pendingDigit: ""
+  readonly property bool deferred: picker.pendingDigit.length > 0
+
+  // The deferred footer is the longest line this panel ever prints, and it is
+  // the one line a child must be able to read. It goes on one row where the
+  // panel is wide enough for it and breaks between two of its three groups
+  // where it is not -- measured in the face the shell handed down rather than
+  // guessed, and broken by hand rather than by `WordWrap`, which put `ANSWER`
+  // and its digit on separate rows at 1366 x 768.
+  readonly property int footerWidth: picker.dockWidth - picker.px(30)
+  readonly property string deferredHead: "⌫  BACK TO THE CARD      ⏎  ANSWER " + picker.pendingDigit
+  readonly property string deferredFooter: (deferredProbe.advanceWidth > 0
+                                            && deferredProbe.advanceWidth <= picker.footerWidth)
+                                           ? (picker.deferredHead + "      ESC  BACK")
+                                           : (picker.deferredHead + "\nESC  BACK")
+
+  TextMetrics {
+    id: deferredProbe
+    font.family: Theme.mono
+    font.bold: true
+    font.pixelSize: picker.fsFloor(14, 15)
+    font.letterSpacing: picker.px(1)
+    text: picker.deferredHead + "      ESC  BACK"
+  }
+
   // -1 is "no card chosen yet", which is the state a hand sits in for as long
   // as the child likes. The design: "You may hold a hand as long as you like."
   property int chosen: -1
@@ -150,13 +199,24 @@ FocusScope {
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Power-up hand"
-  Accessible.description: "Press one, two or three to choose a card."
-                          + (picker.targeting
-                             ? " Left and right pick a rival, Enter uses it on " + picker.targetName + "."
-                             : (picker.strandedTarget
-                                ? " There is no rival left to aim at, so this card cannot be used."
-                                : " Enter uses it."))
-                          + " Escape puts the card back. Using a card costs the whole hand."
+  // The deferred sentence comes first, because while a digit is parked it is the
+  // only rule on this panel that costs anything, and a screen-reader user got no
+  // version of it at all before. It names all three keys and what each one does.
+  Accessible.description: picker.deferred
+    ? ("The digit " + picker.pendingDigit + " is waiting in the answer box. "
+       + "Backspace takes it back out and keeps the card chosen. "
+       + "Enter answers " + picker.pendingDigit + " instead. "
+       + "Escape puts the card back and takes the digit with it. "
+       + "One, two and three still change which card is chosen."
+       + (picker.targeting ? " Left and right pick a rival." : "")
+       + " Using a card costs the whole hand.")
+    : ("Press one, two or three to choose a card."
+       + (picker.targeting
+          ? " Left and right pick a rival, Enter uses it on " + picker.targetName + "."
+          : (picker.strandedTarget
+             ? " There is no rival left to aim at, so this card cannot be used."
+             : " Enter uses it."))
+       + " Escape puts the card back. Using a card costs the whole hand.")
 
   function choose(index) {
     if (index < 0 || index >= picker.hand.length)
@@ -375,20 +435,30 @@ FocusScope {
       // hand before finds out what to press by looking at the panel -- and when
       // a card cannot be spent, this line is where it says why, rather than the
       // press going nowhere in silence.
+      //
+      // ROUND 4 -- EVERY LINE NAMES KEYS AND WHAT THEY DO, not what the child
+      // has failed to do. `FINISH THE ANSWER FIRST` was an instruction with a
+      // price on it and no alternative printed beside it; it is gone. The
+      // deferred line below names all three keys that reach the parked digit,
+      // and it says what Enter would actually send -- `⏎  ANSWER 1`, with the
+      // digit in it -- so the child can read the cost off the panel while the
+      // fact is still on screen above them.
       Text {
         textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: picker.chosen < 0
               ? "1 2 3  CHOOSE A CARD"
-              : (picker.strandedTarget
-                 ? "ESC  BACK"
-                 : (!picker.enterSpends
-                    ? "FINISH THE ANSWER FIRST      ESC  BACK"
-                    : (picker.targeting
-                       ? "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
-                       : "⏎  USE IT      ESC  BACK")))
-        color: picker.strandedTarget ? Theme.hazard : Theme.text
+              : (picker.deferred
+                 ? picker.deferredFooter
+                 : (picker.strandedTarget
+                    ? "ESC  BACK"
+                    : (!picker.enterSpends
+                       ? "⏎  SEND THE ANSWER      ESC  BACK"
+                       : (picker.targeting
+                          ? "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
+                          : "⏎  USE IT      ESC  BACK"))))
+        color: (picker.strandedTarget && !picker.deferred) ? Theme.hazard : Theme.text
         font.family: Theme.mono
         font.bold: true
         font.pixelSize: picker.fsFloor(14, 15)

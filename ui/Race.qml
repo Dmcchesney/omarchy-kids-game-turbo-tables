@@ -169,6 +169,8 @@ FocusScope {
     }
 
     race.timeline = Engine.emptyTimeline()
+    race.clearRevealQueue()
+    reveal.clear()
     var built = Engine.createRace({
       "seed": race.seed,
       "mode": race.mode,
@@ -258,6 +260,12 @@ FocusScope {
     // field the engine just handed back. This is the one funnel every input
     // goes through, so no key handler can leave a stale claim behind.
     race.reconcileClaims()
+    // ... and if the reveal that was covering the field has just gone, the keys
+    // the child pressed into it are replayed here rather than inside
+    // `handleEvents`, so the whole step has landed before the first of them is
+    // read against it.
+    if (race.revealHolds && !reveal.active)
+      race.releaseReveal()
   }
 
   function send(input) {
@@ -301,8 +309,12 @@ FocusScope {
         }
         break
       case "reveal":
-        if (e.racerId === me)
+        if (e.racerId === me) {
           reveal.show(Engine.factLabel(e.fact) + " = " + e.answer, e.revealMs, Theme.teal)
+          // The field is the child's and this took it away from them mid-answer.
+          // Everything they press until it comes back waits in `revealQueue`.
+          race.revealHolds = true
+        }
         break
       case "pitCrew":
         if (e.racerId === me)
@@ -606,16 +618,50 @@ FocusScope {
   //
   //   Backspace, Escape and `H` all retire the claim. Backspace on a deferred
   //   digit simply drops it and leaves the card chosen, so the panel's own
-  //   footer turns from `FINISH THE ANSWER FIRST` to `⏎ USE IT` and the card is
-  //   one printed key away. Escape drops it and puts the card back. `H` drops it
-  //   because the hint moves the fact, and a claim that outlives its fact eats
-  //   the next digit the child types -- round two's `1` `H` `4` `⏎`, which
-  //   backspaced the child's own `4` away and spent the hand.
+  //   footer turns from the deferred line to `⏎ USE IT`. Escape drops it and
+  //   puts the card back. `H` drops it because the hint moves the fact, and a
+  //   claim that outlives its fact eats the next digit the child types -- round
+  //   two's `1` `H` `4` `⏎`, which backspaced the child's own `4` away and spent
+  //   the hand.
   //
-  // Nothing is ever spent by a keystroke that was meant as a digit; no keystroke
-  // of the child's is thrown away without the engine seeing it; a card choice,
-  // and a change of card choice, costs nothing at all; and no answer in the
-  // tables has become untypable while a hand is held.
+  // ROUND 4 -- WHAT ROUND THREE GOT WRONG ABOUT ITS OWN RULE.
+  //
+  // The rule above is a fork with two branches, and round three printed one of
+  // them. The comment that used to sit here said the card was "one printed key
+  // away". It was not printed anywhere: the footer read
+  // `FINISH THE ANSWER FIRST      ESC  BACK`, Backspace appeared in no string a
+  // child could see or hear, and the sentence the footer DID print pointed at
+  // the branch that costs a streak, a `missed` entry and a mastery lamp on a
+  // fact the child is about to get right. `ui/Picker.qml` now prints both
+  // branches and names the digit Enter would send; the arbitration below is
+  // unchanged by that.
+  //
+  // Three things below it did change, and all three are about time rather than
+  // about which key was pressed:
+  //
+  //   - An engine hit locks the field. A deferred digit handed over while the
+  //     field is locked is refused by the engine and was cleared here anyway, so
+  //     the digit AND the card both vanished on a rival's timing. `flushPending`
+  //     now asks whether the engine can take the digit before it lets go of it,
+  //     and says whether it succeeded, so Enter under a stall leaves the child
+  //     exactly where they were.
+  //   - Under that same lock, a card key equal to a one-digit answer used to run
+  //     case (a) -- reset the panel, hand the digit over, watch the engine refuse
+  //     it -- and did nothing at all, not even choose the card. Case (a) is now
+  //     guarded on the lock and falls through to the card choice, which is the
+  //     only reading left when the field cannot be typed into.
+  //   - A second wrong answer on a fact reveals it for 1500 ms. The engine moves
+  //     the deck on at once and the FIELD keeps the old fact's answer for that
+  //     window, so a key pressed into it was arbitrated -- and could be submitted
+  //     and credited -- against a question whose answer box the child could not
+  //     see. Those keystrokes are held in `revealQueue` and replayed the instant
+  //     the field comes back.
+  //
+  // Nothing is ever spent by a keystroke that was meant as a digit; a card
+  // choice, and a change of card choice, costs nothing at all; no answer in the
+  // tables has become untypable while a hand is held; and no keystroke of the
+  // child's is thrown away -- under a stall it waits for the field, and under a
+  // reveal it waits for the fact.
   Item {
     id: keys
     anchors.fill: parent
@@ -631,6 +677,7 @@ FocusScope {
         // One meaning: back out of a card choice if there is one, and otherwise
         // leave the race. Round one had three, and the middle one neither left
         // nor cleared the digit it had caused.
+        race.clearRevealQueue()
         if (picker.chosen >= 0) {
           race.dropPending()
           race.takeBackProvisional()
@@ -643,23 +690,39 @@ FocusScope {
         return
       }
 
-      if (key === Qt.Key_Return || key === Qt.Key_Enter) {
-        if (race.pending.length > 0) {
-          // A deferred digit is the child's answer. It goes to the engine now,
-          // which submits it and charges a wrong one the streak -- and only the
-          // streak. It never becomes a card play.
-          picker.reset()
-          race.flushPending()
-        } else if (race.enterSpendsCard()) {
-          race.takeBackProvisional()
-          picker.confirm()
-        } else if (race.entryLength() > 0) {
-          race.clearProvisional()
-          picker.reset()
-          race.send({ "kind": "submit" })
-        } else if (picker.chosen >= 0) {
-          picker.confirm()
+      // ------------------------------------------------- the reveal window
+      // While the field is showing a fact's answer back to the child, the deck
+      // has already moved and the answer box is not on screen. Keys that belong
+      // to the answer wait here for it. Escape above is not one of them -- back
+      // one is back one, at every moment of the game.
+      if (race.holdsForReveal()) {
+        if (key >= Qt.Key_0 && key <= Qt.Key_9) {
+          race.queueForReveal(key - Qt.Key_0)
+          event.accepted = true
+          return
         }
+        if (key === Qt.Key_Backspace && race.revealQueue.length > 0) {
+          // The child taking back a digit they cannot see yet. It is theirs to
+          // take back, and it never reached the engine.
+          race.revealQueue = race.revealQueue.slice(0, race.revealQueue.length - 1)
+          event.accepted = true
+          return
+        }
+        if ((key === Qt.Key_Return || key === Qt.Key_Enter) && race.revealQueue.length > 0) {
+          // Enter after digits belongs to those digits, so it queues behind
+          // them. A bare Enter with nothing queued still plays a chosen card at
+          // once: the hand is on screen throughout the reveal and a card play
+          // has nothing to do with the fact behind it.
+          race.queueForReveal(-1)
+          event.accepted = true
+          return
+        }
+        if (key === Qt.Key_H)
+          race.clearRevealQueue()
+      }
+
+      if (key === Qt.Key_Return || key === Qt.Key_Enter) {
+        race.submitKey()
         event.accepted = true
         return
       }
@@ -723,13 +786,39 @@ FocusScope {
 
   function dropPending() { race.pending = "" }
 
+  // Will the engine take a digit right now? This mirrors the engine's own
+  // `canAnswer`, which is private to `src/engine/race.ts`, and it is asked
+  // BEFORE a deferred digit is let go of rather than after. Round three cleared
+  // `pending` and then sent; under an engine hit the send was refused, the
+  // follow-up submit was skipped because the entry was empty, and the child's
+  // keystroke and their card choice were both gone with nothing on screen
+  // saying so. A stall is two to three seconds long and lands on a rival's
+  // clock, not the child's.
+  function fieldTakesDigits() {
+    if (!race.state || !race.human)
+      return false
+    if (race.state.status !== "racing" && race.state.status !== "settling")
+      return false
+    if (race.human.finished)
+      return false
+    if (race.human.currentFact < 0)
+      return false
+    return !race.stalled
+  }
+
   // Hand the deferred digit to the engine. It goes through `typeDigit` like
-  // every other digit -- same stall guard, same leading-zero rule, same
-  // automatic submit -- so a deferred wrong answer costs exactly what a typed
-  // one costs: the streak, a sputter, a `missed` entry, and nothing else.
+  // every other digit -- same leading-zero rule, same automatic submit -- so a
+  // deferred wrong answer costs exactly what a typed one costs: the streak, a
+  // sputter, a `missed` entry, and nothing else.
+  //
+  // Returns true only when the digit actually left this file. False means the
+  // field is locked and the digit is still deferred, still drawn, and still one
+  // printed key from the card.
   function flushPending() {
     if (race.pending.length === 0)
-      return
+      return false
+    if (!race.fieldTakesDigits())
+      return false
     var value = Number(race.pending)
     race.pending = ""
     race.clearProvisional()
@@ -739,6 +828,7 @@ FocusScope {
     // assume), Enter still means submit.
     if (race.entryLength() > 0)
       race.send({ "kind": "submit" })
+    return true
   }
 
   function entryLength() { return race.human ? race.human.entry.length : 0 }
@@ -758,7 +848,8 @@ FocusScope {
   // Enter spends the card exactly when the field holds nothing but the digits
   // the card presses put there -- and a deferred digit is never one of them: it
   // is on screen precisely because it might be an answer, so Enter reads it as
-  // one and the panel prints `FINISH THE ANSWER FIRST` while it is there.
+  // one and the panel prints `⏎  ANSWER n` beside the Backspace that takes it
+  // back while it is there.
   function enterSpendsCard() {
     if (picker.chosen < 0)
       return false
@@ -798,6 +889,105 @@ FocusScope {
     race.provisional = 0
   }
 
+  // ------------------------------------------------------ the reveal window
+  //
+  // Design, The answer loop 5: a second wrong answer on the same fact "shows the
+  // answer for a moment" and the deck moves on. The engine moves it in the same
+  // step; the field on screen is handed over to `7 x 8 = 56` for 1500 ms
+  // (`fieldBox` below draws the entry only while `!reveal.active`). For that
+  // window the child is being shown one thing and the arbitration is reading
+  // another, and a key pressed into it went straight through: a card key landed
+  // as a CORRECT ANSWER to a question whose answer box was not on screen, took
+  // the streak up and lit that fact's mastery lamp.
+  //
+  // Keys that belong to the answer wait here instead and are replayed through
+  // the whole arbitration the moment the field comes back, so they cost what
+  // they would have cost had the child pressed them one beat later, and nothing
+  // is scored against a question they were not being shown.
+  //
+  // The pit crew's reveal is deliberately NOT held. `H` is the child's own
+  // request to be shown the answer and move on; they pressed the key that moved
+  // the deck, the new fact is already drawn above them at a tenth of the screen
+  // height, and holding their next keystroke would put a 1.2 s wall in front of
+  // a key they pressed on purpose. Only the reveal a wrong answer imposes takes
+  // the field away from a child who was in the middle of using it.
+  property bool revealHolds: false
+  property var revealQueue: []
+
+  function holdsForReveal() { return race.revealHolds && reveal.active }
+
+  function queueForReveal(digitOrEnter) {
+    // Four is more than a child can press inside 1500 ms with intent, and it is
+    // longer than the longest answer in the deck. Past it the presses are a
+    // mash, and a mash should not become a replayed answer.
+    if (race.revealQueue.length >= 4)
+      return
+    var queue = race.revealQueue.slice()
+    queue.push(digitOrEnter)
+    race.revealQueue = queue
+  }
+
+  function clearRevealQueue() {
+    race.revealHolds = false
+    race.revealQueue = []
+  }
+
+  // Called the instant the reveal stops covering the field, by whichever of the
+  // three things ends it: the hold timer, a correct answer, or another wrong one.
+  function releaseReveal() {
+    if (!race.revealHolds)
+      return
+    race.revealHolds = false
+    var queued = race.revealQueue
+    race.revealQueue = []
+    for (var i = 0; i < queued.length; i++) {
+      if (race.revealHolds) {
+        // A replayed key was itself a second wrong answer and opened a new
+        // window. The rest of the queue belongs to that one, not to this one.
+        // Nothing can have been queued in between: a replay posts no key events.
+        race.revealQueue = queued.slice(i)
+        return
+      }
+      if (queued[i] < 0) {
+        race.submitKey()
+        continue
+      }
+      race.typeKey(queued[i])
+    }
+  }
+
+  // What Enter means, in one place, so a key held back by the reveal window
+  // replays through exactly the branch a live press would have taken.
+  function submitKey() {
+    if (race.pending.length > 0) {
+      // A deferred digit is the child's answer. It goes to the engine now,
+      // which submits it and charges a wrong one the streak -- and only the
+      // streak. It never becomes a card play.
+      //
+      // ROUND 4. Unless the engine cannot take it: an engine hit locks the
+      // field for two or three seconds, and round three cleared the digit,
+      // reset the panel and sent into the lock, so a rival's timing deleted the
+      // child's keystroke and their card choice together. If the digit did not
+      // land, nothing here moves and the panel still prints both keys.
+      if (race.flushPending())
+        picker.reset()
+      return
+    }
+    if (race.enterSpendsCard()) {
+      race.takeBackProvisional()
+      picker.confirm()
+      return
+    }
+    if (race.entryLength() > 0) {
+      race.clearProvisional()
+      picker.reset()
+      race.send({ "kind": "submit" })
+      return
+    }
+    if (picker.chosen >= 0)
+      picker.confirm()
+  }
+
   function typeKey(digit) {
     var expected = race.expectedAnswer()
     var holding = digit >= 1 && digit <= 3 && race.hand.length >= digit
@@ -808,9 +998,17 @@ FocusScope {
     if (holding && clean && expected.length > 0) {
       var cand = race.shownEntry + String(digit)
 
-      if (cand === expected) {
+      if (cand === expected && !race.stalled) {
         // (a) the press completes the correct answer. Type it, let the engine
         // submit it, and leave the hand alone.
+        //
+        // ROUND 4 -- `!race.stalled`. With the field locked by an engine hit
+        // this branch reset the panel, handed the digit over and watched the
+        // engine refuse it: on `2 x 1` a press of `2` did NOTHING for the two or
+        // three seconds of the hit -- no card chosen, no digit, no refusal said
+        // out loud, and any card already chosen quietly dropped. The press
+        // cannot be this answer while the answer cannot be given, so it falls
+        // through to (c), which chooses the card and prints `⏎  USE IT`.
         race.dropPending()
         race.clearProvisional()
         picker.reset()
@@ -1262,7 +1460,12 @@ FocusScope {
 
   Timer {
     id: revealHold
-    onTriggered: reveal.active = false
+    onTriggered: {
+      reveal.active = false
+      // The field is back. Anything the child pressed into the window it was
+      // gone for is replayed now, against the fact they can finally see.
+      race.releaseReveal()
+    }
   }
 
   // ------------------------------------------------------------- callouts
@@ -1339,9 +1542,15 @@ FocusScope {
     // in the field are not an answer the child is part-way through, so Enter
     // still spends. A DEFERRED digit is the exception, and it is why this reads
     // `shownEntry` rather than the engine's entry: that digit might be the
-    // child's answer, so Enter belongs to it and the footer says
-    // `FINISH THE ANSWER FIRST` until Backspace or Enter settles it.
+    // child's answer, so Enter belongs to it until Backspace or Enter settles
+    // it.
     enterSpends: race.enterSpendsCard() || race.shownEntry.length === 0
+    // ROUND 4. The panel could not print the way back because it was never told
+    // there was one: `enterSpends` alone says "Enter is not yours", which is
+    // what produced `FINISH THE ANSWER FIRST` and nothing else. The parked digit
+    // itself goes down now, so the footer can name Backspace, and say what Enter
+    // would send if the child chose it.
+    pendingDigit: race.pending
     dockWidth: race.px(500)
     dockMargin: race.px(30)
     visible: race.hand.length > 0
