@@ -220,7 +220,19 @@ Item {
       var hw = g.halfW
       var noseZ = g.noseZ
 
-      // contact shadow, on the ground, before anything else
+      // Contact shadow, on the ground, before anything else.
+      //
+      // Two parts. A soft ellipse spread wider than the kart, which is what
+      // actually reads as ground contact at a distance -- round one drew only
+      // the tight quad below, and against dark tarmac it was invisible, so the
+      // hero kart looked like a sticker while every roadside prop had an
+      // ellipse under it. Then the tight quad, which gives the hard edge.
+      ctx.fillStyle = Qt.rgba(0, 0, 0, 0.30)
+      ctx.beginPath()
+      ctx.ellipse(sprite.sheetW * 0.155, sprite.sheetH - 20,
+                  sprite.sheetW * 0.69, 20)
+      ctx.fill()
+
       var sh = []
       var corners = [[-hw - 3, 0, -1], [hw + 3, 0, -1], [hw + 3, 0, noseZ + 1], [-hw - 3, 0, noseZ + 1]]
       for (var c = 0; c < corners.length; c++)

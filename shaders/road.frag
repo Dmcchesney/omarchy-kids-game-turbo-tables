@@ -103,13 +103,41 @@ void main()
         // reason a still frame still reads as speed once it moves.
         float band = step(0.5, fract(s / stripe));
 
-        vec3 road = mix(roadColor.rgb, roadAlt.rgb, band * 0.34);
-        vec3 rumble = mix(rumbleColor.rgb, rumbleAlt.rgb, band);
+        // How much fine detail survives at this distance. Between the horizon
+        // and about y = 480 the road is four internal pixels wide, and a hard
+        // black-and-cream zebra blown up by a nearest-neighbour filter there
+        // reads as speckle rather than as fog. So the alternations dissolve
+        // toward their own average with distance and the far road resolves
+        // into a smooth dark ribbon that still shows which way it bends.
+        float detail = smoothstep(52.0, 16.0, z);
+        float softBand = mix(0.5, band, detail);
+
+        vec3 road = mix(roadColor.rgb, roadAlt.rgb, softBand * 0.34);
+        vec3 rumble = mix(rumbleColor.rgb, rumbleAlt.rgb, softBand);
 
         // The garage floor: a diagnostic grid, both ways, off the road.
-        float gridX = lineMask(x, gridScale, 0.030);
-        float gridZ = lineMask(s, gridScale, 0.030);
-        vec3 floorCol = mix(groundColor.rgb, gridColor.rgb, max(gridX, gridZ) * 0.80);
+        //
+        // ONE SPACING IS NOT ENOUGH. A single 4.5-unit grid is right at the
+        // middle distance and wrong at both ends. Near the camera the whole
+        // bottom fifth of the screen covers less than one world unit of depth
+        // and half a dozen across, so a 4.5-unit grid puts no line in it at
+        // all: measured, the floor went black below y = 900, which is exactly
+        // where a racer sells speed. So the grid is a ladder of three octaves
+        // and the finer two fade in as the floor comes toward the eye. The
+        // fade is a smoothstep in z, so nothing pops as a line arrives.
+        float fine = smoothstep(12.0, 4.5, z) * 0.72;
+        float finer = smoothstep(4.6, 2.2, z) * 0.55;
+        float g0 = max(lineMask(x, gridScale, 0.030), lineMask(s, gridScale, 0.030));
+        float g1 = max(lineMask(x, gridScale * 0.25, 0.030),
+                       lineMask(s, gridScale * 0.25, 0.030));
+        float g2 = max(lineMask(x, gridScale * 0.0625, 0.030),
+                       lineMask(s, gridScale * 0.0625, 0.030));
+        float grid = max(g0, max(g1 * fine, g2 * finer * 0.85));
+        vec3 floorCol = mix(groundColor.rgb, gridColor.rgb, grid * 0.80);
+        // A wash of work light on the floor closest to the kart. Small on
+        // purpose: the design's ground is near-black and a lit lattice reads
+        // as water, which an earlier round proved.
+        floorCol += glowColor.rgb * 0.022 * smoothstep(13.0, 2.2, z);
 
         float onRumble = insideMask(ax, roadHalf + rumbleHalf);
         float onRoad = insideMask(ax, roadHalf);
@@ -125,7 +153,7 @@ void main()
 
         col = mix(floorCol, rumble, onRumble);
         col = mix(col, road, onRoad);
-        col = mix(col, laneColor.rgb, marks * onRoad * 0.88);
+        col = mix(col, laneColor.rgb, marks * onRoad * 0.88 * detail);
 
         // Pools of amber where the work lights hang over the track.
         float pool = fract(s / (stripe * 12.0)) - 0.5;

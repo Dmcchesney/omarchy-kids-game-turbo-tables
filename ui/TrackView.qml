@@ -65,22 +65,100 @@ Item {
   // the karts.
   readonly property real playerZ: 3.20
   readonly property real kartWorldWidth: 1.36
-  // World units per question of effective progress, near the child. Beyond
-  // four questions the gap is compressed, so a rival a whole lap ahead is a
-  // speck on the horizon rather than a kart that is not on the screen at all.
+  // World units per question of effective progress, near the child.
   readonly property real unitsPerQuestion: 4.0
+  // How far ahead the compressed distance is allowed to reach. Round one let
+  // it run to whatever the gap was, and the two karts actually beating the
+  // child came out 17 px and 13 px wide -- the karts you most need to read
+  // were the ones you could not. The tail now saturates: `farSpan` is the most
+  // any rival can ever be pushed past the four-question near zone, so the
+  // furthest kart on the road is 41 world units away and about 43 px wide,
+  // which is over the ~28 px floor a number plate needs to be legible.
+  readonly property real farSpan: 22.0
+  readonly property real farSoftness: 13.0
+
+  // ------------------------------------------------------------ the circuit
+  // THE TRACK IS A TABLE, NOT A SINE.
+  //
+  // Design, The view: "the road narrows to a vanishing point, curves swing the
+  // horizon ... The track is a closed circuit of twelve sectors, one per
+  // lap-table, each with its own landmark."
+  //
+  // Round one derived `curve` from two sines with amplitudes of 0.00075 and
+  // 0.00042. Measured over a whole cycle that moved the far road centre at
+  // y=510 by 26 px in 1920 -- 1.4% -- so the road was straight and the
+  // concession that "the horizon swings and the road bends" was false.
+  //
+  // So the circuit is now authored: twelve sectors around a closed loop, each
+  // with a corner and a gradient, and both the roadside landmarks and the
+  // curve are indexed off the same loop position. Sector 4's roller door is at
+  // the same place on the track every lap because the props and the corners
+  // are the same table read twice.
+  //
+  // The two amplitudes are the only knobs. `curveAmplitude` is set from the
+  // measurement it controls: the far road centre at y=510 moves
+  // 11846 * curve pixels at 1920x1080, so 0.0255 is a +-302 px swing and a
+  // 604 px peak-to-peak excursion, 31% of the frame's width.
+  readonly property int sectorCount: 12
+  readonly property real sectorLength: 36.0
+  readonly property real circuitLength: sectorCount * sectorLength
+  readonly property real curveAmplitude: 0.0255
+  readonly property real hillAmplitude: 0.030
+
+  // Two long straights, one wide left-hand sweep, one tighter right-hander,
+  // which is the shape the minimap draws. Positive bends the road right.
+  readonly property var sectorCurve: [0.00, 0.10, -0.45, -1.00, -0.80, -0.20,
+                                      0.00, 0.55, 1.00, 0.62, 0.15, -0.10]
+  readonly property var sectorHill:  [0.00, 0.30, 0.72, 0.40, 0.00, -0.40,
+                                      -0.75, -0.35, 0.10, 0.55, 0.25, -0.20]
+
+  // Sampled at sector boundaries and blended with a smoothstep, so the value
+  // is continuous and its slope is zero at every boundary: a corner opens and
+  // closes rather than switching on.
+  function sectorBlend(table, at) {
+    var p = at / sectorLength
+    var i = Math.floor(p)
+    var f = p - i
+    var s = f * f * (3 - 2 * f)
+    var a = table[((i % sectorCount) + sectorCount) % sectorCount]
+    var b = table[(((i + 1) % sectorCount) + sectorCount) % sectorCount]
+    return a + (b - a) * s
+  }
+
+  function curveAt(at) { return sectorBlend(sectorCurve, at) * curveAmplitude }
+  function hillAt(at) { return sectorBlend(sectorHill, at) * hillAmplitude }
+
+  // Which sector of the circuit the camera is in, 0-based. Exposed so a test
+  // or a harness can assert that a landmark and its corner arrive together.
+  readonly property int sectorNow: {
+    var p = Math.floor(travel / sectorLength)
+    return ((p % sectorCount) + sectorCount) % sectorCount
+  }
 
   // ----------------------------------------------------------- live camera
-  property real travel: 0
-  property real curve: 0
+  // Not zero: with reduced motion on, nothing ever calls advance() and the
+  // still is whatever `travel` starts at. Starting it a third of the way into
+  // sector 3 means the reduced-motion picture is a road in a corner rather
+  // than a ruler.
+  property real travel: 118
+  // Derived, not assigned, so it is right on the first frame, right under
+  // reduced motion, and cannot fall out of step with `travel`.
+  readonly property real curve: curveAt(travel)
   // Impulses, each 0..1 and each decaying. Reduced motion never raises them.
+  // Where the car is pointing, in backdrop pixels. The integral of the curve
+  // along the track; the far wall parallaxes with it.
+  property real heading: 0
   property real lurch: 0
   property real pullback: 0
   property real shake: 0
   property real shakeX: 0
   property real shakeY: 0
 
-  readonly property real horizon: baseHorizon + pullback * 0.055
+  // The horizon swings because the track climbs and falls, which is the other
+  // half of what the design means by "curves swing the horizon": the lateral
+  // term moves the road, the gradient moves the skyline. Bounded to +-32 px at
+  // 1080p so the far wall never reaches the fact.
+  readonly property real horizon: baseHorizon + pullback * 0.055 + hillAt(travel)
   readonly property real focal: baseFocal + lurch * 0.16 - pullback * 0.13
   readonly property real aspect: height > 0 ? width / height : 16 / 9
 
@@ -94,16 +172,33 @@ Item {
   }
 
   // Compressed distance for a kart `delta` questions ahead of the child.
+  //
+  // The first four questions are true scale, so the kart you are actually
+  // fighting moves the way it should. Past that the gap is squashed through a
+  // saturating exponential rather than a linear 0.30: the leader of a Grand
+  // Prix can be seventy questions up the road, and 70 x 4 x 0.30 put it 87
+  // world units away and 20 px wide. It now saturates at `farSpan`, so the
+  // furthest kart on the road is at z = 41.2 and 43 px wide, and the child can
+  // still see who is winning.
   function zForDelta(delta) {
     var a = Math.abs(delta)
     var near = Math.min(a, 4) * unitsPerQuestion
-    var far = a > 4 ? (a - 4) * unitsPerQuestion * 0.30 : 0
+    var extra = a > 4 ? a - 4 : 0
+    var far = farSpan * (1 - Math.exp(-extra / farSoftness))
     return playerZ + (delta < 0 ? -1 : 1) * (near + far)
   }
 
   // Lane offsets by seat, so four karts do not stack on the centre line.
+  // Seat 0 is the child's. It is not 0.0: at dead centre the hero sat exactly
+  // on the dashed centre line, so it never read as being *in* a lane. It sits
+  // a third of a lane off and drifts to the outside of a corner, which is the
+  // only steering in a game where the child does not steer.
+  readonly property real heroLane: 0.34 - curve * 13.0
   readonly property var lanes: [0.0, -0.98, 0.98, -0.42]
-  function laneOf(seat) { return lanes[((seat % 4) + 4) % 4] }
+  function laneOf(seat) {
+    var s = ((seat % 4) + 4) % 4
+    return s === 0 ? heroLane : lanes[s]
+  }
 
   // ---------------------------------------------------------- the kart list
   ListModel { id: kartModel }
@@ -121,6 +216,7 @@ Item {
         "kartSeat": k.seat,
         "kartPaint": String(k.paint),
         "kartProgress": k.progress,
+        "kartGap": 0,
         "isHuman": k.isHuman === true,
         "isGhost": k.ghost === true
       })
@@ -130,10 +226,76 @@ Item {
   // Called every frame with one number per kart, in the same order. Setting a
   // role leaves the delegate alone and only re-evaluates the bindings that
   // read it, which is the whole reason this is a ListModel.
-  function setProgress(values) {
-    var n = Math.min(values.length, kartModel.count)
-    for (var i = 0; i < n; i++)
-      kartModel.setProperty(i, "kartProgress", values[i])
+  //
+  // `order`, if given, is the engine's authoritative finishing order as an
+  // array of kart ids, first to last -- `Engine.raceOrder(state)`. Pass it and
+  // the drawn karts can never contradict a callout. See `orderedProgress`.
+  //
+  // `exact`, if given, is the UNSMOOTHED effective progress per kart, in the
+  // same order -- the integers the engine ranks by and the HUD's ladder prints.
+  // The name plates take their gap from it. Without it the plate has to round
+  // the smoothed value, which is one question out for a fraction of a second
+  // after every answer, and a plate that says "+3" beside a ladder that says
+  // "2" is two sources of truth for one number.
+  // A plate shows its gap ONLY when `exact` was supplied. Rounding the smoothed
+  // delta instead is wrong on 17% of frames -- measured, 320 of 1875 -- because
+  // the smoothing takes about four tenths of a second to cross the next half
+  // question, and a plate reading "+3" beside a HUD ladder reading "2" is two
+  // sources of truth for one number. Without `exact` the plate is the name
+  // alone, which is still every rival named at every distance.
+  property bool haveExact: false
+
+  function setProgress(values, order, exact) {
+    var v = order ? orderedProgress(values, order) : values
+    var n = Math.min(v.length, kartModel.count)
+    haveExact = !!(exact && exact.length >= n)
+    var mine = 0
+    if (haveExact)
+      for (var h = 0; h < n; h++)
+        if (kartModel.get(h).isHuman)
+          mine = exact[h]
+    for (var i = 0; i < n; i++) {
+      kartModel.setProperty(i, "kartProgress", v[i])
+      if (haveExact)
+        kartModel.setProperty(i, "kartGap", Math.round(exact[i] - mine))
+    }
+  }
+
+  // WHY THE DRAWN POSITIONS ARE PROJECTED ONTO THE ENGINE'S ORDER.
+  //
+  // The callouts are fired from the engine's order, which is exact and
+  // instantaneous. The karts are drawn from a smoothed copy of effective
+  // progress, so that a kart glides between the engine's ten-per-second steps
+  // instead of jumping. Those two disagree while the smoothing catches up, and
+  // measured over a real race the disagreement ran for 176 consecutive frames
+  // -- 2.8 s at the 62.5 fps this build measures, longer than the 1.6 s the
+  // callout is on screen. That is a `PASSED GASKET` over a Gasket that is
+  // still drawn in front, which is what the round-one critique caught.
+  //
+  // This is the fix, and it is one line of caller: project the smoothed values
+  // onto the true order. Walking from the leader, any kart the engine says is
+  // behind is pulled back to at most the position of the kart in front of it.
+  // The projection only ever moves a kart backwards, so nothing lurches
+  // forward; a kart that has just been passed sits level for a frame or two
+  // and then falls away as the smoothing resolves, which is what being passed
+  // looks like. With no `order` argument the behaviour is exactly as before.
+  function orderedProgress(values, order) {
+    if (!order || order.length === 0)
+      return values
+    var row = ({})
+    for (var i = 0; i < kartModel.count; i++)
+      row[kartModel.get(i).kartId] = i
+    var out = values.slice()
+    var cap = Number.POSITIVE_INFINITY
+    for (var k = 0; k < order.length; k++) {
+      var at = row[order[k]]
+      if (at === undefined || at >= out.length)
+        continue
+      if (out[at] > cap)
+        out[at] = cap
+      cap = out[at]
+    }
+    return out
   }
 
   // ------------------------------------------------------------ the clock
@@ -158,12 +320,10 @@ Item {
     var rate = speed * 26 + lurch * 90
     rate *= (1 - Math.min(0.95, pullback * 1.05))
     travel += rate * dt
-
-    // A slow wander in the curve, so the road bends the way a circuit does
-    // rather than running dead straight for twelve laps. Derived from
-    // `travel`, so it is the same bend at the same point of the track every
-    // lap and not a random number per frame.
-    curve = 0.00075 * Math.sin(travel * 0.010) + 0.00042 * Math.sin(travel * 0.0031 + 1.7)
+    heading += curve * rate * dt * 118
+    // `curve` and `horizon` follow `travel` by binding, from the sector table
+    // above. Nothing is assigned here: a corner is a property of where you are
+    // on the circuit, not of when this function last ran.
 
     lurch = Math.max(0, lurch - dt * 1.5)
     pullback = Math.max(0, pullback - dt * 1.35)
@@ -370,7 +530,12 @@ Item {
     // Taking the modulo over the whole row was the round-two bug that left the
     // wall standing off the side of the screen.
     readonly property real shift: {
-      var s = -view.curve * 62000 - view.travel * 0.55
+      // `heading` is the integral of the curve along the track -- which way
+      // the car is pointing -- and a wall a long way off moves with the
+      // heading, not with the road's own lateral offset. Round one multiplied
+      // `curve` by 62000 directly; with an authored circuit that is twenty
+      // times the amplitude it was tuned for, and the wall would have whipped.
+      var s = -view.heading - view.travel * 0.55
       var m = s % bayWidth
       return m < 0 ? m + bayWidth : m
     }
@@ -467,21 +632,41 @@ Item {
   }
 
   // ---------------------------------------------------------- the props
-  // Twelve pieces of the garage, spaced down the track and recycled by a
-  // modulo, so there are always twelve on screen and never a thirteenth to
-  // pay for. The kinds repeat on a fixed cycle, so the same landmark comes
-  // round at the same place every lap, which is what makes it a circuit.
-  readonly property var propCycle: ["tireWall", "workLight", "cone", "drum",
-                                    "sign", "workLight", "rollerDoor", "cone",
-                                    "tireWall", "drum", "workLight", "sign"]
+  // The roadside, indexed off the same circuit the corners are.
+  //
+  // Design, The view: "a closed circuit of twelve sectors, one per lap-table,
+  // each with its own landmark: the twos pass the tire wall, the sevens run
+  // under the roller door". So each of the twelve sectors opens with its own
+  // signature landmark and then carries two pieces of ordinary furniture, and
+  // the loop the props run on is the same 432 units the sector table runs on:
+  // the roller door is in sector 4's corner on every lap of every race.
+  //
+  // Thirty-six items rather than twelve, but the draw cost is unchanged: the
+  // draw distance is 190 world units and the spacing is 12, so about sixteen
+  // are ever visible and the rest are culled before they reach the scene
+  // graph. Each is drawn once into its own canvas at startup and only ever
+  // moved and scaled after that.
+  readonly property var sectorLandmark: ["tireWall", "sign", "workLight", "drum",
+                                         "rollerDoor", "tireWall", "cone", "sign",
+                                         "workLight", "rollerDoor", "drum", "tireWall"]
+  readonly property var sectorFiller: ["cone", "workLight", "drum", "cone",
+                                       "workLight", "sign"]
   readonly property real propSpacing: 12.0
-  readonly property real propLoop: propCycle.length * propSpacing
+  readonly property int propCount: Math.round(circuitLength / propSpacing)
+  readonly property real propLoop: circuitLength
+
+  function propKind(index) {
+    var slot = index % 3
+    if (slot === 0)
+      return sectorLandmark[Math.floor(index / 3) % sectorCount]
+    return sectorFiller[index % sectorFiller.length]
+  }
 
   Repeater {
-    model: view.propCycle.length
+    model: view.propCount
 
     Item {
-      readonly property string myKind: view.propCycle[index]
+      readonly property string myKind: view.propKind(index)
       readonly property bool arch: myKind === "rollerDoor"
       readonly property real worldWidth: arch ? 9.4 : (myKind === "tireWall" ? 2.6 : 1.35)
       readonly property real zed: {
@@ -563,36 +748,114 @@ Item {
         y: -sheetH
         scale: slot.sc
       }
+    }
+  }
 
-      // A rival carries a small name plate so a callout that says PASSED BOLT
-      // can be matched to a kart on the road. The child's own kart does not:
-      // it is the one in the middle at the bottom.
-      Item {
-        visible: !isHuman && !isGhost && slot.zed > view.playerZ + 1.5
-                 && slot.spriteH > 28
-        width: tag.implicitWidth + 10
-        height: tag.implicitHeight + 5
-        x: -width / 2
-        y: -slot.spriteH - height - 4
+  // ---------------------------------------------------------- the plates
+  // Every rival's name and how far ahead it is, drawn in a pass of its own
+  // ABOVE the roadside furniture.
+  //
+  // Round one hung the plate inside the kart's own item, gated on the sprite
+  // being over 28 px tall, and depth-sorted with everything else. Three things
+  // went wrong at once: the two karts actually beating the child were under
+  // the gate and unnamed; the three rivals converge near the vanishing point
+  // and their plates landed on top of one another; and a tyre wall nearer than
+  // a rival drew straight over its plate. A plate is a statement about the
+  // race rather than an object in the garage, so it goes over the scenery, it
+  // has a floor on its type, and the three are stacked by seat so they cannot
+  // collide with each other.
+  //
+  // The gap is in questions and comes from the same effective progress the
+  // engine ranks by, so a plate can never disagree with the place readout.
+  function kartSpriteH(z) { return sizeAt(kartWorldWidth, z) * 128 / 192 }
 
-        Rectangle {
-          anchors.fill: parent
-          radius: 3
-          color: Qt.rgba(0, 0, 0, 0.62)
-          border.width: 1
-          border.color: Qt.rgba(slot.paintCol.r, slot.paintCol.g, slot.paintCol.b, 0.8)
+  Repeater {
+    model: kartModel
+
+    Item {
+      id: badge
+      readonly property color paintCol: kartPaint
+      readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
+      readonly property real zed: isHuman ? view.playerZ : view.zForDelta(delta)
+      readonly property real spriteH: view.kartSpriteH(zed)
+      readonly property int gapQuestions: kartGap
+      readonly property int tagSize: Math.max(13, Math.min(19, Math.round(spriteH * 0.16)))
+
+      visible: !isHuman && !isGhost && zed > view.playerZ + 1.0
+               && zed < view.drawDistance
+      width: tag.implicitWidth + tagGap.implicitWidth + 14
+      height: tag.implicitHeight + 6
+      z: 2000
+
+      // How many rivals are further up the road than this one. Reading
+      // `kartProgress` first is deliberate: it is what makes this a live
+      // binding, since it changes on every frame for every kart.
+      readonly property int plateRow: {
+        var mine = kartProgress
+        var rank = 0
+        for (var i = 0; i < kartModel.count; i++) {
+          var k = kartModel.get(i)
+          if (k.isHuman)
+            continue
+          if (k.kartProgress > mine
+              || (k.kartProgress === mine && k.kartSeat < kartSeat))
+            rank += 1
         }
+        return rank
+      }
+
+      x: view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX - width / 2
+      // BELOW the kart, stacked downward, furthest-away first.
+      //
+      // Above the kart was the obvious place and it was wrong twice. Three
+      // rivals converge on the vanishing point on a straight, so one row of
+      // clearance each is needed; and the vanishing point rises to y = 408 at
+      // the crest of a gradient, so a stack of three above it reaches y = 332
+      // and lands behind the answer field, which lives in the sky. Below the
+      // kart there is nothing but road all the way down, at every horizon and
+      // every gradient, so a plate can never reach the fact or the field.
+      //
+      // The row is the kart's rank by distance, not its seat. A fixed per-seat
+      // offset only separates plates when the karts are at the same depth; at
+      // 1366x768 two rivals a row apart in seat and a row apart in depth landed
+      // on the same line and read as `PISTONOLT`. Ranking by distance makes the
+      // offsets and the depths pull the same way, so the vertical gap between
+      // two plates is at least one row however the field is spread.
+      y: view.vAt(zed) * view.height + view.shakeY + 3 + plateRow * (height + 3)
+
+      Rectangle {
+        anchors.fill: parent
+        radius: 3
+        color: Qt.rgba(0, 0, 0, 0.80)
+        border.width: 1
+        border.color: Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95)
+      }
+
+      Row {
+        anchors.centerIn: parent
+        spacing: 6
 
         Text {
           id: tag
-          anchors.centerIn: parent
+          anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: kartName
           color: Theme.textBright
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: Math.max(9, Math.min(15, Math.round(slot.spriteH * 0.16)))
+          font.pixelSize: badge.tagSize
           font.letterSpacing: 1
+        }
+
+        Text {
+          id: tagGap
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: badge.gapQuestions > 0 ? "+" + badge.gapQuestions : ""
+          color: Theme.amber
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: badge.tagSize
         }
       }
     }

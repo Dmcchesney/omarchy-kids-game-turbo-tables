@@ -34,6 +34,7 @@ Item {
       var r = list[i]
       dots.append({
         "dotProgress": r.progress,
+        "dotT": r.progress,
         "dotColor": String(r.color),
         "dotNumber": r.number,
         "dotHuman": r.isHuman === true,
@@ -41,12 +42,75 @@ Item {
         "dotFinished": r.finished === true
       })
     }
+    relayout()
   }
 
   function setProgress(values) {
     var n = Math.min(values.length, dots.count)
     for (var i = 0; i < n; i++)
       dots.setProperty(i, "dotProgress", values[i])
+    relayout()
+  }
+
+  // ---------------------------------------------------------- de-collision
+  // WHY THE DOTS ARE NOT DRAWN WHERE THE NUMBERS SAY.
+  //
+  // The loop is the whole race, twelve sectors for twelve lap-tables, which is
+  // what the design asks for. That makes the whole picture 144 questions long,
+  // so four racers within a few questions of one another -- which is most of a
+  // race -- land inside one dot's width of one another. Round one drew them
+  // straight and the shipped frame contained exactly two visible dots out of
+  // four: the child's disc was drawn 24% larger and on top, and it covered the
+  // other two completely. A map of a four-kart race that shows two karts is
+  // worse than no map.
+  //
+  // So the dots are pushed apart along the track until each has a dot's width
+  // of room, in order, from the racer who is furthest back. Three properties
+  // hold, and they are the ones that make this a legibility device rather than
+  // a lie:
+  //
+  //   * the ORDER is never changed -- the dot in front is the racer in front;
+  //   * the displacement is BOUNDED by (n-1) x one dot width, which is the
+  //     smallest gap at which two dots are two dots at all;
+  //   * the group is re-centred on its own true mean, so the field as a whole
+  //     still sits where it really is on the lap.
+  //
+  // The exact gaps are the HUD's job to state in questions; this is the
+  // picture, and a picture that hides half the field is not honest either.
+  readonly property real perimeter: {
+    var total = 0
+    for (var i = 1; i < outline.length; i++) {
+      var dx = outline[i].x - outline[i - 1].x
+      var dy = outline[i].y - outline[i - 1].y
+      total += Math.sqrt(dx * dx + dy * dy)
+    }
+    return Math.max(1, total)
+  }
+  readonly property real minSepT: (dotSize * 1.32) / perimeter
+
+  function relayout() {
+    var n = dots.count
+    if (n === 0)
+      return
+    var order = []
+    var sum = 0
+    for (var i = 0; i < n; i++) {
+      var t = Math.max(0, Math.min(0.99999, dots.get(i).dotProgress))
+      order.push({ "at": i, "t": t })
+      sum += t
+    }
+    order.sort(function (a, b) { return a.t - b.t })
+    for (var k = 1; k < n; k++)
+      if (order[k].t < order[k - 1].t + minSepT)
+        order[k].t = order[k - 1].t + minSepT
+    // Re-centre on the true mean, so spreading never drags the field forward.
+    var moved = 0
+    for (var m = 0; m < n; m++)
+      moved += order[m].t
+    var shift = (sum - moved) / n
+    for (var w = 0; w < n; w++)
+      dots.setProperty(order[w].at, "dotT",
+                       Math.max(0, Math.min(0.99999, order[w].t + shift)))
   }
 
   function setFinished(flags) {
@@ -60,7 +124,10 @@ Item {
   property int activeSector: 1
   property bool reducedMotion: false
   property real dotSize: 18
-  property color trackColor: Theme.panelSunken
+  // The tarmac reads as a road only if it is lighter than the panel it sits
+  // on. Round one used panelSunken, which is darker than the panel, so the
+  // loop read as a hole cut in the HUD rather than as a circuit.
+  property color trackColor: Theme.panelRaised
   property color edgeColor: Theme.lineStrong
 
   implicitWidth: 260
@@ -102,6 +169,8 @@ Item {
   }
 
   // -------------------------------------------------------------- drawing
+  readonly property real tarmacWidth: Math.max(8, dotSize * 0.92)
+
   Shape {
     anchors.fill: parent
     antialiasing: true
@@ -109,7 +178,7 @@ Item {
     // the tarmac
     ShapePath {
       strokeColor: minimap.trackColor
-      strokeWidth: Math.max(6, minimap.dotSize * 0.72)
+      strokeWidth: minimap.tarmacWidth
       fillColor: "transparent"
       capStyle: ShapePath.RoundCap
       joinStyle: ShapePath.RoundJoin
@@ -136,8 +205,11 @@ Item {
       readonly property point tan: minimap.tangentAt(t)
       readonly property bool active: index === ((minimap.activeSector - 1) % minimap.sectors)
 
+      // Exactly the tarmac's width. Round one drew the ticks taller than the
+      // road they cross, so one on a tight bend read as a mark floating beside
+      // the loop rather than a sector line on it.
       width: 2
-      height: Math.max(8, minimap.dotSize * 0.86)
+      height: minimap.tarmacWidth
       color: active ? Theme.amber : Theme.textFaint
       x: p.x - width / 2
       y: p.y - height / 2
@@ -146,21 +218,27 @@ Item {
     }
   }
 
-  // The start and finish line, in checkers, at t = 0.
-  Row {
+  // The start and finish line, at t = 0. Two rows of squares, not one row of
+  // bars: round one drew six 3 px columns the full height of the road, which
+  // reads as three slashes rather than as a chequered flag.
+  Grid {
     readonly property point p: minimap.pointAt(0)
     readonly property point tan: minimap.tangentAt(0)
+    readonly property real cell: Math.max(3, Math.round(minimap.tarmacWidth / 2))
+    columns: 4
+    rows: 2
     x: p.x - width / 2
     y: p.y - height / 2
     rotation: Math.atan2(tan.y, tan.x) * 180 / Math.PI
     spacing: 0
 
     Repeater {
-      model: 6
+      model: 8
       Rectangle {
-        width: 3
-        height: Math.max(9, minimap.dotSize * 0.92)
-        color: (index % 2 === 0) ? Theme.cream : Qt.rgba(0.08, 0.08, 0.09, 1)
+        width: parent.cell
+        height: parent.cell
+        color: ((index % 4) + Math.floor(index / 4)) % 2 === 0
+               ? Theme.cream : Qt.rgba(0.06, 0.06, 0.07, 1)
       }
     }
   }
@@ -171,14 +249,20 @@ Item {
 
     Item {
       readonly property color tint: dotColor
-      readonly property point p: minimap.pointAt(Math.max(0, Math.min(0.99999, dotProgress)))
-      readonly property real size: dotHuman ? minimap.dotSize * 1.24 : minimap.dotSize
+      readonly property point p: minimap.pointAt(Math.max(0, Math.min(0.99999, dotT)))
+      // Every dot is the same size now. The child's is found by its ring and
+      // by the accent, not by being the biggest thing on the map -- a bigger
+      // disc on top is exactly what erased two of the four racers.
+      readonly property real size: minimap.dotSize
 
       width: size
       height: size
       x: p.x - size / 2
       y: p.y - size / 2
-      z: dotHuman ? 3 : 2
+      // The child's dot is drawn UNDER the rivals, not over them. If two are
+      // ever coincident despite the spreading, the one that loses is the one
+      // the child already knows the position of.
+      z: dotHuman ? 2 : 3
 
       // Position changes are a cut under reduced motion and a short slide
       // otherwise, which is the design's rule for the whole screen.
@@ -191,13 +275,24 @@ Item {
         NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
       }
 
-      // The child's dot carries the theme's accent as a ring, so it is found
-      // by shape as well as by size.
+      // The child's dot carries a double ring in cream and the theme's accent,
+      // so it is found by shape rather than by size. Round one used the same
+      // blue for the emphasis ring that a rival dot was painted in.
       Rectangle {
         visible: dotHuman
         anchors.centerIn: parent
-        width: parent.width + 6
-        height: parent.height + 6
+        width: parent.width + 9
+        height: parent.height + 9
+        radius: width / 2
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.cream
+      }
+      Rectangle {
+        visible: dotHuman
+        anchors.centerIn: parent
+        width: parent.width + 5
+        height: parent.height + 5
         radius: width / 2
         color: "transparent"
         border.width: 2
@@ -209,9 +304,12 @@ Item {
         radius: width / 2
         color: dotGhost ? Qt.rgba(Theme.teal.r, Theme.teal.g, Theme.teal.b, 0.45) : tint
         border.width: 1
-        border.color: Qt.rgba(0, 0, 0, 0.55)
+        border.color: Qt.rgba(0, 0, 0, 0.72)
         opacity: dotFinished ? 0.72 : 1.0
 
+        // A two-digit number in a disc has to be sized off the chord it sits
+        // on, not off the diameter, or the second digit is clipped by the
+        // curve -- which is what happened to the `34` in round one.
         Text {
           anchors.centerIn: parent
           textFormat: Text.PlainText
@@ -219,7 +317,8 @@ Item {
           color: Theme.ink(parent.color)
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: Math.max(8, Math.round(parent.height * 0.60))
+          font.pixelSize: Math.max(8, Math.round(parent.height
+                                                 * (String(dotNumber).length > 1 ? 0.50 : 0.62)))
         }
       }
     }

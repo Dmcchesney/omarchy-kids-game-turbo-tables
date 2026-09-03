@@ -122,6 +122,17 @@ Canvas {
     function fog(zz) {
       return Math.max(0, Math.min(1, Math.exp(-fogDensity * zz * zz * 0.0011)))
     }
+    // The shader's smoothstep(edge0, edge1, z), written the same way round:
+    // 0 at `far`, 1 at `near`, eased at both ends.
+    function fade(zz, far, near) {
+      var t = Math.max(0, Math.min(1, (zz - far) / (near - far)))
+      return t * t * (3 - 2 * t)
+    }
+    function blend(a, b, t) {
+      var k = Math.max(0, Math.min(1, t))
+      return Qt.rgba(a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k,
+                     a.b + (b.b - a.b) * k, 1)
+    }
     function quad(x1, y1, x2, y2, x3, y3, x4, y4) {
       ctx.beginPath()
       ctx.moveTo(x1, y1)
@@ -148,39 +159,79 @@ Canvas {
       ctx.fillStyle = groundColor
       ctx.fillRect(0, yFar, w, Math.max(1, yNear - yFar + 1))
 
-      // the garage floor grid, longitudinal lines only: the transverse ones
-      // fall out of the band edges below.
-      // The columns that can possibly land on the plane at this depth, rather
-      // than a fixed count with a loose reject: at the far end that is two or
-      // three lines and at the near end it is none at all, and asking for the
-      // range is what keeps the fallback's fill count flat instead of
-      // proportional to the draw distance.
-      var span = (aspect * zFar / focal) * 1.25 + Math.abs(curve) * zFar * zFar
-      var columns = Math.min(9, Math.ceil(span / gridScale))
-      ctx.fillStyle = gridColor
-      for (var g = -columns; g <= columns; g++) {
-        var gx = g * gridScale
-        if (Math.abs(gx) < roadHalf + rumbleHalf)
-          continue
-        var gf = uAt(gx, zFar) * w
-        var gn = uAt(gx, zNear) * w
-        if ((gf < -0.05 * w && gn < -0.05 * w) || (gf > 1.05 * w && gn > 1.05 * w))
-          continue
-        var wf = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zFar) * 40))
-        var wn = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zNear) * 40))
-        quad(gf - wf, yFar, gf + wf, yFar, gn + wn, yNear + 1, gn - wn, yNear + 1)
-      }
-
-      // a transverse grid line wherever a grid boundary crosses this band
+      // The garage floor grid, in three octaves.
+      //
+      // One 4.5-unit spacing is right in the middle distance and wrong at both
+      // ends. The bottom fifth of the screen covers under one world unit of
+      // depth and about six across, so a single coarse grid puts nothing in
+      // it: measured, the floor went black below y = 900, which is the
+      // fastest-moving part of the frame and the part that sells speed. So the
+      // two finer octaves fade in as the floor comes toward the eye. The
+      // fade is by alpha, not by a switch, so no line ever pops into being --
+      // and the coarse lines are skipped inside the finer passes, because a
+      // multiple of 4.5 is also a multiple of 4.5/4.
+      var octaves = [
+        { "period": gridScale, "alpha": 1.0 },
+        { "period": gridScale * 0.25, "alpha": fade(zFar, 12.0, 4.5) * 0.72 },
+        { "period": gridScale * 0.0625, "alpha": fade(zFar, 4.6, 2.2) * 0.55 }
+      ]
       var sFar = zFar + travel
       var sNear = zNear + travel
-      var kFar = Math.floor(sFar / gridScale)
-      var kNear = Math.floor(sNear / gridScale)
-      if (kFar !== kNear) {
-        var zLine = kFar * gridScale - travel
-        var yLine = vAt(zLine) * h
+      for (var o = 0; o < octaves.length; o++) {
+        var period = octaves[o].period
+        var alpha = octaves[o].alpha
+        if (alpha <= 0.02)
+          continue
+        ctx.globalAlpha = alpha
         ctx.fillStyle = gridColor
-        ctx.fillRect(0, yLine, w, Math.max(1, Math.min(2, (yNear - yFar) * 0.20)))
+
+        // longitudinal: only the columns that can land on the plane at this
+        // depth, so the fill count stays flat instead of growing with the
+        // draw distance.
+        var span = (aspect * zFar / focal) * 1.3 + Math.abs(curve) * zFar * zFar
+        var columns = Math.min(o === 0 ? 9 : 26, Math.ceil(span / period))
+        for (var g = -columns; g <= columns; g++) {
+          if (o > 0 && (g % 4) === 0)
+            continue
+          var gx = g * period
+          if (Math.abs(gx) < roadHalf + rumbleHalf)
+            continue
+          var gf = uAt(gx, zFar) * w
+          var gn = uAt(gx, zNear) * w
+          if ((gf < -0.05 * w && gn < -0.05 * w) || (gf > 1.05 * w && gn > 1.05 * w))
+            continue
+          var wf = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zFar) * 40))
+          var wn = Math.max(0.5, Math.min(2.4, (w * 0.0016) * (focal / zNear) * 40))
+          quad(gf - wf, yFar, gf + wf, yFar, gn + wn, yNear + 1, gn - wn, yNear + 1)
+        }
+
+        // transverse: every grid boundary this band crosses, not just the
+        // first one. Near the camera one band spans several fine boundaries.
+        var kFar = Math.floor(sFar / period)
+        var kNear = Math.floor(sNear / period)
+        for (var k = kFar; k <= kNear && k - kFar < 24; k++) {
+          if (k === kFar && kFar === kNear)
+            break
+          if (o > 0 && (k % 4) === 0)
+            continue
+          var zLine = (k + 1) * period - travel
+          if (zLine <= zNear || zLine >= zFar)
+            continue
+          var yLine = vAt(zLine) * h
+          ctx.fillRect(0, yLine, w, Math.max(1, Math.min(2, (yNear - yFar) * 0.18)))
+        }
+        ctx.globalAlpha = 1
+      }
+
+      // A wash of work light on the floor closest to the kart, matching the
+      // shader's. Small: the design's ground is near-black and a lit lattice
+      // reads as water, which an earlier round proved.
+      var wash = fade(zFar, 13.0, 2.2) * 0.022
+      if (wash > 0.002) {
+        ctx.globalAlpha = wash
+        ctx.fillStyle = glowColor
+        ctx.fillRect(0, yFar, w, Math.max(1, yNear - yFar + 1))
+        ctx.globalAlpha = 1
       }
 
       // rumble strips, then the road on top of them
@@ -195,14 +246,23 @@ Canvas {
       var rNearIn = uAt(roadHalf, zNear) * w
       var rNearOut = uAt(edgeNear, zNear) * w
 
-      ctx.fillStyle = band === 1 ? rumbleAlt : rumbleColor
+      // How much of the zebra survives at this distance. Between the horizon
+      // and about y = 480 a band is a couple of pixels tall, and a hard
+      // black-and-cream alternation there reads as speckle rather than as fog,
+      // so the alternations dissolve toward their own average with distance.
+      // The shader does the same thing with the same two numbers.
+      var detail = fade(mid, 52.0, 16.0)
+      var soft = 0.5 + (band - 0.5) * detail
+
+      ctx.fillStyle = blend(rumbleColor, rumbleAlt, soft)
       quad(lFarOut, yFar, lFarIn, yFar, lNearIn, yNear + 1, lNearOut, yNear + 1)
       quad(rFarIn, yFar, rFarOut, yFar, rNearOut, yNear + 1, rNearIn, yNear + 1)
 
-      ctx.fillStyle = band === 1 ? roadAlt : roadColor
+      ctx.fillStyle = blend(roadColor, roadAlt, soft * 0.34)
       quad(lFarIn, yFar, rFarIn, yFar, rNearIn, yNear + 1, lNearIn, yNear + 1)
 
       // lane markings: two solid inner edge lines and a dashed centre
+      ctx.globalAlpha = detail
       ctx.fillStyle = laneColor
       var inner = roadHalf * 0.88
       var markF = Math.max(0.5, (rFarIn - lFarIn) * 0.012)
@@ -215,6 +275,7 @@ Canvas {
         var cF = uAt(0, zFar) * w, cN = uAt(0, zNear) * w
         quad(cF - markF, yFar, cF + markF, yFar, cN + markN, yNear + 1, cN - markN, yNear + 1)
       }
+      ctx.globalAlpha = 1
 
       // a pool of work light on the tarmac, every fourth stripe
       var pool = ((mid + travel) / (stripe * 12)) % 1 - 0.5
