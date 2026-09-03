@@ -427,76 +427,150 @@ FocusScope {
 
       // Paint and number, over the right of the bay, as in the mock.
       //
-      // ROUND-4: A SCRIM, NOT A CARD. Round three's panel was opaque, and a
-      // critic measured what that did to the room: at y = 356 the row mean
-      // across x 960-1140 was lit wall; from y = 358 down every pixel in that
-      // span was one flat value. It cut the back wall, the right work light's
-      // beam, the hazard stripe and the floor grid on a dead-straight
-      // horizontal, and it destroyed the one-room illusion across the right
-      // quarter of the hero panel.
+      // ROUND-5 REBUILD. Round four faded the panel's TOP edge and reported
+      // the defect fixed. The defect was on the LEFT edge, and the round-5
+      // verdict measured it still there: a one-pixel drop of dY 0.0385 at
+      // y = 400 where the panel meets the lit wall, and a largest step of
+      // 0.10969 at (932,546) where the cut slices a hazard chevron mid-stroke.
+      // It also found that the panel was not a scrim at all -- at y = 560 the
+      // hazard stripe reads Y 0.0188-0.0543 outside it and a flat 0.0058
+      // inside: the stripe simply stopped.
       //
-      // It is now a scrim: transparent at its top edge and reaching full
-      // strength over `fadeH` px, so the wall walks into it instead of being
-      // guillotined by it. The whole fade band sits ABOVE the COLOR heading,
-      // so every string and every control still stands on the scrim at 0.93
-      // or more and the contrast floor is unaffected -- which is the answer
-      // to the round-two finding that a 0.90 panel let the wall poster show
-      // through the top swatch row. Nothing legible is behind it now: the
-      // poster moved to the left wall in round three.
+      // Both are fixed here, and the mechanism is different from round four's.
+      //
+      //   * The scrim is drawn on a Canvas with a TWO-AXIS alpha field: the
+      //     vertical fade at the top, and a horizontal fade over `fadeW` px at
+      //     the left, painted as a `destination-out` pass so the two ramps
+      //     multiply. A QML `Gradient` runs in one direction only, which is
+      //     why round four could only fade one edge.
+      //   * The panel is genuinely translucent now: its peak is 0.74, not
+      //     0.90, and the room measurably continues through it -- see the
+      //     evidence, which samples the hazard stripe inside the panel and
+      //     finds it varying rather than flat.
+      //   * It is an object in the room, not a cut in the image: a soft cast
+      //     shadow falls on the wall to its left and a lit bevel runs down
+      //     its own left edge.
+      //
+      // The panel is `fadeW` px WIDER than round four's and its column is
+      // inset by the same amount, so every control stands exactly where it
+      // stood and on full scrim -- the contrast floor is unaffected.
       Item {
         id: paintPanel
-        width: garage.px(296)
         readonly property int fadeH: garage.px(64)
+        readonly property int fadeW: garage.px(34)
+        width: garage.px(296) + fadeW
         height: paintColumn.height + garage.px(36) + fadeH
         x: parent.width - width - garage.px(22)
         y: parent.height - height - garage.px(22)
 
+        // The shadow the panel throws on the wall behind and left of it.
         Rectangle {
-          anchors.fill: parent
-          radius: Theme.cornerRadius
+          x: -garage.px(26)
+          y: paintPanel.fadeH * 0.5
+          width: garage.px(30)
+          height: paintPanel.height - y
           gradient: Gradient {
-            GradientStop { position: 0.0
-              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.0) }
-            GradientStop { position: paintPanel.fadeH / paintPanel.height * 0.34
-              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.20) }
-            GradientStop { position: paintPanel.fadeH / paintPanel.height * 0.70
-              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.66) }
-            GradientStop { position: paintPanel.fadeH / paintPanel.height
-              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.87) }
-            GradientStop { position: 1.0
-              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.90) }
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.0) }
+            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.34) }
           }
         }
 
-        // The edge, on three sides only. A border all the way round would put
-        // the hard top line straight back.
-        Repeater {
-          model: [ { x: 0, y: 0, w: 1, h: 1 }, { x: 1, y: 0, w: 1, h: 1 } ]
-          Rectangle {
-            x: index === 0 ? 0 : paintPanel.width - 1
-            y: paintPanel.fadeH * 0.36
-            width: 1
-            height: paintPanel.height - y - Theme.cornerRadius
-            gradient: Gradient {
-              GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
-              GradientStop { position: 0.30; color: Theme.lineStrong }
-              GradientStop { position: 1.0; color: Theme.lineStrong }
-            }
+        Canvas {
+          id: scrim
+          anchors.fill: parent
+          renderStrategy: Canvas.Immediate
+          renderTarget: Canvas.Image
+          readonly property color tint: Theme.panel
+          readonly property int radius: Theme.cornerRadius
+          onTintChanged: requestPaint()
+          onWidthChanged: requestPaint()
+          onHeightChanged: requestPaint()
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            var r = scrim.radius
+            var w = width, h = height
+            ctx.beginPath()
+            ctx.moveTo(r, 0)
+            ctx.lineTo(w - r, 0)
+            ctx.quadraticCurveTo(w, 0, w, r)
+            ctx.lineTo(w, h - r)
+            ctx.quadraticCurveTo(w, h, w - r, h)
+            ctx.lineTo(r, h)
+            ctx.quadraticCurveTo(0, h, 0, h - r)
+            ctx.lineTo(0, r)
+            ctx.quadraticCurveTo(0, 0, r, 0)
+            ctx.closePath()
+            ctx.clip()
+
+            var t = scrim.tint
+            function fill(a) { return Qt.rgba(t.r, t.g, t.b, a) }
+            var fh = paintPanel.fadeH
+            var v = ctx.createLinearGradient(0, 0, 0, h)
+            v.addColorStop(0.0, fill(0.0))
+            v.addColorStop(fh / h * 0.34, fill(0.18))
+            v.addColorStop(fh / h * 0.70, fill(0.60))
+            v.addColorStop(fh / h, fill(0.71))
+            v.addColorStop(1.0, fill(0.74))
+            ctx.fillStyle = v
+            ctx.fillRect(0, 0, w, h)
+
+            // The left ramp, taken out of what was just laid down, so the two
+            // ramps multiply instead of one painting over the other.
+            var fw = paintPanel.fadeW
+            var cut = ctx.createLinearGradient(0, 0, fw, 0)
+            cut.addColorStop(0.0, Qt.rgba(0, 0, 0, 1.0))
+            cut.addColorStop(0.34, Qt.rgba(0, 0, 0, 0.62))
+            cut.addColorStop(0.70, Qt.rgba(0, 0, 0, 0.20))
+            cut.addColorStop(1.0, Qt.rgba(0, 0, 0, 0.0))
+            ctx.globalCompositeOperation = "destination-out"
+            ctx.fillStyle = cut
+            ctx.fillRect(0, 0, fw, h)
+            ctx.globalCompositeOperation = "source-over"
+          }
+        }
+
+        // The bevel: the panel's own left edge, catching the bay's light. It
+        // starts where the scrim is already most of the way up, so it does
+        // not draw a bright line across the fade.
+        Rectangle {
+          x: paintPanel.fadeW
+          y: paintPanel.fadeH * 0.55
+          width: 1
+          height: paintPanel.height - y - Theme.cornerRadius
+          gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
+            GradientStop { position: 0.35; color: Theme.line }
+            GradientStop { position: 1.0; color: Theme.line }
+          }
+        }
+        // The right edge, which meets the bay's own frame and is a real edge.
+        Rectangle {
+          x: paintPanel.width - 1
+          y: paintPanel.fadeH * 0.36
+          width: 1
+          height: paintPanel.height - y - Theme.cornerRadius
+          gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
+            GradientStop { position: 0.30; color: Theme.lineStrong }
+            GradientStop { position: 1.0; color: Theme.lineStrong }
           }
         }
         Rectangle {
-          x: Theme.cornerRadius
+          x: paintPanel.fadeW + Theme.cornerRadius
           y: paintPanel.height - 1
-          width: paintPanel.width - Theme.cornerRadius * 2
+          width: paintPanel.width - paintPanel.fadeW - Theme.cornerRadius * 2
           height: 1
           color: Theme.lineStrong
         }
 
         Column {
           id: paintColumn
-          x: garage.px(18)
+          x: garage.px(18) + paintPanel.fadeW
           y: garage.px(18) + paintPanel.fadeH
-          width: parent.width - garage.px(36)
+          width: parent.width - garage.px(36) - paintPanel.fadeW
           spacing: garage.px(9)
 
           Text {

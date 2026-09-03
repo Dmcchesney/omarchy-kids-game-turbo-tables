@@ -67,7 +67,8 @@ Window {
   height: wantHeight
   visible: true
   title: "Turbo Tables harness -- " + screenName
-  color: Theme.ground
+  // Transparent in sprite mode, so grabToImage returns the kart's own alpha.
+  color: kartMode ? "transparent" : Theme.ground
 
   // ---------------------------------------------------------------- store
   MemoryStore { id: memory }
@@ -128,11 +129,65 @@ Window {
                 + " font=" + Theme.mono
                 + " accent=" + Theme.accent
                 + " shellCornerRadius=" + Theme.shellCornerRadius)
+    if (kartMode)
+      startup.start()
+  }
+
+  // ------------------------------------------------------- the sprite rig
+  //
+  // ROUND-5. `--kart` renders KartSprite alone on a TRANSPARENT background
+  // instead of loading a screen, and it exists for one reason: it is the only
+  // way to get the kart's own alpha channel out of the renderer.
+  //
+  // Round four's report said it "could not build a pixel test that separates
+  // 'ends in mid-air' from 'room seen through an opening'", and the round-four
+  // verdict answered that a flood fill for backdrop colour inside the
+  // silhouette settles it -- and found 18 px of garage door enclosed by
+  // bodywork. It does settle it, but a colour flood on the composited frame
+  // has a tolerance in it, and a tolerance wide enough to catch the backdrop
+  // also catches dark teal shadow on the dais. On the sprite's own alpha
+  // there is no tolerance and no colour: a pixel is either bodywork or it is
+  // not, and a hole is an alpha-zero component that the silhouette encloses.
+  // That is the metric this round uses, and it is exact.
+  //
+  //   --kart <n>        n = 0..5 one body, n = -1 all six on one sheet
+  //   --kart-size <px>  sprite width; the height follows the camera
+  //   --kart-paint <n>  paint index, default 0
+  //   --kart-grain off  turn the grain pass off, leaving the shading model
+  readonly property string kartArg: argument("kart", "")
+  readonly property bool kartMode: kartArg.length > 0
+  readonly property int kartIndex: parseInt(kartArg.length > 0 ? kartArg : "0", 10)
+  readonly property int kartSize: parseInt(argument("kart-size", "500"), 10)
+  readonly property int kartPaint: parseInt(argument("kart-paint", "0"), 10)
+  readonly property bool kartGrain: argument("kart-grain", "on") !== "off"
+
+  Item {
+    id: kartRig
+    visible: harness.kartMode
+    anchors.fill: parent
+
+    Repeater {
+      model: harness.kartMode ? (harness.kartIndex < 0 ? 6 : 1) : 0
+      KartSprite {
+        width: harness.kartSize
+        height: width * vbH / vbW
+        x: harness.kartIndex < 0 ? (index % 3) * harness.kartSize
+                                 : (harness.width - width) / 2
+        y: harness.kartIndex < 0 ? Math.floor(index / 3) * height
+                                 : (harness.height - height) / 2
+        body: harness.kartIndex < 0 ? index : harness.kartIndex
+        paint: Theme.paint(harness.kartPaint)
+        number: 7
+        grain: harness.kartGrain
+        shadow: false
+      }
+    }
   }
 
   // --------------------------------------------------------------- screen
   Loader {
     id: screenLoader
+    active: !harness.kartMode
     anchors.fill: parent
     focus: true
     source: Qt.resolvedUrl("../ui/" + harness.screenName + ".qml")
@@ -222,6 +277,11 @@ Window {
     interval: 60
     onTriggered: {
       var screen = screenLoader.item
+      if (harness.kartMode) {
+        if (harness.shotPath.length > 0)
+          settle.start()
+        return
+      }
       if (harness.focusStops > 0)
         harness.tabForward(harness.focusStops)
 
