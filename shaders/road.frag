@@ -1,20 +1,26 @@
 #version 440
 
-// The garage circuit's ground plane, drawn analytically, one pixel at a time.
+// The circuit's ground plane, drawn analytically, one pixel at a time.
 //
 // There is no geometry here and there is no per-frame work in JavaScript. The
 // fragment shader inverts the camera projection: for every pixel below the
 // horizon it recovers the distance down the track and the lateral position on
 // the floor, and then asks what is at that spot -- road, rumble strip, lane
-// marking, or the garage's diagnostic grid. Curves, the horizon, the scroll
+// marking, or the floor's diagnostic grid. Curves, the horizon, the scroll
 // and the fog are a handful of uniforms, so the road bends and rushes with no
 // vertex buffer to rebuild and nothing for the CPU to do but set numbers.
 //
-// The same inversion is written out in QML in TrackView.qml (`groundV`,
-// `laneU`, `spriteScale`) so the karts and the props land on the road this
-// shader draws, and again in CanvasRoad.qml so the fallback draws the same
-// picture. Those three have to agree; the comment at the top of TrackView.qml
-// names the four lines that must match.
+// GOLDEN-HOUR PROTOTYPE. Above the horizon this shader draws NOTHING: the sky
+// is ui/parts/SunsetSky.qml, an item behind this plane, and the plane blends
+// over it. Below the horizon the floor is near-black purple with a neon
+// magenta grid, fading with distance into a dusk fog, and the sun's foot
+// spills a warm elliptical glow across the far floor and the road.
+//
+// The same inversion is written out in QML in TrackView.qml (`vAt`, `uAt`,
+// `sizeAt`) so the karts and the props land on the road this shader draws,
+// and again in CanvasRoad.qml so the fallback draws the same picture. Those
+// three have to agree; the comment at the top of TrackView.qml names the four
+// lines that must match.
 //
 // Baked with:  qsb --qt6 -o shaders/road.frag.qsb shaders/road.frag
 // The .qsb is committed. It is a Qt shader container, not an executable.
@@ -38,9 +44,13 @@ layout(std140, binding = 0) uniform buf {
     float roadHalf;     // half the road's width, world units
     float rumbleHalf;   // width of one rumble strip, world units
     float stripe;       // length of one rumble band, world units
-    float gridScale;    // spacing of the garage floor grid, world units
-    float fogDensity;   // how fast the far end fades into the dark
-    float glowAmount;   // strength of the work-light pools on the tarmac
+    float gridScale;    // spacing of the floor grid, world units
+    float fogDensity;   // how fast the far end fades into the dusk
+    float glowAmount;   // strength of the sun's glow on the floor, 0..1
+    float gridAlpha;    // how strongly the grid lines show over the ground
+    float sunU;         // the sun's centre, 0..1 across the plane
+    float glowRx;       // half-width of the sun-foot glow, fraction of width
+    float glowRy;       // depth of the sun-foot glow below the horizon, fraction of height
 
     vec4 roadColor;
     vec4 roadAlt;
@@ -49,7 +59,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 laneColor;
     vec4 groundColor;
     vec4 gridColor;
-    vec4 skyColor;
+    vec4 skyColor;      // unused by this pass; kept so the uniform block matches CanvasRoad
     vec4 fogColor;
     vec4 glowColor;
 };
@@ -73,97 +83,94 @@ float insideMask(float value, float edge)
     return 1.0 - smoothstep(edge - w, edge + w, value);
 }
 
+// The sun-foot glow's falloff over its normalised radius: piecewise linear
+// through the same three stops CanvasRoad's radial gradient uses, so the two
+// renderers agree to the pixel.
+float glowFall(float d)
+{
+    if (d >= 1.0)
+        return 0.0;
+    if (d < 0.5)
+        return mix(0.55, 0.18, d / 0.5);
+    return mix(0.18, 0.0, (d - 0.5) / 0.5);
+}
+
 void main()
 {
     float u = qt_TexCoord0.x;
     float v = qt_TexCoord0.y;
     float dy = v - horizon;
 
-    vec3 col;
-
     if (dy <= 0.0) {
-        // Above the horizon: the far wall of the garage, and a band of warm
-        // haze sitting on the horizon where the work lights are.
-        // The warm half is kept to the bottom quarter of the wall; spread
-        // over all of it, it reads as a sunset, and this game is indoors.
-        float t = clamp(-dy / max(horizon, 0.001), 0.0, 1.0);
-        col = mix(groundColor.rgb * 0.34, skyColor.rgb, clamp((t - 0.24) / 0.76, 0.0, 1.0));
-        col += glowColor.rgb * exp(-t * 16.0) * 0.30;
-    } else {
-        // Invert the projection. v = horizon + focal * camHeight / (2 z), so
-        // z = focal * camHeight / (2 (v - horizon)); and the lateral world
-        // position follows from the same focal length, corrected for the
-        // curve, which is what makes the road bend away.
-        float z = (focal * camHeight) / (2.0 * dy);
-        float x = ((u - 0.5) * 2.0 * aspect) * z / focal - curve * z * z;
-        float s = z + travel;
-        float ax = abs(x);
-
-        // Alternating bands down the track, the rumble strips' rhythm and the
-        // reason a still frame still reads as speed once it moves.
-        float band = step(0.5, fract(s / stripe));
-
-        // How much fine detail survives at this distance. Between the horizon
-        // and about y = 480 the road is four internal pixels wide, and a hard
-        // black-and-cream zebra blown up by a nearest-neighbour filter there
-        // reads as speckle rather than as fog. So the alternations dissolve
-        // toward their own average with distance and the far road resolves
-        // into a smooth dark ribbon that still shows which way it bends.
-        float detail = smoothstep(52.0, 16.0, z);
-        float softBand = mix(0.5, band, detail);
-
-        vec3 road = mix(roadColor.rgb, roadAlt.rgb, softBand * 0.34);
-        vec3 rumble = mix(rumbleColor.rgb, rumbleAlt.rgb, softBand);
-
-        // The garage floor: a diagnostic grid, both ways, off the road.
-        //
-        // ONE SPACING IS NOT ENOUGH. A single 4.5-unit grid is right at the
-        // middle distance and wrong at both ends. Near the camera the whole
-        // bottom fifth of the screen covers less than one world unit of depth
-        // and half a dozen across, so a 4.5-unit grid puts no line in it at
-        // all: measured, the floor went black below y = 900, which is exactly
-        // where a racer sells speed. So the grid is a ladder of three octaves
-        // and the finer two fade in as the floor comes toward the eye. The
-        // fade is a smoothstep in z, so nothing pops as a line arrives.
-        float fine = smoothstep(12.0, 4.5, z) * 0.72;
-        float finer = smoothstep(4.6, 2.2, z) * 0.55;
-        float g0 = max(lineMask(x, gridScale, 0.030), lineMask(s, gridScale, 0.030));
-        float g1 = max(lineMask(x, gridScale * 0.25, 0.030),
-                       lineMask(s, gridScale * 0.25, 0.030));
-        float g2 = max(lineMask(x, gridScale * 0.0625, 0.030),
-                       lineMask(s, gridScale * 0.0625, 0.030));
-        float grid = max(g0, max(g1 * fine, g2 * finer * 0.85));
-        vec3 floorCol = mix(groundColor.rgb, gridColor.rgb, grid * 0.80);
-        // A wash of work light on the floor closest to the kart. Small on
-        // purpose: the design's ground is near-black and a lit lattice reads
-        // as water, which an earlier round proved.
-        floorCol += glowColor.rgb * 0.022 * smoothstep(13.0, 2.2, z);
-
-        float onRumble = insideMask(ax, roadHalf + rumbleHalf);
-        float onRoad = insideMask(ax, roadHalf);
-
-        // Lane markings: a dashed centre line and two solid inner edge lines.
-        // The dash period is four rumble bands, so the centre line reads as a
-        // dashed line rather than as another zebra.
-        float dash = step(0.45, fract(s / (stripe * 2.0)));
-        float centre = insideMask(ax, roadHalf * 0.030) * dash;
-        float inner = abs(ax - roadHalf * 0.88);
-        float edgeLine = insideMask(inner, roadHalf * 0.016);
-        float marks = clamp(max(centre, edgeLine), 0.0, 1.0);
-
-        col = mix(floorCol, rumble, onRumble);
-        col = mix(col, road, onRoad);
-        col = mix(col, laneColor.rgb, marks * onRoad * 0.88 * detail);
-
-        // Pools of amber where the work lights hang over the track.
-        float pool = fract(s / (stripe * 12.0)) - 0.5;
-        col += glowColor.rgb * exp(-pool * pool * 26.0) * glowAmount * onRoad;
-
-        // Fog. Quadratic in distance so the near road stays crisp and the
-        // vanishing point dissolves rather than ending at a hard line.
-        float fog = exp(-fogDensity * z * z * 0.0011);
-        col = mix(fogColor.rgb, col, clamp(fog, 0.0, 1.0));
+        // Above the horizon: the sky item behind this plane shows through.
+        fragColor = vec4(0.0);
+        return;
     }
+
+    // Invert the projection. v = horizon + focal * camHeight / (2 z), so
+    // z = focal * camHeight / (2 (v - horizon)); and the lateral world
+    // position follows from the same focal length, corrected for the
+    // curve, which is what makes the road bend away.
+    float z = (focal * camHeight) / (2.0 * dy);
+    float x = ((u - 0.5) * 2.0 * aspect) * z / focal - curve * z * z;
+    float s = z + travel;
+    float ax = abs(x);
+
+    // Alternating bands down the track, the rumble strips' rhythm and the
+    // reason a still frame still reads as speed once it moves.
+    float band = step(0.5, fract(s / stripe));
+
+    // How much fine detail survives at this distance. Between the horizon
+    // and about y = 480 the road is four internal pixels wide, and a hard
+    // black-and-cream zebra blown up by a nearest-neighbour filter there
+    // reads as speckle rather than as fog. So the alternations dissolve
+    // toward their own average with distance and the far road resolves
+    // into a smooth dark ribbon that still shows which way it bends.
+    float detail = smoothstep(52.0, 16.0, z);
+    float softBand = mix(0.5, band, detail);
+
+    vec3 road = mix(roadColor.rgb, roadAlt.rgb, softBand * 0.34);
+    vec3 rumble = mix(rumbleColor.rgb, rumbleAlt.rgb, softBand);
+
+    // The floor grid, both ways, off the road, in three octaves: the finer
+    // two fade in as the floor comes toward the eye, so the bottom of the
+    // frame -- where a racer sells speed -- is never an empty black.
+    float fine = smoothstep(12.0, 4.5, z) * 0.72;
+    float finer = smoothstep(4.6, 2.2, z) * 0.55;
+    float g0 = max(lineMask(x, gridScale, 0.030), lineMask(s, gridScale, 0.030));
+    float g1 = max(lineMask(x, gridScale * 0.25, 0.030),
+                   lineMask(s, gridScale * 0.25, 0.030));
+    float g2 = max(lineMask(x, gridScale * 0.0625, 0.030),
+                   lineMask(s, gridScale * 0.0625, 0.030));
+    float grid = max(g0, max(g1 * fine, g2 * finer * 0.85));
+    vec3 floorCol = mix(groundColor.rgb, gridColor.rgb, grid * gridAlpha);
+
+    float onRumble = insideMask(ax, roadHalf + rumbleHalf);
+    float onRoad = insideMask(ax, roadHalf);
+
+    // Lane markings: a dashed centre line and two solid inner edge lines.
+    // The dash period is four rumble bands, so the centre line reads as a
+    // dashed line rather than as another zebra.
+    float dash = step(0.45, fract(s / (stripe * 2.0)));
+    float centre = insideMask(ax, roadHalf * 0.030) * dash;
+    float inner = abs(ax - roadHalf * 0.88);
+    float edgeLine = insideMask(inner, roadHalf * 0.016);
+    float marks = clamp(max(centre, edgeLine), 0.0, 1.0);
+
+    vec3 col = mix(floorCol, rumble, onRumble);
+    col = mix(col, road, onRoad);
+    col = mix(col, laneColor.rgb, marks * onRoad * 0.88 * detail);
+
+    // Dusk. Quadratic in distance so the near floor stays crisp and the
+    // vanishing point dissolves rather than ending at a hard line.
+    float fog = exp(-fogDensity * z * z * 0.0011);
+    col = mix(fogColor.rgb, col, clamp(fog, 0.0, 1.0));
+
+    // The sun's foot: a warm ellipse spilling down from the horizon under the
+    // disc, over floor and road alike. This is what "the grid fades into the
+    // horizon glow" means in pixels.
+    vec2 gd = vec2((u - sunU) / glowRx, dy / glowRy);
+    col = mix(col, glowColor.rgb, glowFall(length(gd)) * glowAmount);
 
     fragColor = vec4(col, 1.0) * qt_Opacity;
 }

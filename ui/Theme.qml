@@ -60,6 +60,27 @@ QtObject {
   readonly property color cream: "#f2e6c4"
   readonly property color hazard: "#d8a12a"
 
+  // PROTOTYPE: "Golden Hour at the Pit". The palette sampled off the Omarchy
+  // Quattro wallpaper -- one low sun behind-right of the subject, a magenta
+  // sky, purple shadows. Added for the proposal branch; nothing above is
+  // renamed, and the design's amber, cream and teal keep their roles (teal
+  // is now the door-frame accent only). If the direction is adopted these
+  // move into docs/design.md as Visual Style v3; if not, they go with the
+  // branch.
+  readonly property color duskSkyTop: "#5e1a50"
+  readonly property color duskSkyMid: "#a4337b"
+  readonly property color duskSkyHot: "#c24073"
+  readonly property color duskHorizon: "#d75d6b"
+  readonly property color duskSun: "#efcb72"
+  readonly property color duskSunEdge: "#f0956e"
+  readonly property color duskHillFar: "#bc405f"
+  readonly property color duskHillNear: "#8e2c50"
+  readonly property color duskGround: "#3c1228"
+  readonly property color duskShadow: "#5f255e"
+  readonly property color duskRim: "#f0b07a"
+  readonly property color duskNeon: "#ff4fa3"
+  readonly property color duskInk: "#280e27"
+
   // Eight paints, in the order the swatch grid reads them: two rows of four.
   readonly property var paints: ["#e0483a", "#ee8b3a", "#f2c93c", "#6dc94a",
                                  "#3f7fe0", "#9a55d6", "#e05fb0", "#d8dbe0"]

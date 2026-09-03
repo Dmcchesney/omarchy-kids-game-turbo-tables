@@ -6,8 +6,17 @@ import "../"
 // 1366x768 and at 2560x1440 without reflowing.
 //
 // The design's motif list is the brief for this scene -- roller door, tire
-// walls, a diagnostic grid floor, rivets, a WELCOME TO THE PIT terminal --
-// lit by warm amber work lights against dark teal night through the door.
+// walls, a diagnostic grid floor, rivets, a WELCOME TO THE PIT terminal.
+//
+// PROTOTYPE "Golden Hour at the Pit". The roller door is open onto a
+// retrowave sunset and the sun through it is now the room's key light: a
+// magenta sky, a low cream sun off-centre right, hills in silhouette, and
+// the bay lit by the door -- pink bounce on the floor and the far wall that
+// falls off with distance, purple shadows where the design's teal ones were.
+// The amber work lights stay on as the warm, local counterpoint. The room's
+// neutrals go from cool blue-grey to the bar's near-black purple; teal is
+// kept for the door frame only. Geometry, the camera and the turntable are
+// exactly what they were: only light and palette change.
 //
 // Placeholder art, drawn in code. It exists so the garage's composition can
 // be judged now; a painted or rendered bay replaces it behind the same
@@ -44,25 +53,11 @@ Item {
 
   // ------------------------------------------------- ONE CAMERA, ROUND SIX
   //
-  // Rounds two through five drew this plinth as an ellipse whose ratio was a
-  // typed constant. Round two used 60/248 = 0.24. Round four replaced it
-  // with 104/256 = 0.406 = sin(24 deg), reasoning that the kart is drawn by
-  // a camera pitched 25 degrees and a floor circle seen from there projects
-  // to sin(pitch).
-  //
-  // BOTH OF THOSE ARE WRONG, and a critic measured how wrong: fitting the
-  // shipped rim (486 points, rms 0.35 px) gave an apparent pitch of 23.96
-  // degrees against about 31 for the kart's own projection -- the dais was
-  // 27 px flatter than the kart standing on it needed, which is 77 times the
-  // fit residual. sin(pitch) is the ORTHOGRAPHIC answer. KartSprite is not
-  // orthographic: it divides by distance, and its aim point sits 13 model
-  // units above the floor. Both of those steepen a floor circle, and the
-  // second one steepens it even for a circle of zero radius.
-  //
-  // So there is no ellipse constant here any more. `daisGroundR` is the only
-  // art choice on this plinth -- how many model units of floor the turntable
-  // covers -- and its projection comes from Theme.groundEllipse, the same
-  // camera KartSprite projects every face through.
+  // There is no ellipse constant here. `daisGroundR` is the only art choice
+  // on this plinth -- how many model units of floor the turntable covers --
+  // and its projection comes from Theme.groundEllipse, the same camera
+  // KartSprite projects every face through. (The history of why is in the
+  // round-six notes on Theme.groundEllipse.)
   //
   // `daisCy` is the projected ellipse's CENTRE, which is not the kart's
   // contact point: the near arc of a floor circle is closer to the camera
@@ -74,10 +69,24 @@ Item {
   readonly property real daisRadius: daisFit.a * kartToStall
   // The dais is a solid plinth, not a painted disc: `daisRy` is the top
   // face's minor axis and `daisRim` the height of the course below it, which
-  // is the surface that catches the amber rim light and carries the kerb.
+  // is the surface that catches the rim light and carries the kerb.
   readonly property real daisRy: daisFit.b * kartToStall
   readonly property real daisCy: daisY + daisFit.dy * kartToStall
   readonly property real daisRim: 26
+
+  // The door opening, in view-box units. The slats are raised further than
+  // the design's night version so that the sky is most of what the opening
+  // shows: the bar's frame is 40% sky, and the door is this room's frame.
+  readonly property real doorX0: 470
+  readonly property real doorX1: 820
+  readonly property real doorTop: 118
+  readonly property real doorSill: 345
+  // The horizon sits at 54% of the opening's height, the sun straddles it
+  // at 77% of its width -- a little further right than the bar's 68% so it
+  // clears the kart's wing and shows between the wing and the nose.
+  readonly property real horizonY: 240
+  readonly property real sunX: 740
+  readonly property real sunR: 56
 
   function vx(x) { return originX + x * unit }
   function vy(y) { return originY + y * unit }
@@ -128,94 +137,44 @@ Item {
         ctx.fillStyle = fill
         ctx.fill()
       }
+      function rgbaOf(c, a) {
+        return Qt.rgba(c.r, c.g, c.b, a)
+      }
+
+      var doorCx = (stall.doorX0 + stall.doorX1) / 2
 
       // ---------------------------------------------------------- back wall
+      // Near-black purple, the bar's ground family, and a shade lighter at
+      // the top where the sky's glow reaches the ceiling line.
       var wall = ctx.createLinearGradient(0, stall.vy(0), 0, stall.vy(360))
-      wall.addColorStop(0, "#161821")
-      wall.addColorStop(0.55, "#12131a")
-      wall.addColorStop(1, "#0b0c11")
+      wall.addColorStop(0, "#2a1024")
+      wall.addColorStop(0.55, "#1e0a1a")
+      wall.addColorStop(1, "#150612")
       ctx.fillStyle = wall
       ctx.fillRect(stall.vx(0), stall.vy(0), stall.vs(1200), stall.vs(360))
 
       // Wall panel seams and rivets.
       for (var px = 0; px <= 1200; px += 150) {
-        line(px, 0, px, 340, 1, "#1d202b")
+        line(px, 0, px, 340, 1, "#341630")
         for (var ry = 30; ry < 340; ry += 60) {
-          rect(px - 2, ry, 4, 4, "#262a37")
+          rect(px - 2, ry, 4, 4, "#48213f")
         }
       }
-      line(0, 120, 1200, 120, 1, "#1c1f29")
-
-      // ------------------------------------------------------- roller door
-      // Night beyond the open door: the design's dark teal.
-      var night = ctx.createLinearGradient(0, stall.vy(150), 0, stall.vy(345))
-      night.addColorStop(0, "#12414c")
-      night.addColorStop(0.6, "#0e2c35")
-      night.addColorStop(1, "#0a1d24")
-      ctx.fillStyle = night
-      ctx.fillRect(stall.vx(470), stall.vy(150), stall.vs(350), stall.vs(195))
-
-      // The yard beyond the doorway: a low roofline, then three buildings.
-      //
-      // Round three scattered sixteen teal rectangles of eight different
-      // widths and six different heights across this strip at unrelated
-      // positions, and a critic read them for exactly what they were --
-      // "arbitrary teal rectangles that read as noise, not as anything".
-      // Randomness is not detail. A window is legible because windows repeat
-      // on a building's own grid, so each block now carries one grid of its
-      // own, on the block's own pitch, and only the lit pattern varies.
-      rect(470, 236, 350, 4, "#0b2029")
-      var blocks = [ { bx: 486, by: 196, bw: 96, bh: 40, cap: "#0f2c37" },
-                     { bx: 600, by: 172, bw: 74, bh: 64, cap: "#123340" },
-                     { bx: 692, by: 206, bw: 112, bh: 30, cap: "#0f2c37" } ]
-      // One character per window, walked in reading order: a fixed pattern,
-      // so the yard is the same yard every time the screen opens.
-      var litBits = "1011010011100101101100101101011010011011"
-      var bit = 0
-      for (var bl = 0; bl < blocks.length; bl++) {
-        var bk = blocks[bl]
-        rect(bk.bx, bk.by, bk.bw, bk.bh, "#0d2731")
-        rect(bk.bx, bk.by, bk.bw, 3, bk.cap)
-        for (var wy = bk.by + 8; wy + 7 <= bk.by + bk.bh; wy += 13)
-          for (var wx = bk.bx + 7; wx + 8 <= bk.bx + bk.bw; wx += 15) {
-            var on = litBits.charAt(bit % litBits.length) === "1"
-            bit++
-            rect(wx, wy, 8, 7, on ? "#2c7d87" : "#14414c")
-          }
-      }
-      // Wet floor reflection outside.
-      rect(470, 292, 350, 53, "#0c2831")
-      for (var rx2 = 490; rx2 < 810; rx2 += 60)
-        rect(rx2, 300 + (rx2 % 40) / 4, 26, 3, "#1c5c66")
-
-      // The raised door: slats and the bottom rail.
-      var slat = ctx.createLinearGradient(0, stall.vy(60), 0, stall.vy(150))
-      slat.addColorStop(0, "#2b2e39")
-      slat.addColorStop(1, "#191b23")
-      ctx.fillStyle = slat
-      ctx.fillRect(stall.vx(462), stall.vy(56), stall.vs(366), stall.vs(94))
-      for (var sy = 62; sy < 150; sy += 11) {
-        line(464, sy, 826, sy, 1.6, "#111319")
-        line(464, sy + 3, 826, sy + 3, 1, "#3a3f4d")
-      }
-      rect(462, 148, 366, 7, "#3f4552")
-      // Door frame uprights.
-      rect(456, 50, 8, 296, "#22252f")
-      rect(824, 50, 8, 296, "#22252f")
+      line(0, 120, 1200, 120, 1, "#30142c")
 
       // -------------------------------------------------------- shelf unit
-      rect(246, 238, 190, 102, "#14161d")
+      rect(246, 238, 190, 102, "#1c0c19")
       for (var sh = 0; sh < 2; sh++) {
         var sy2 = 238 + sh * 48
-        rect(246, sy2, 190, 6, "#2d323f")
+        rect(246, sy2, 190, 6, "#44243e")
         // crates
-        rect(254, sy2 + 10, 34, 32, sh % 2 === 0 ? "#3d4a2c" : "#4a3324")
-        rect(294, sy2 + 16, 26, 26, "#2b3a49")
-        rect(326, sy2 + 12, 40, 30, sh % 2 === 0 ? "#48342a" : "#2f3a2a")
-        rect(372, sy2 + 20, 22, 22, "#3a3040")
+        rect(254, sy2 + 10, 34, 32, sh % 2 === 0 ? "#3f3a2c" : "#4e2c2a")
+        rect(294, sy2 + 16, 26, 26, "#3a2a44")
+        rect(326, sy2 + 12, 40, 30, sh % 2 === 0 ? "#4c302e" : "#35302c")
+        rect(372, sy2 + 20, 22, 22, "#3f2a44")
       }
-      rect(240, 234, 8, 106, "#20242e")
-      rect(430, 234, 8, 106, "#20242e")
+      rect(240, 234, 8, 106, "#2e1629")
+      rect(430, 234, 8, 106, "#2e1629")
 
       // ------------------------------------------------------ tool chest
       rect(120, 236, 122, 106, "#5a1f1c")
@@ -227,56 +186,230 @@ Item {
       rect(120, 336, 122, 6, "#1a0f0e")
 
       // -------------------------------------------------------- pegboard
-      // The wall right of the roller door was a large dead expanse. The
-      // COLOR panel covers everything below y=156 on that side, so this sits
-      // in the strip that is actually visible, and it is kept dark on purpose
-      // -- the brief for this round is that nothing in the corner of the bay
+      // The strip of wall right of the roller door that the COLOR panel does
+      // not cover. Kept dark on purpose: nothing in the corner of the bay
       // should outrank the kart.
-      rect(946, 44, 214, 104, "#191c24")
-      rect(946, 44, 214, 4, "#272c38")
+      rect(946, 44, 214, 104, "#22101f")
+      rect(946, 44, 214, 4, "#3a1c35")
       for (var pgx = 954; pgx < 1156; pgx += 12)
         for (var pgy = 56; pgy < 142; pgy += 12)
-          rect(pgx, pgy, 2, 2, "#232733")
+          rect(pgx, pgy, 2, 2, "#331a2f")
       // A spanner, a hammer and two hooks, as silhouettes.
-      rect(968, 58, 6, 54, "#3a4050")
-      rect(963, 56, 16, 8, "#3a4050")
-      rect(963, 104, 16, 8, "#3a4050")
-      rect(1000, 58, 7, 40, "#333947")
-      rect(994, 56, 19, 9, "#464d5e")
-      rect(1036, 58, 5, 30, "#333947")
-      rect(1030, 86, 17, 7, "#3a4050")
-      rect(1074, 58, 5, 44, "#2f3441")
-      rect(1068, 58, 17, 6, "#3a4050")
-      rect(1110, 58, 5, 36, "#2f3441")
-      rect(1104, 58, 17, 6, "#3a4050")
-      rect(946, 146, 214, 3, "#0d0f14")
+      rect(968, 58, 6, 54, "#4a2e45")
+      rect(963, 56, 16, 8, "#4a2e45")
+      rect(963, 104, 16, 8, "#4a2e45")
+      rect(1000, 58, 7, 40, "#40283c")
+      rect(994, 56, 19, 9, "#573a52")
+      rect(1036, 58, 5, 30, "#40283c")
+      rect(1030, 86, 17, 7, "#4a2e45")
+      rect(1074, 58, 5, 44, "#3a2236")
+      rect(1068, 58, 17, 6, "#4a2e45")
+      rect(1110, 58, 5, 36, "#3a2236")
+      rect(1104, 58, 17, 6, "#4a2e45")
+      rect(946, 146, 214, 3, "#12060f")
 
       // ------------------------------------------------------- tire walls
       function tyreStack(x, yBase, count, w) {
         for (var t = 0; t < count; t++) {
           var ty = yBase - t * 26
-          rect(x, ty, w, 24, "#191b21")
-          rect(x + 3, ty + 3, w - 6, 18, "#101216")
-          rect(x, ty, w, 4, "#24272f")
+          rect(x, ty, w, 24, "#1e1019")
+          rect(x + 3, ty + 3, w - 6, 18, "#130a10")
+          rect(x, ty, w, 4, "#2e1a2a")
         }
       }
-      // Only the left stack is drawn. There were two more at x=1010 and
-      // x=1096, and the opaque COLOR panel begins at x=889 and runs to the
-      // bottom-right corner, so neither of them was ever visible on any
-      // screen at any size -- the composition scales as one factor, so what
-      // is covered at 1920 is covered everywhere. Scenery nothing can see is
-      // scenery that gets counted in a report and not in the picture.
+      // Only the left stack is drawn: the two on the right were under the
+      // opaque COLOR panel on every screen at every size.
       tyreStack(24, 316, 4, 84)
+
+      // ------------------------------------------- the door's light, wall
+      // Magenta bounce on the wall, centred on the opening and dying with
+      // distance from it. Painted over the wall and its props and UNDER the
+      // sky, so the sky is the one pure thing in the room and everything
+      // else is lit by it. The radius is most of the bay: the sun is not a
+      // lamp, and the far corners are dim rather than dark.
+      var wallGlow = ctx.createRadialGradient(stall.vx(doorCx), stall.vy(stall.horizonY), stall.vs(120),
+                                              stall.vx(doorCx), stall.vy(stall.horizonY), stall.vs(760))
+      wallGlow.addColorStop(0, rgbaOf(Theme.duskSkyHot, 0.50))
+      wallGlow.addColorStop(0.28, rgbaOf(Theme.duskSkyMid, 0.30))
+      wallGlow.addColorStop(0.62, rgbaOf(Theme.duskSkyTop, 0.12))
+      wallGlow.addColorStop(1, rgbaOf(Theme.duskSkyTop, 0))
+      ctx.fillStyle = wallGlow
+      ctx.fillRect(stall.vx(0), stall.vy(0), stall.vs(1200), stall.vs(360))
+
+      // ------------------------------------------------------- roller door
+      // The sunset beyond the open door. Everything in here is clipped to
+      // the opening, so the sun's glow cannot leak onto the wall as a disc:
+      // the wall gets its light from the bounce above, as a wall would.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(stall.vx(stall.doorX0), stall.vy(stall.doorTop),
+               stall.vs(stall.doorX1 - stall.doorX0), stall.vs(stall.doorSill - stall.doorTop))
+      ctx.clip()
+
+      // The sky: the brief's four-stop gradient, top of the opening to the
+      // horizon. It is never black.
+      var sky = ctx.createLinearGradient(0, stall.vy(stall.doorTop), 0, stall.vy(stall.horizonY))
+      sky.addColorStop(0, Theme.duskSkyTop)
+      sky.addColorStop(0.42, Theme.duskSkyMid)
+      sky.addColorStop(0.78, Theme.duskSkyHot)
+      sky.addColorStop(1, Theme.duskHorizon)
+      ctx.fillStyle = sky
+      ctx.fillRect(stall.vx(stall.doorX0), stall.vy(stall.doorTop),
+                   stall.vs(stall.doorX1 - stall.doorX0), stall.vs(292 - stall.doorTop))
+
+      // Streaky cloud bands: soft horizontal shapes, one a shade lighter
+      // than the sky behind it and two a shade darker, thin, and stretched
+      // toward the sun so they read as lit from it.
+      function cloud(cx, cy, w, h, fill) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.translate(stall.vx(cx), stall.vy(cy))
+        ctx.scale(w * u, h * u)
+        ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+        ctx.restore()
+        ctx.fillStyle = fill
+        ctx.fill()
+      }
+      cloud(600, 148, 150, 5, rgbaOf(Theme.duskSkyTop, 0.55))
+      cloud(700, 166, 120, 3.5, rgbaOf(Theme.duskSkyTop, 0.45))
+      cloud(560, 190, 130, 4, rgbaOf(Theme.duskHorizon, 0.55))
+      cloud(720, 212, 160, 4.5, rgbaOf(Theme.duskSun, 0.32))
+      cloud(590, 228, 110, 3, rgbaOf(Theme.duskSun, 0.26))
+
+      // The sun's glow: wide, horizon-pink, and it reaches the whole opening.
+      var halo = ctx.createRadialGradient(stall.vx(stall.sunX), stall.vy(stall.horizonY), stall.vs(stall.sunR * 0.8),
+                                          stall.vx(stall.sunX), stall.vy(stall.horizonY), stall.vs(stall.sunR * 3.4))
+      halo.addColorStop(0, rgbaOf(Theme.duskSunEdge, 0.85))
+      halo.addColorStop(0.35, rgbaOf(Theme.duskHorizon, 0.55))
+      halo.addColorStop(1, rgbaOf(Theme.duskHorizon, 0))
+      ctx.fillStyle = halo
+      ctx.fillRect(stall.vx(stall.doorX0), stall.vy(stall.doorTop),
+                   stall.vs(stall.doorX1 - stall.doorX0), stall.vs(stall.doorSill - stall.doorTop))
+
+      // The sun: a big low disc, cream at the core going to orange at the
+      // limb, sitting on the horizon. Then the genre's signature: horizontal
+      // cut lines through its lower half, thickening downward, in the sky's
+      // own horizon colour.
+      var sunG = ctx.createRadialGradient(stall.vx(stall.sunX), stall.vy(stall.horizonY - 6), 0,
+                                          stall.vx(stall.sunX), stall.vy(stall.horizonY), stall.vs(stall.sunR))
+      sunG.addColorStop(0, "#fbe6a0")
+      sunG.addColorStop(0.55, Theme.duskSun)
+      sunG.addColorStop(1, Theme.duskSunEdge)
+      ctx.fillStyle = sunG
+      ctx.beginPath()
+      ctx.arc(stall.vx(stall.sunX), stall.vy(stall.horizonY), stall.vs(stall.sunR), 0, Math.PI * 2, false)
+      ctx.fill()
+      var cutY = stall.horizonY - stall.sunR * 0.02
+      for (var cut = 0; cut < 6; cut++) {
+        var cw = 1.2 + cut * 1.1
+        rect(stall.sunX - stall.sunR - 2, cutY - cw * 0.5, stall.sunR * 2 + 4, cw, Theme.duskHorizon)
+        cutY += 5 + cut * 1.6
+      }
+
+      // Hills: two silhouette layers, the far one lighter (atmospheric
+      // perspective), both rising a little above the horizon so the sun's
+      // lower limb sets behind them. A skyline is a polyline, not a curve
+      // -- low-poly is the medium.
+      function hills(pts, yBase, fill) {
+        ctx.fillStyle = fill
+        ctx.beginPath()
+        ctx.moveTo(stall.vx(pts[0][0]), stall.vy(yBase))
+        for (var hi = 0; hi < pts.length; hi++)
+          ctx.lineTo(stall.vx(pts[hi][0]), stall.vy(pts[hi][1]))
+        ctx.lineTo(stall.vx(pts[pts.length - 1][0]), stall.vy(yBase))
+        ctx.closePath()
+        ctx.fill()
+      }
+      hills([[460, 252], [520, 234], [580, 242], [640, 228], [700, 238], [760, 226],
+             [800, 236], [830, 230]], 300, Theme.duskHillFar)
+      hills([[460, 274], [530, 256], [600, 266], [660, 252], [720, 264], [790, 250],
+             [830, 260]], 320, Theme.duskHillNear)
+
+      // The near ground: the bar's near-black purple, a hard floor line,
+      // and a warm glint under the sun where the road catches it.
+      var groundG = ctx.createLinearGradient(0, stall.vy(292), 0, stall.vy(stall.doorSill))
+      groundG.addColorStop(0, "#4a1832")
+      groundG.addColorStop(1, Theme.duskGround)
+      ctx.fillStyle = groundG
+      ctx.fillRect(stall.vx(stall.doorX0), stall.vy(292),
+                   stall.vs(stall.doorX1 - stall.doorX0), stall.vs(stall.doorSill - 292))
+      rect(stall.doorX0, 291, stall.doorX1 - stall.doorX0, 2, "#6a2a4c")
+      var glint = ctx.createLinearGradient(stall.vx(stall.sunX - 90), 0, stall.vx(stall.sunX + 90), 0)
+      glint.addColorStop(0, rgbaOf(Theme.duskSun, 0))
+      glint.addColorStop(0.5, rgbaOf(Theme.duskSun, 0.55))
+      glint.addColorStop(1, rgbaOf(Theme.duskSun, 0))
+      ctx.fillStyle = glint
+      for (var gl = 0; gl < 4; gl++)
+        ctx.fillRect(stall.vx(stall.sunX - 90 + gl * 8), stall.vy(298 + gl * 9),
+                     stall.vs(180 - gl * 16), stall.vs(1.6 + gl * 0.5))
+      // A neon grid on the yard outside, converging on the sun: the design's
+      // diagnostic grid, in the sky's own pink.
+      ctx.globalAlpha = 0.30
+      for (var yg = -6; yg <= 6; yg++)
+        line(stall.sunX + yg * 20, 292, stall.sunX + yg * 110, stall.doorSill + 10, 1, Theme.duskNeon)
+      var yardRows = [300, 311, 326, 345]
+      for (var yr = 0; yr < yardRows.length; yr++)
+        line(stall.doorX0, yardRows[yr], stall.doorX1, yardRows[yr], 1, Theme.duskNeon)
+      ctx.globalAlpha = 1
+      ctx.restore()
+
+      // The raised door: slats and the bottom rail, now rolled higher than
+      // the night version so the sky has room. Their undersides catch the
+      // sky, so the highlight on each slat is pink rather than grey.
+      var slat = ctx.createLinearGradient(0, stall.vy(56), 0, stall.vy(stall.doorTop))
+      slat.addColorStop(0, "#3a1a34")
+      slat.addColorStop(1, "#22101f")
+      ctx.fillStyle = slat
+      ctx.fillRect(stall.vx(462), stall.vy(56), stall.vs(366), stall.vs(stall.doorTop - 56))
+      for (var sy = 62; sy < stall.doorTop - 2; sy += 11) {
+        line(464, sy, 826, sy, 1.6, "#150812")
+        line(464, sy + 3, 826, sy + 3, 1, "#5a2a50")
+      }
+      rect(462, stall.doorTop - 3, 366, 7, "#4a2444")
+      rect(462, stall.doorTop + 2, 366, 2, rgbaOf(Theme.duskHorizon, 0.55))
+      // Door frame uprights: the design's teal, kept here and nowhere else in
+      // the room, with a bright teal edge on the side that faces the sky.
+      rect(456, 50, 8, 296, Theme.tealDeep)
+      rect(824, 50, 8, 296, Theme.tealDeep)
+      rect(462, 50, 2, 296, rgbaOf(Theme.teal, 0.75))
+      rect(824, 50, 2, 296, rgbaOf(Theme.teal, 0.75))
+      rect(456, 46, 376, 6, Theme.tealDeep)
 
       // ------------------------------------------------------------ floor
       var floor = ctx.createLinearGradient(0, stall.vy(340), 0, stall.vy(560))
-      floor.addColorStop(0, "#15171d")
-      floor.addColorStop(0.45, "#0e1014")
-      floor.addColorStop(1, "#08090c")
+      floor.addColorStop(0, "#2c1026")
+      floor.addColorStop(0.45, "#1a0917")
+      floor.addColorStop(1, "#0e040c")
       ctx.fillStyle = floor
       ctx.fillRect(stall.vx(0), stall.vy(340), stall.vs(1200), stall.vs(220))
 
-      // Hazard stripe along the back of the bay.
+      // The door's light on the floor: the opening, thrown across the bay
+      // toward the camera as a widening pool that is hottest at the sill.
+      // This is the room's key on the ground plane -- what the kart's long
+      // shadow is cut out of.
+      var spill = ctx.createLinearGradient(0, stall.vy(stall.doorSill), 0, stall.vy(560))
+      spill.addColorStop(0, rgbaOf(Theme.duskHorizon, 0.62))
+      spill.addColorStop(0.25, rgbaOf(Theme.duskSkyHot, 0.42))
+      spill.addColorStop(0.7, rgbaOf(Theme.duskSkyMid, 0.14))
+      spill.addColorStop(1, rgbaOf(Theme.duskSkyTop, 0))
+      ctx.fillStyle = spill
+      ctx.beginPath()
+      ctx.moveTo(stall.vx(stall.doorX0), stall.vy(stall.doorSill))
+      ctx.lineTo(stall.vx(stall.doorX1), stall.vy(stall.doorSill))
+      ctx.lineTo(stall.vx(stall.doorX1 + 260), stall.vy(560))
+      ctx.lineTo(stall.vx(stall.doorX0 - 330), stall.vy(560))
+      ctx.closePath()
+      ctx.fill()
+      // And the wider, weaker bounce that reaches the rest of the floor.
+      var floorGlow = ctx.createRadialGradient(stall.vx(doorCx), stall.vy(stall.doorSill), 0,
+                                               stall.vx(doorCx), stall.vy(stall.doorSill), stall.vs(700))
+      floorGlow.addColorStop(0, rgbaOf(Theme.duskSkyHot, 0.22))
+      floorGlow.addColorStop(0.5, rgbaOf(Theme.duskSkyMid, 0.08))
+      floorGlow.addColorStop(1, rgbaOf(Theme.duskSkyTop, 0))
+      ctx.fillStyle = floorGlow
+      ctx.fillRect(stall.vx(0), stall.vy(340), stall.vs(1200), stall.vs(220))
+
+      // Hazard stripe along the back of the bay: the design's amber, kept.
       ctx.save()
       ctx.beginPath()
       ctx.rect(stall.vx(0), stall.vy(340), stall.vs(1200), stall.vs(14))
@@ -292,39 +425,28 @@ Item {
         ctx.fill()
       }
       ctx.restore()
-      rect(0, 338, 1200, 2, "#2a2d38")
+      rect(0, 338, 1200, 2, "#3e1a38")
 
-      // The diagnostic grid: lines converging on a vanishing point.
-      ctx.globalAlpha = 0.5
+      // The diagnostic grid: lines converging on a vanishing point, in the
+      // sky's pink at low alpha so the floor keeps the neon cue without the
+      // grid outranking anything standing on it.
+      ctx.globalAlpha = 0.22
       for (var gx = -1400; gx <= 2600; gx += 100)
-        line(600 + (gx - 600) * 0.16, 344, gx, 566, 1, "#252a36")
+        line(600 + (gx - 600) * 0.16, 344, gx, 566, 1, Theme.duskNeon)
       var depth = [346, 356, 370, 390, 418, 456, 506, 566]
       for (var d = 0; d < depth.length; d++)
-        line(0, depth[d], 1200, depth[d], 1, "#232833")
+        line(0, depth[d], 1200, depth[d], 1, Theme.duskNeon)
       ctx.globalAlpha = 1
 
       // ------------------------------------------------------------- dais
-      // A plinth with a top face, a rim course under it and its own shadow on
-      // the floor. Round two drew a stack of four flat ellipses and scattered
-      // 40 kerb blocks around the widest of them at a constant *angular*
-      // pitch measured on the wrong ellipse, so the blocks came out 12 to 22
-      // units wide with 15 to 35 unit gaps and several floated clear of the
-      // stroke. Here the kerb is cut from the rim itself -- every block runs
-      // from the top face's edge down to the bottom of the course, so no
-      // block can be detached from it.
       var dx0 = stall.daisX
       var dr = stall.daisRadius
       var dcy = stall.daisCy
       var dry = stall.daisRy
       var rim = stall.daisRim
 
-      // ROUND-6. Every ring on this plinth is a floor circle put through the
-      // kart's camera, not the outer ellipse with a number subtracted from
-      // each axis. `ring(k)` is the circle of k times the turntable's radius.
-      // Subtracting a constant is wrong twice over: it changes the axis ratio
-      // (26 off 256 and 12 off 104 is a different camera again) and it leaves
-      // the ring concentric with the outer ellipse when a smaller floor
-      // circle projects with its centre HIGHER up the screen, not level.
+      // Every ring on this plinth is a floor circle put through the kart's
+      // camera. `ring(k)` is the circle of k times the turntable's radius.
       function ring(k) {
         var e = Theme.groundEllipse(stall.daisGroundR * k)
         return { rx: e.a * stall.kartToStall, ry: e.b * stall.kartToStall,
@@ -336,15 +458,17 @@ Item {
                 stall.vy(dcy + Math.sin(angle) * dry + drop)]
       }
 
-      // The plinth's own shadow, thrown away from the work lights overhead.
-      var dsh = ring(1.10)
+      // The plinth's own shadow, thrown by the sun through the door: away
+      // from the door, which is up and right of it, so toward the camera
+      // and to the left. Purple, because the ambient is a magenta sky.
+      var dsh = ring(1.14)
       ctx.save()
-      ctx.translate(stall.vx(dx0), stall.vy(dsh.cy + rim + 6))
+      ctx.translate(stall.vx(dx0 - 34), stall.vy(dsh.cy + rim + 16))
       ctx.scale(dsh.rx * u, dsh.ry * u)
       var daisShadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
-      daisShadow.addColorStop(0, Qt.rgba(0, 0, 0, 0.62))
-      daisShadow.addColorStop(0.72, Qt.rgba(0, 0, 0, 0.34))
-      daisShadow.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+      daisShadow.addColorStop(0, Qt.rgba(0.10, 0.02, 0.09, 0.66))
+      daisShadow.addColorStop(0.72, Qt.rgba(0.10, 0.02, 0.09, 0.36))
+      daisShadow.addColorStop(1, Qt.rgba(0.10, 0.02, 0.09, 0))
       ctx.fillStyle = daisShadow
       ctx.beginPath()
       ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
@@ -353,8 +477,8 @@ Item {
 
       // The course, then the top face over it: what stays visible between the
       // two is the rim, so the plinth has a real thickness.
-      ellipse(dx0, dcy + rim, dr, dry, "#0e1116")
-      ellipse(dx0, dcy + rim * 0.45, dr, dry, "#191d26")
+      ellipse(dx0, dcy + rim, dr, dry, "#150a14")
+      ellipse(dx0, dcy + rim * 0.45, dr, dry, "#22121f")
 
       // The kerb, cut from the rim on a constant arc pitch and anchored to
       // the top face's own edge at both ends.
@@ -364,7 +488,7 @@ Item {
         var a1 = -0.08 * Math.PI + (1.16 * Math.PI) * ((k + 0.66) / kerbs)
         var p0 = daisPoint(a0, 0), p1 = daisPoint(a1, 0)
         var p2 = daisPoint(a1, rim * 0.62), p3 = daisPoint(a0, rim * 0.62)
-        ctx.fillStyle = (k % 2 === 0) ? "#3d4658" : "#171b23"
+        ctx.fillStyle = (k % 2 === 0) ? "#4e3550" : "#1d101c"
         ctx.beginPath()
         ctx.moveTo(p0[0], p0[1])
         ctx.lineTo(p1[0], p1[1])
@@ -374,54 +498,66 @@ Item {
         ctx.fill()
       }
 
-      ellipse(dx0, dcy, dr, dry, "#242b38")
+      // The top face, lit from the door: a gradient across the ellipse from
+      // the far (door) edge, where it is pink, to the near edge, where it is
+      // the room's purple. Three concentric rings step the same gradient so
+      // the turntable still reads as a turntable.
+      function daisTop(cy, rx, ry, farC, nearC) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.translate(stall.vx(dx0), stall.vy(cy))
+        ctx.scale(rx * u, ry * u)
+        ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+        ctx.restore()
+        var topG = ctx.createLinearGradient(stall.vx(dx0 + rx * 0.5), stall.vy(cy - ry),
+                                            stall.vx(dx0 - rx * 0.5), stall.vy(cy + ry))
+        topG.addColorStop(0, farC)
+        topG.addColorStop(1, nearC)
+        ctx.fillStyle = topG
+        ctx.fill()
+      }
+      daisTop(dcy, dr, dry, "#7a3462", "#2a1626")
       var r90 = ring(0.90), r70 = ring(0.70)
-      ellipse(dx0, r90.cy - 2, r90.rx, r90.ry, "#2b3341")
-      ellipse(dx0, r70.cy - 4, r70.rx, r70.ry, "#313a49")
+      daisTop(r90.cy - 2, r90.rx, r90.ry, "#83396a", "#31192d")
+      daisTop(r70.cy - 4, r70.rx, r70.ry, "#8d3f72", "#381d34")
 
-      // Amber rim light along the near edge of the top face, dying away round
-      // the sides. Round one stroked the whole ellipse in amberDeep at 2.5
-      // units and it was invisible at 1:1.
+      // Two rims on the top face. The near arc catches the amber work light
+      // -- the design's own rim, kept -- and the far arc catches the sun,
+      // in the same #f0b07a the kart's own rim is.
       ctx.save()
       ctx.beginPath()
       ctx.translate(stall.vx(dx0), stall.vy(dcy))
       ctx.scale(dr * u, dry * u)
       ctx.arc(0, 0, 1, 0.04 * Math.PI, 0.96 * Math.PI, false)
       ctx.restore()
-      ctx.strokeStyle = Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.82)
+      ctx.strokeStyle = Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.72)
       ctx.lineWidth = Math.max(1.5, 3 * u)
       ctx.stroke()
       ctx.save()
       ctx.beginPath()
       ctx.translate(stall.vx(dx0), stall.vy(dcy))
       ctx.scale(dr * u, dry * u)
-      ctx.arc(0, 0, 1, 0.96 * Math.PI, 2.04 * Math.PI, false)
+      ctx.arc(0, 0, 1, 1.04 * Math.PI, 1.96 * Math.PI, false)
       ctx.restore()
-      ctx.strokeStyle = Qt.rgba(Theme.amberDeep.r, Theme.amberDeep.g, Theme.amberDeep.b, 0.5)
-      ctx.lineWidth = Math.max(1, 2 * u)
+      ctx.strokeStyle = rgbaOf(Theme.duskRim, 0.70)
+      ctx.lineWidth = Math.max(1, 2.5 * u)
       ctx.stroke()
 
       // ------------------------------------------------------ work lights
-      // A work light. ROUND-4: a fixture, not a bar.
-      //
-      // The design's own visual pillar is "amber work lights", and round
-      // three's were, in a critic's words, "flat amber bars with no fixture
-      // or cord, and near-invisible beams" -- fairly, because the fixture was
-      // one flat grey rectangle behind one flat amber rectangle, with a
-      // single 5-unit stem, and the beam left the source at alpha 0.10.
-      // What is here now: two hanger rods, a reflector that is wider at the
-      // top than at the tube so it reads as a shade, end caps that stop the
-      // tube being a bar, a hot core inside the tube, and a beam that starts
-      // at alpha 0.20 with a brighter inner cone inside it.
+      // A work light: two hanger rods, a reflector that is wider at the top
+      // than at the tube so it reads as a shade, end caps, a hot core inside
+      // the tube, and a beam with a brighter inner cone. Unchanged from the
+      // design's version except for the fixture's own metal, which is now in
+      // the room's purple neutrals. The beam is a little weaker than it was:
+      // this is the local light now, not the only one.
       function workLight(x, y, w) {
         // Hangers.
-        rect(x + w * 0.17, y - 30, 3, 30, "#2a2e39")
-        rect(x + w * 0.80, y - 30, 3, 30, "#2a2e39")
-        rect(x + w * 0.17 - 2, y - 31, 7, 3, "#3a4050")
-        rect(x + w * 0.80 - 2, y - 31, 7, 3, "#3a4050")
-        // The reflector, as a trapezoid: 20 units wider at its top edge than
-        // at the tube, which is the whole reason it reads as a shade.
-        ctx.fillStyle = "#3b414e"
+        rect(x + w * 0.17, y - 30, 3, 30, "#3a1e34")
+        rect(x + w * 0.80, y - 30, 3, 30, "#3a1e34")
+        rect(x + w * 0.17 - 2, y - 31, 7, 3, "#4d2c48")
+        rect(x + w * 0.80 - 2, y - 31, 7, 3, "#4d2c48")
+        // The reflector, as a trapezoid.
+        ctx.fillStyle = "#4b2f48"
         ctx.beginPath()
         ctx.moveTo(stall.vx(x - 16), stall.vy(y))
         ctx.lineTo(stall.vx(x + w + 16), stall.vy(y))
@@ -429,18 +565,18 @@ Item {
         ctx.lineTo(stall.vx(x - 4), stall.vy(y + 11))
         ctx.closePath()
         ctx.fill()
-        rect(x - 16, y, w + 32, 3, "#4b5262")
-        rect(x - 4, y + 10, w + 8, 2, "#565d6e")
+        rect(x - 16, y, w + 32, 3, "#5d3d5a")
+        rect(x - 4, y + 10, w + 8, 2, "#6a4866")
         // End caps, then the tube: a hot core, the amber body, a warm base.
-        rect(x - 4, y + 11, 7, 11, "#262a34")
-        rect(x + w - 3, y + 11, 7, 11, "#262a34")
+        rect(x - 4, y + 11, 7, 11, "#2e1a2c")
+        rect(x + w - 3, y + 11, 7, 11, "#2e1a2c")
         rect(x + 3, y + 12, w - 6, 9, Theme.amberGlow)
         rect(x + 3, y + 12, w - 6, 3, "#fff2d6")
         rect(x + 3, y + 20, w - 6, 3, Theme.amberDeep)
         var glow = ctx.createRadialGradient(stall.vx(x + w / 2), stall.vy(y + 16), 0,
                                             stall.vx(x + w / 2), stall.vy(y + 16), stall.vs(w * 1.9))
-        glow.addColorStop(0, Qt.rgba(1, 0.80, 0.40, 0.42))
-        glow.addColorStop(0.45, Qt.rgba(1, 0.72, 0.3, 0.14))
+        glow.addColorStop(0, Qt.rgba(1, 0.80, 0.40, 0.40))
+        glow.addColorStop(0.45, Qt.rgba(1, 0.72, 0.3, 0.12))
         glow.addColorStop(1, Qt.rgba(1, 0.7, 0.3, 0))
         ctx.fillStyle = glow
         ctx.fillRect(stall.vx(x + w / 2 - w * 1.9), stall.vy(y + 16 - w * 1.9),
@@ -461,85 +597,72 @@ Item {
           ctx.closePath()
           ctx.fill()
         }
-        beam(150, 0.115, 0.045)
-        beam(52, 0.115, 0.040)
+        beam(150, 0.095, 0.035)
+        beam(52, 0.095, 0.032)
       }
-      // A matched pair: same length, same baseline. Round one had them 186
-      // and 194 units long, hung four units apart, and called them a pair.
+      // A matched pair: same length, same baseline.
       workLight(206, 34, 180)
       workLight(794, 34, 180)
 
-      // A pool of warm light on the floor under the kart.
+      // A pool of warm light on the floor under the kart: the amber
+      // counterpoint, local, sitting inside the door's wide pink.
       var pool = ctx.createRadialGradient(stall.vx(stall.daisX), stall.vy(stall.daisY - 4), 0,
-                                          stall.vx(stall.daisX), stall.vy(stall.daisY - 4), stall.vs(300))
-      pool.addColorStop(0, Qt.rgba(1, 0.75, 0.34, 0.18))
+                                          stall.vx(stall.daisX), stall.vy(stall.daisY - 4), stall.vs(260))
+      pool.addColorStop(0, Qt.rgba(1, 0.75, 0.34, 0.16))
       pool.addColorStop(1, Qt.rgba(1, 0.7, 0.3, 0))
       ctx.fillStyle = pool
-      ctx.fillRect(stall.vx(stall.daisX - 300), stall.vy(330), stall.vs(600), stall.vs(230))
+      ctx.fillRect(stall.vx(stall.daisX - 260), stall.vy(330), stall.vs(520), stall.vs(230))
 
       // ----------------------------------------------------------- signage
       // The pit terminal, left wall.
-      rect(38, 92, 174, 104, "#101318")
-      rect(42, 96, 166, 96, "#1a1d24")
+      rect(38, 92, 174, 104, "#160a14")
+      rect(42, 96, 166, 96, "#241422")
       rect(48, 102, 154, 84, "#06120e")
       rect(48, 102, 154, 3, "#0d2a1e")
       for (var scan = 106; scan < 186; scan += 4)
         rect(48, scan, 154, 1, "#0a1f16")
-      rect(38, 92, 174, 4, "#232833")
+      rect(38, 92, 174, 4, "#3a1e36")
 
-      // The practice poster. It hangs on the wall between the terminal and
-      // the roller door, where the COLOR panel cannot reach it: on the right
-      // wall the panel cut it in half and left its kart floating.
-      rect(246, 86, 164, 146, "#2a3140")
-      rect(252, 92, 152, 134, "#0f1319")
-      rect(252, 92, 152, 78, "#14232d")
-      rect(252, 168, 152, 2, "#243544")
+      // The practice poster, between the terminal and the roller door. Its
+      // backdrop is the same sunset as the door: the poster is the bar's
+      // own composition in miniature.
+      rect(246, 86, 164, 146, "#3a1e36")
+      rect(252, 92, 152, 134, "#160a14")
+      var posterSky = ctx.createLinearGradient(0, stall.vy(92), 0, stall.vy(170))
+      posterSky.addColorStop(0, Theme.duskSkyTop)
+      posterSky.addColorStop(0.7, Theme.duskSkyHot)
+      posterSky.addColorStop(1, Theme.duskHorizon)
+      ctx.fillStyle = posterSky
+      ctx.fillRect(stall.vx(252), stall.vy(92), stall.vs(152), stall.vs(78))
+      ctx.fillStyle = Theme.duskSun
+      ctx.beginPath()
+      ctx.arc(stall.vx(352), stall.vy(160), stall.vs(22), Math.PI, Math.PI * 2, false)
+      ctx.fill()
+      rect(252, 160, 152, 10, Theme.duskHillNear)
+      rect(252, 168, 152, 2, "#4a1838")
 
-      // Hanging checkered flag, on the wall right of the door.
-      //
-      // Two faults here in round two. The drape was a single hard step -- the
-      // last two columns dropped by four units in one jump -- which read as a
-      // texture seam rather than as cloth. And at #c9cdd8 the prop measured a
-      // 95th-percentile luminance of 0.446 against the kart's 0.359, so the
-      // highest-contrast object in the stall was a decoration in the corner
-      // rather than the thing the screen exists for.
-      //
-      // The drape is now a smooth per-column curve, and the check's phase is
-      // taken from the column and row indices rather than from the offset
-      // position, so no amount of drape can put the pattern out of register.
-      // The light square is dropped to a value that sits under the kart.
-      //
-      // ROUND-4: the hem. A critic found "a detached dark square at
-      // (955-962, 350-356), 8 px below the checkered flag's bottom edge,
-      // floating on the wall." It was the bottom check of the one column
-      // whose drape ran three units lower than its neighbours': a dark square
-      // on a dark wall with dark squares either side of it, so its own column
-      // gave it nothing to belong to. Cloth has a hem, and a hem is what ties
-      // the columns together, so there is one now -- a continuous band in a
-      // value that reads against the wall, following each column's drape.
-      rect(852, 60, 72, 5, "#2b3040")
-      rect(854, 64, 68, 6, "#131620")
+      // Hanging checkered flag, on the wall right of the door. The light
+      // square is kept below the kart's value; the hem ties the columns.
+      rect(852, 60, 72, 5, "#3a1e36")
+      rect(854, 64, 68, 6, "#180a16")
       for (var fc = 0; fc < 6; fc++) {
         var drape = Math.round(Math.abs(Math.sin((fc + 0.4) * 0.7)) * 3)
         for (var fr = 0; fr < 7; fr++) {
           rect(856 + fc * 11, 68 + drape + fr * 11, 11, 11,
-               (fr + fc) % 2 === 0 ? "#8a90a0" : "#131620")
+               (fr + fc) % 2 === 0 ? "#9a8a94" : "#180a16")
         }
-        rect(856 + fc * 11, 68 + drape + 77, 11, 3, "#5a6070")
+        rect(856 + fc * 11, 68 + drape + 77, 11, 3, "#5e4258")
       }
 
-      // Traffic cone. It used to stand at x=46 with its base at y=400, and
-      // the KART BODY card's top edge falls at y=386 -- so the card cut the
-      // cone off at the ankles, with no base, no floor contact and no shadow.
-      // Moved back and right, it stands on open floor 14 px above the card
-      // and 144 px clear of the dais, with its whole base visible.
+      // Traffic cone, on open floor left of the dais. Its shadow now runs
+      // toward the camera and left, like everything else's.
       var coneX = 250, coneBase = 372
       ctx.save()
-      ctx.translate(stall.vx(coneX + 28), stall.vy(coneBase + 3))
-      ctx.scale(34 * u, 7 * u)
+      ctx.translate(stall.vx(coneX + 14), stall.vy(coneBase + 6))
+      ctx.scale(44 * u, 8 * u)
       var coneShadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
-      coneShadow.addColorStop(0, Qt.rgba(0, 0, 0, 0.6))
-      coneShadow.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+      coneShadow.addColorStop(0, Qt.rgba(0.10, 0.02, 0.09, 0.6))
+      coneShadow.addColorStop(1, Qt.rgba(0.10, 0.02, 0.09, 0))
       ctx.fillStyle = coneShadow
       ctx.beginPath()
       ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
@@ -550,17 +673,17 @@ Item {
       for (var cn = 0; cn < 6; cn++)
         rect(coneX + 6 + cn * 3, coneBase - 8 - cn * 11 - 11, 44 - cn * 6, 11,
              cn === 2 || cn === 3 ? "#d8d9dd" : "#c25a1c")
-
-      // There is no oil drum. Round one drew one on the right, where the
-      // COLOR panel covered it, and the self-report counted it as scenery the
-      // reader could see. Moved to the left it fell behind the KART BODY
-      // card instead, so it is gone rather than claimed.
+      // The sun's rim on the cone's right edge.
+      for (var cr = 0; cr < 6; cr++)
+        rect(coneX + 6 + cr * 3 + (44 - cr * 6) - 3, coneBase - 8 - cr * 11 - 11, 3, 11,
+             rgbaOf(Theme.duskRim, 0.7))
 
       // ---------------------------------------------------------- vignette
-      var vig = ctx.createRadialGradient(stall.vx(600), stall.vy(300), stall.vs(240),
-                                         stall.vx(600), stall.vy(300), stall.vs(760))
-      vig.addColorStop(0, Qt.rgba(0, 0, 0, 0))
-      vig.addColorStop(1, Qt.rgba(0, 0, 0, 0.72))
+      // Purple, not black: the corners fall toward the bar's ground colour.
+      var vig = ctx.createRadialGradient(stall.vx(640), stall.vy(280), stall.vs(260),
+                                         stall.vx(640), stall.vy(280), stall.vs(800))
+      vig.addColorStop(0, Qt.rgba(0.08, 0.02, 0.07, 0))
+      vig.addColorStop(1, Qt.rgba(0.08, 0.02, 0.07, 0.70))
       ctx.fillStyle = vig
       ctx.fillRect(0, 0, width, height)
     }
@@ -621,7 +744,7 @@ Item {
       horizontalAlignment: Text.AlignHCenter
       text: "PRACTICE"
       textFormat: Text.PlainText
-      color: Theme.amberGlow
+      color: Theme.cream
       font.family: Theme.mono
       font.bold: true
       font.pixelSize: Math.max(7, stall.vs(21))
@@ -632,7 +755,7 @@ Item {
       horizontalAlignment: Text.AlignHCenter
       text: "PAYS OFF"
       textFormat: Text.PlainText
-      color: Theme.amberGlow
+      color: Theme.cream
       font.family: Theme.mono
       font.bold: true
       font.pixelSize: Math.max(7, stall.vs(21))

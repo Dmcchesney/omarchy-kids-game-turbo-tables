@@ -3,6 +3,12 @@ import "parts"
 
 // The floor. Same road, no shader.
 //
+// GOLDEN-HOUR PROTOTYPE. Above the horizon this canvas is cleared to
+// transparent -- the sky is ui/parts/SunsetSky.qml, an item behind this plane
+// -- and below it the floor is near-black purple with a neon magenta grid
+// that dissolves into a dusk fog, with the sun's foot spilling a warm ellipse
+// down from the horizon. road.frag draws the same thing per pixel.
+//
 // Design, Rendering approach, Fallback and floor: "If the shader fails to
 // compile on a machine, the view falls back to a Canvas port of the classic
 // segment-based road renderer at the same internal size."
@@ -36,18 +42,22 @@ Canvas {
   property real stripe: 1.4
   property real gridScale: 4.5
   property real fogDensity: 1.0
-  property real glowAmount: 0.10
+  property real glowAmount: 1.0
+  property real gridAlpha: 0.35
+  property real sunU: 0.68
+  property real glowRx: 0.24
+  property real glowRy: 0.08
 
-  property color roadColor: "#23262c"
-  property color roadAlt: "#2b2f36"
+  property color roadColor: "#221420"
+  property color roadAlt: "#2c1a2a"
   property color rumbleColor: "#d8a12a"
   property color rumbleAlt: "#f2e6c4"
   property color laneColor: "#f2e6c4"
-  property color groundColor: "#0b0d10"
-  property color gridColor: "#16323a"
-  property color skyColor: "#07090c"
-  property color fogColor: "#07090c"
-  property color glowColor: "#f5a524"
+  property color groundColor: "#3c1228"
+  property color gridColor: "#ff4fa3"
+  property color skyColor: "#5e1a50"
+  property color fogColor: "#3a1032"
+  property color glowColor: "#f0956e"
 
   // How far down the track to draw. Past this the fog has closed anyway.
   property real drawDistance: 190
@@ -81,27 +91,9 @@ Canvas {
     ctx.reset()
 
     // ------------------------------------------------------------- the sky
+    // Nothing. The sky is an item behind this plane; clear to it.
     var hy = Math.round(horizon * h)
-    var sky = ctx.createLinearGradient(0, 0, 0, Math.max(1, hy))
-    sky.addColorStop(0, skyColor)
-    // The warm half of the backdrop is kept in the bottom quarter of the wall.
-    // Spread over the whole of it, it stops reading as work lights behind a
-    // roller door and starts reading as a sunset, which this game does not
-    // have: it is a garage, at night, indoors.
-    sky.addColorStop(0.76, Qt.rgba(groundColor.r * 0.34, groundColor.g * 0.34,
-                                   groundColor.b * 0.40, 1))
-    sky.addColorStop(1, Qt.rgba(groundColor.r * 0.30 + glowColor.r * 0.075,
-                                groundColor.g * 0.30 + glowColor.g * 0.058,
-                                groundColor.b * 0.30 + glowColor.b * 0.038, 1))
-    ctx.fillStyle = sky
-    ctx.fillRect(0, 0, w, Math.max(0, hy))
-
-    // the warm haze that sits on the horizon where the work lights are
-    var haze = ctx.createLinearGradient(0, Math.max(0, hy - h * 0.07), 0, hy)
-    haze.addColorStop(0, Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0))
-    haze.addColorStop(1, Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0.17))
-    ctx.fillStyle = haze
-    ctx.fillRect(0, Math.max(0, hy - h * 0.07), w, Math.min(h * 0.07, hy))
+    ctx.clearRect(0, 0, w, Math.max(0, hy))
 
     // ------------------------------------------------- the sample ladder
     //
@@ -198,10 +190,18 @@ Canvas {
       // fade is by alpha, not by a switch, so no line ever pops into being --
       // and the coarse lines are skipped inside the finer passes, because a
       // multiple of 4.5 is also a multiple of 4.5/4.
+      //
+      // OPAQUE, PRE-BLENDED, FINEST FIRST. road.frag takes the MAX of the
+      // line masks and mixes the ground toward the grid colour once, so a
+      // crossing is exactly as bright as a line. Drawing translucent lines
+      // stacked alpha at every crossing and the floor read as strings of
+      // beads. Each octave is now painted opaque in the colour the shader
+      // would arrive at, dimmest octave first, so the brightest line wins
+      // wherever two cross -- which is what max() does.
       var octaves = [
-        { "period": gridScale, "alpha": 1.0 },
-        { "period": gridScale * 0.25, "alpha": fade(zFar, 12.0, 4.5) * 0.72 },
-        { "period": gridScale * 0.0625, "alpha": fade(zFar, 4.6, 2.2) * 0.55 }
+        { "period": gridScale * 0.0625, "alpha": fade(zFar, 4.6, 2.2) * 0.55 * gridAlpha, "coarse": 16 },
+        { "period": gridScale * 0.25, "alpha": fade(zFar, 12.0, 4.5) * 0.72 * gridAlpha, "coarse": 4 },
+        { "period": gridScale, "alpha": gridAlpha, "coarse": 0 }
       ]
       var sFar = zFar + travel
       var sNear = zNear + travel
@@ -210,8 +210,9 @@ Canvas {
         var alpha = octaves[o].alpha
         if (alpha <= 0.02)
           continue
-        ctx.globalAlpha = alpha
-        ctx.fillStyle = gridColor
+        ctx.globalAlpha = 1
+        ctx.fillStyle = blend(groundColor, gridColor, alpha)
+        var coarse = octaves[o].coarse
 
         // LONGITUDINAL: THE COLUMNS THAT CAN ACTUALLY LAND ON THE SCREEN.
         //
@@ -236,7 +237,7 @@ Canvas {
         var gHi = Math.floor((mid0 + reach) / period)
         if (pitchPx >= 3.0 && gHi - gLo <= 220) {
           for (var g = gLo; g <= gHi; g++) {
-            if (o > 0 && (g % 4) === 0)
+            if (coarse > 0 && (g % coarse) === 0)
               continue
             var gx = g * period
             if (Math.abs(gx) < roadHalf + rumbleHalf)
@@ -269,7 +270,7 @@ Canvas {
         var mLo = Math.ceil(sNear / period)
         var mHi = Math.floor(sFar / period)
         for (var m2 = mLo; m2 <= mHi && m2 - mLo < 24; m2++) {
-          if (o > 0 && (m2 % 4) === 0)
+          if (coarse > 0 && (m2 % coarse) === 0)
             continue
           var zLine = m2 * period - travel
           if (zLine <= zNear || zLine >= zFar)
@@ -277,17 +278,6 @@ Canvas {
           var yLine = vAt(zLine) * h
           ctx.fillRect(0, yLine, w, Math.max(1, Math.min(2, (yNear - yFar) * 0.18)))
         }
-        ctx.globalAlpha = 1
-      }
-
-      // A wash of work light on the floor closest to the kart, matching the
-      // shader's. Small: the design's ground is near-black and a lit lattice
-      // reads as water, which an earlier round proved.
-      var wash = fade(zFar, 13.0, 2.2) * 0.022
-      if (wash > 0.002) {
-        ctx.globalAlpha = wash
-        ctx.fillStyle = glowColor
-        ctx.fillRect(0, yFar, w, Math.max(1, yNear - yFar + 1))
         ctx.globalAlpha = 1
       }
 
@@ -334,16 +324,6 @@ Canvas {
       }
       ctx.globalAlpha = 1
 
-      // a pool of work light on the tarmac, every fourth stripe
-      var pool = ((mid + travel) / (stripe * 12)) % 1 - 0.5
-      var poolAmount = Math.exp(-pool * pool * 26) * glowAmount
-      if (poolAmount > 0.004) {
-        ctx.globalAlpha = Math.min(0.5, poolAmount)
-        ctx.fillStyle = glowColor
-        quad(lFarIn, yFar, rFarIn, yFar, rNearIn, yNear + 1, lNearIn, yNear + 1)
-        ctx.globalAlpha = 1
-      }
-
     }
 
     // ------------------------------------------------------------- the fog
@@ -365,6 +345,22 @@ Canvas {
       }
       ctx.fillStyle = grad
       ctx.fillRect(0, fogTop, w, fogBottom - fogTop)
+    }
+
+    // ------------------------------------------------------ the sun's foot
+    // A warm ellipse spilling down from the horizon under the disc, over
+    // floor and road alike. The three stops are road.frag's `glowFall`.
+    if (glowAmount > 0.001) {
+      ctx.save()
+      ctx.translate(sunU * w, hy)
+      ctx.scale(glowRx * w, glowRy * h)
+      var foot = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+      foot.addColorStop(0.0, Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0.55 * glowAmount))
+      foot.addColorStop(0.5, Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0.18 * glowAmount))
+      foot.addColorStop(1.0, Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0))
+      ctx.fillStyle = foot
+      ctx.fillRect(-1, 0, 2, 1)
+      ctx.restore()
     }
   }
 }

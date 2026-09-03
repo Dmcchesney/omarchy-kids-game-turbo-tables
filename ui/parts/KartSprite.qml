@@ -314,9 +314,28 @@ Item {
       // One unit vector, used by every face on the kart and by every shadow
       // it casts. Above, from the nose side, and a little toward the viewer,
       // which is where the stall's work lights are.
-      var Lx = 0.52, Ly = 0.80, Lz = -0.30
-      var warm = rgba(1.0, 0.84, 0.58, 1)     // the stall's work lights
-      var cool = rgba(0.07, 0.20, 0.24, 1)    // the design's dark teal
+      // PROTOTYPE "Golden Hour at the Pit": the key is no longer a work
+      // light. It is the sun through the open roller door -- off the nose
+      // (+x), a little behind the kart (+z, away from the viewer) and low,
+      // about 40 degrees up. Under the camera's screen basis (+x right and a
+      // little down, +z up and right) it resolves to (+0.74, -0.64): up and
+      // to the right at 41 degrees, which is where GarageStall draws the sun
+      // relative to the turntable (43 degrees). The shadow it throws runs
+      // y / Ly along -(Lx, Lz): left, and toward the camera.
+      //
+      // WHY IT IS NOT FURTHER BEHIND THE KART. The bar's sun is behind-right
+      // and its shadows run at the camera. This sprite's canvas is its own
+      // bounds, and under this camera the near-front tyre's contact point
+      // already sits at v = 71 of 80: there are nine view-box units of
+      // floor below it. Any shadow that runs toward the camera from that
+      // tyre leaves the canvas and is cut square, which is worse than a
+      // shadow that runs sideways. So the key sits more to the right than
+      // behind, and the shadow goes mostly left. See garage-notes.md.
+      var Lx = 0.62, Ly = 0.64, Lz = 0.45
+      var warm = rgba(0.94, 0.69, 0.48, 1)     // the sun's rim, #f0b07a
+      var cool = rgba(0.37, 0.15, 0.37, 1)     // the bar's shadow purple, #5f255e
+      var skyC = rgba(0.76, 0.25, 0.48, 1)     // the magenta sky, on up faces
+      var rim = rgba(0.94, 0.69, 0.48, 1)      // #f0b07a
 
       // ROUND-5: THE REST OF THE RIG.
       //
@@ -349,8 +368,12 @@ Item {
       // difference between a facet and a panel: a real panel is never one
       // value, because it is never exactly flat and the light is never
       // exactly parallel.
-      var Kx = -0.66, Ky = 0.44, Kz = 0.61       // the far work light
-      var bounce = rgba(0.94, 0.66, 0.30, 1)  // amber off the lit dais
+      // PROTOTYPE: the fill is the amber work light, overhead and a little
+      // toward the viewer, so the top faces still read under a key that
+      // comes from behind. Soft and local: it lifts, it does not compete.
+      var Kx = 0.10, Ky = 0.92, Kz = -0.37       // the amber work light, overhead
+      var fillC = rgba(1.0, 0.80, 0.45, 1)     // Theme.amberGlow, roughly
+      var bounce = rgba(0.62, 0.22, 0.44, 1)   // magenta off the door-lit floor
 
       // The direction the camera looks, in model coordinates. Declared here
       // rather than below the face queue because the specular and fresnel
@@ -455,17 +478,33 @@ Item {
         // value -- only its texture. The two tiles' alphas average 0.035 and
         // 0.026, which multiply to a mean darkening of 0.060,
         // so the lift is 1 / (1 - 0.060).
-        var k = (m.amb + m.lam * lam + sky + 0.20 * key2 + 0.13 * down) * grainLift
+        // PROTOTYPE light budget. The key is behind the kart, so the faces
+        // the camera sees are mostly the ones it does NOT hit: the body is
+        // its paint's shadow ramp, held up by the amber fill from overhead
+        // (0.16 x key2) and by the ambient. Where the key does land -- the
+        // nose, the top, the far chamfers -- it lands hard and warm, and
+        // where it does not the paint goes to its purple shadow ramp.
+        var k = (m.amb * 0.80 + m.lam * lam + sky * 0.6 + 0.16 * key2 + 0.10 * down) * grainLift
         var c = gain(base, k)
-        c = mix(c, warm, 0.20 * lam)
-        c = mix(c, cool, 0.24 * (1 - lam) * (1 - 0.5 * key2))
-        c = mix(c, bounce, 0.13 * down)
+        c = mix(c, warm, 0.30 * lam)
+        c = mix(c, fillC, 0.10 * key2 * (1 - lam))
+        c = mix(c, skyC, 0.10 * up * (1 - lam))
+        c = mix(c, cool, 0.50 * (1 - lam) * (1 - 0.45 * key2))
+        c = mix(c, bounce, 0.14 * down)
         // Fresnel: how far the face is from facing the eye. `-W` is the eye
         // direction, and a face is only drawn when it faces the eye, so this
         // is 0 head-on and rises to 1 at a grazing edge.
         var vd = Math.max(0, -(n[0] * Wx + n[1] * Wy + n[2] * Wz))
         var fr = m.fres * Math.pow(1 - vd, 3)
-        c = mix(c, up >= down ? warm : cool, fr)
+        // THE RIM. A face that grazes the eye AND leans toward the sun is a
+        // silhouette edge with the sun behind it, which is the one thing
+        // the bar image is made of. It goes to #f0b07a, hard: the weight
+        // is the lambert term itself, gated by the grazing angle, so a
+        // panel that faces the sun squarely and the eye obliquely burns
+        // cream, and a panel that faces the eye keeps its paint.
+        var rimT = lam * (0.28 + 0.72 * Math.pow(1 - vd, 2))
+        c = mix(c, rim, Math.min(0.90, rimT * 1.6))
+        c = mix(c, lam > 0.15 ? rim : cool, fr)
         // Satin. One lobe, from the key only: a second specular from the fill
         // light puts highlights on faces the eye reads as being in shadow.
         //
@@ -1051,7 +1090,7 @@ Item {
           c.transform(ex[0] - o[0], ex[1] - o[1], ez[0] - o[0], ez[1] - o[1], o[0], o[1])
           var grad = c.createRadialGradient(0, 0, 0, 0, 0, 1)
           for (var i = 0; i < stops.length; i++)
-            grad.addColorStop(stops[i][0], cssa([0, 0, 0, stops[i][1]]))
+            grad.addColorStop(stops[i][0], cssa([0.09, 0.01, 0.08, stops[i][1]]))
           c.fillStyle = grad
           c.beginPath()
           c.arc(0, 0, 1, 0, Math.PI * 2, false)
@@ -1215,7 +1254,10 @@ Item {
         function castPass(swell, alpha, depth) {
           queue.push({ depth: depth, custom: function (c) {
             c.save()
-            c.fillStyle = cssa([0, 0, 0, alpha])
+            // PROTOTYPE: the shadow is purple, not black -- the bar's
+            // #3c1228 ground under a #5f255e shadow -- because the room's
+            // ambient is a magenta sky, and a shadow is lit by ambient.
+            c.fillStyle = cssa([0.16, 0.03, 0.14, alpha])
             c.beginPath()
             for (var i = 0; i < casters.length; i++) {
               var poly = casters[i]
@@ -1231,9 +1273,11 @@ Item {
             c.restore()
           } })
         }
-        castPass(1.26, 0.22, 2.86e6)
-        castPass(1.11, 0.28, 2.84e6)
-        castPass(1.00, 0.55, 2.82e6)
+        // PROTOTYPE: a low sun's shadow is long and its penumbra is wide,
+        // so the outer passes swell more and the core is a little softer.
+        castPass(1.22, 0.18, 2.86e6)
+        castPass(1.10, 0.26, 2.84e6)
+        castPass(1.00, 0.50, 2.82e6)
         contactPatch(g.rearX, g.rearR, g.nearZ0, g.nearZ1)
         contactPatch(g.frontX, g.frontR, g.nearZ0, g.nearZ1)
         contactPatch(g.rearX, g.rearR, g.farZ0, g.farZ1)

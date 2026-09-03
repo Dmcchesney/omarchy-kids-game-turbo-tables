@@ -63,9 +63,15 @@ const allowedBinaryTypes: { extension: string; what: string; ok: (bytes: Buffer)
       bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WAVE",
   },
   {
+    // The first four bytes of a .qsb are NOT a fixed magic: a rebake of the
+    // same source read 00 00 92 66 where the committed file read 00 00 98 3E,
+    // and the check as first written failed the rebake. What every qsb shares
+    // is the zlib stream that follows that prefix -- 78 01, 78 9C or 78 DA --
+    // because Qt's shader container is a zlib-compressed QDataStream. That is
+    // the signature checked here.
     extension: ".qsb",
-    what: "the QSB header 00 00 98 3E",
-    ok: (bytes) => bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x98, 0x3e])),
+    what: "a zlib stream at offset 4 (78 01 / 78 9C / 78 DA), Qt's compressed shader container",
+    ok: (bytes) => bytes.length > 6 && bytes[4] === 0x78 && (bytes[5] === 0x01 || bytes[5] === 0x9c || bytes[5] === 0xda),
   },
 ];
 const allowedBinaryExtensions = new Set(allowedBinaryTypes.map((type) => type.extension));
