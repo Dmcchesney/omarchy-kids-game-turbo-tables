@@ -71,6 +71,47 @@ export function spec(E: typeof EngineModule, label: string): void {
       return { harness, rivals };
     }
 
+    // ---- no dead state ---------------------------------------------------
+
+    test("rivals: a rival's mind carries only fields the engine reads", () => {
+      // Twice now a field has been added to this object, cloned on every step
+      // of every race, and never read: `handSize` in round 1 and
+      // `sentGoodGame` in round 2. The GOOD GAME latch that matters is
+      // `RivalsState.sentGoodGame`, which `rivalObserve` checks; the per-mind
+      // copy of it was written and never looked at again. This list is the
+      // guard: a field added to `RivalMind` fails here until whoever added it
+      // has said, in this file, that something reads it.
+      const { rivals } = withRivals();
+      const mind = mindOf(rivals, "bolt")!;
+      assert.deepEqual(Object.keys(mind).sort(), [
+        "accuracyPercent",
+        "answersSincePolicy",
+        "answersTaken",
+        "id",
+        "lastDrawnThinkMs",
+        "lastHandAttackedHuman",
+        "lastScale",
+        "lastThinkMs",
+        "level",
+        "nextAnswerAtMs",
+        "personality",
+        "rng",
+        "thinkTimeMeanMs",
+        "thinkTimeSpreadMs",
+      ]);
+      assert.deepEqual(Object.keys(rivals).sort(), [
+        "childAnswers",
+        "childGaps",
+        "childLapMistakes",
+        "childLastAnswerAtMs",
+        "humanId",
+        "minds",
+        "niceRunLaps",
+        "rng",
+        "sentGoodGame",
+      ]);
+    });
+
     // ---- the table, verbatim ---------------------------------------------
 
     test("rivals: the design's table is the engine's table", () => {

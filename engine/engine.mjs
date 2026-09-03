@@ -1,3 +1,20 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
+
 // src/engine/rng.ts
 function rotl(value, shift) {
   return (value << shift | value >>> 32 - shift) >>> 0;
@@ -1167,8 +1184,7 @@ function cloneMind(mind) {
     lastScale: mind.lastScale,
     answersTaken: mind.answersTaken,
     answersSincePolicy: mind.answersSincePolicy,
-    lastHandAttackedHuman: mind.lastHandAttackedHuman,
-    sentGoodGame: mind.sentGoodGame
+    lastHandAttackedHuman: mind.lastHandAttackedHuman
   };
 }
 function cloneRivals(rivals) {
@@ -1212,8 +1228,7 @@ function createRivals(state, configs) {
       lastScale: 1,
       answersTaken: 0,
       answersSincePolicy: 0,
-      lastHandAttackedHuman: false,
-      sentGoodGame: false
+      lastHandAttackedHuman: false
     };
     schedule(rivals, mind, state.startedAtMs);
     rivals.minds.push(mind);
@@ -1368,7 +1383,6 @@ function observeInto(rivals, state, events) {
       const speaker = pickSpeaker(rivals, state);
       if (speaker === null) continue;
       rivals.sentGoodGame = true;
-      speaker.sentGoodGame = true;
       signals.push(signalEvent(speaker.id, "goodGame", event.at));
     }
   }
@@ -1741,7 +1755,9 @@ function recordKeys(records) {
 function recordKey(preset, tables) {
   if (preset !== "choose") return preset;
   const sorted = tables.slice().sort((left, right) => left - right);
-  return "choose:" + sorted.join("-");
+  const unique = [];
+  for (const table of sorted) if (unique.indexOf(table) === -1) unique.push(table);
+  return "choose:" + unique.join("-");
 }
 function recordKeyOf(state) {
   return recordKey(state.preset, state.tables);
@@ -1749,7 +1765,15 @@ function recordKeyOf(state) {
 var FIXED_PRESETS = ["2-5", "2-10", "1-12"];
 var CHOOSE_KEY = /^choose:(?:[1-9]|1[0-2])(?:-(?:[1-9]|1[0-2]))*$/;
 function isRecordKey(key) {
-  return FIXED_PRESETS.indexOf(key) !== -1 || CHOOSE_KEY.test(key);
+  if (FIXED_PRESETS.indexOf(key) !== -1) return true;
+  if (!CHOOSE_KEY.test(key)) return false;
+  let previous = 0;
+  for (const part of key.slice("choose:".length).split("-")) {
+    const table = Number(part);
+    if (!(table > previous)) return false;
+    previous = table;
+  }
+  return true;
 }
 var FORBIDDEN_KEY_WORDS = [
   "date",
@@ -1895,8 +1919,7 @@ function validateTimeline(value, path, issues) {
     }
     unknownKeys(sample, SAMPLE_KEYS, at, issues);
     checkRange(sample.atMs, 0, 864e5, at + ".atMs", issues);
-    if (!isWholeNumber(sample.progress))
-      issues.push({ path: at + ".progress", problem: "expected a whole number" });
+    checkRange(sample.progress, 0, 1e5, at + ".progress", issues);
     if (isWholeNumber(sample.atMs)) {
       if (sample.atMs < previous)
         issues.push({ path: at + ".atMs", problem: "timeline runs backwards" });
@@ -1974,6 +1997,14 @@ function validateFacts(value, issues) {
     }
     if (lastThree.length > FACT_HISTORY_WINDOW)
       issues.push({ path: at + ".lastThree", problem: "more than " + FACT_HISTORY_WINDOW + " outcomes" });
+    else if (isWholeNumber(record.attempts)) {
+      const expected = record.attempts < FACT_HISTORY_WINDOW ? record.attempts : FACT_HISTORY_WINDOW;
+      if (lastThree.length !== expected)
+        issues.push({
+          path: at + ".lastThree",
+          problem: "expected " + expected + " outcomes for " + record.attempts + " attempts, got " + lastThree.length
+        });
+    }
     for (let slot = 0; slot < lastThree.length; slot++) {
       if (typeof lastThree[slot] !== "string" || OUTCOMES.indexOf(lastThree[slot]) === -1)
         issues.push({ path: at + ".lastThree[" + slot + "]", problem: "not an outcome" });
@@ -2013,7 +2044,7 @@ function migrateSave(value) {
       steps: [],
       problem: "written by a newer build (version " + version + ")"
     };
-  let raw = value;
+  let raw = __spreadValues({}, value);
   const steps = [];
   let at = version;
   while (at < SAVE_VERSION) {
@@ -2026,6 +2057,73 @@ function migrateSave(value) {
     raw.version = at;
   }
   return { raw, from: version, to: SAVE_VERSION, steps, problem: "" };
+}
+var LEGACY_GARAGE_KEYS = [
+  "kartBody",
+  "kartPaint",
+  "kartNumber",
+  "rivalLevel",
+  "raceMode",
+  "mathSet",
+  "sound",
+  "reducedMotion",
+  "scanlines"
+];
+function migrateLegacyGarageSettings(value) {
+  if (!isPlainObject(value)) return { settings: null, problem: "not an object" };
+  const settings = value.settings;
+  if (!isPlainObject(settings)) return { settings: null, problem: "no settings object" };
+  if (!Object.prototype.hasOwnProperty.call(settings, "kartBody"))
+    return { settings: null, problem: "not the garage's own settings shape" };
+  for (const key in settings) {
+    if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
+    if (LEGACY_GARAGE_KEYS.indexOf(key) === -1)
+      return { settings: null, problem: "unknown legacy setting: " + key };
+  }
+  const records = value.records;
+  if (records !== void 0 && (!isPlainObject(records) || Object.keys(records).length > 0))
+    return { settings: null, problem: "the legacy shape never held a record, and this one does" };
+  const facts = value.facts;
+  const factsEmpty = facts === void 0 || Array.isArray(facts) && facts.length === 0 || isPlainObject(facts) && Object.keys(facts).length === 0;
+  if (!factsEmpty)
+    return { settings: null, problem: "the legacy shape never held a fact history, and this one does" };
+  const level = RIVAL_LEVEL_ORDER[clampWhole(settings.rivalLevel, 0, RIVAL_LEVEL_ORDER.length - 1, 1)];
+  return {
+    settings: {
+      sound: settings.sound !== false,
+      reducedMotion: settings.reducedMotion === true,
+      scanlines: settings.scanlines === true,
+      kart: clampWhole(toNumber(settings.kartBody) + 1, 1, KART_BODIES, 1),
+      paint: clampWhole(toNumber(settings.kartPaint) + 1, 1, PAINT_SWATCHES, 1),
+      number: clampWhole(settings.kartNumber, KART_NUMBER_MIN, KART_NUMBER_MAX, 1),
+      rivalLevel: level,
+      streakThreshold: STREAK_THRESHOLD
+    },
+    problem: ""
+  };
+}
+function toNumber(value) {
+  return typeof value === "number" && isFinite(value) ? value : NaN;
+}
+function clampWhole(value, low, high, fallback) {
+  const number = Math.round(toNumber(value));
+  if (!isFinite(number)) return fallback;
+  return number < low ? low : number > high ? high : number;
+}
+function resetSettings(file) {
+  const next = cloneSave(file);
+  next.settings = defaultSettings();
+  return next;
+}
+function resetRecords(file) {
+  const next = cloneSave(file);
+  next.records = {};
+  return next;
+}
+function resetFacts(file) {
+  const next = cloneSave(file);
+  next.facts = [];
+  return next;
 }
 function serialiseSave(file) {
   const settings = file.settings;
@@ -2116,12 +2214,56 @@ function factHistoryDelta(seededWith, history) {
   }
   return delta;
 }
-function factHistoryAccounts(state, seededWith, history) {
+function baselineIsFile(file, seededWith) {
+  const baseline = seededWith != null ? seededWith : [];
+  if (baseline.length !== file.facts.length) return false;
+  for (let index = 0; index < baseline.length; index++) {
+    const left = baseline[index];
+    const right = file.facts[index];
+    if (left.fact !== right.fact) return false;
+    if (left.attempts !== right.attempts) return false;
+    if (left.correct !== right.correct) return false;
+    if (left.lastThree.length !== right.lastThree.length) return false;
+    for (let slot = 0; slot < left.lastThree.length; slot++)
+      if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+  }
+  return true;
+}
+function factHistoryAlreadyHolds(file, delta) {
+  if (delta.length === 0) return false;
+  for (const record of delta) {
+    const saved = factRecordOf(file.facts, record.fact);
+    if (saved === null) return false;
+    if (saved.attempts < record.attempts) return false;
+    if (saved.correct < record.correct) return false;
+    const tail = saved.lastThree.slice(saved.lastThree.length - record.lastThree.length);
+    if (tail.length !== record.lastThree.length) return false;
+    for (let slot = 0; slot < tail.length; slot++)
+      if (tail[slot] !== record.lastThree[slot]) return false;
+  }
+  return true;
+}
+function factHistoryMergeIssues(file, state, seededWith, history) {
   const human = state.racers.find((racer) => racer.id === state.humanId);
-  if (human === void 0) return false;
+  if (human === void 0)
+    return [{ path: "facts", problem: "the race has no human racer to account for" }];
+  const delta = factHistoryDelta(seededWith, history);
+  if (!baselineIsFile(file, seededWith) && factHistoryAlreadyHolds(file, delta))
+    return [{
+      path: "facts",
+      problem: "this race is already in the file -- every fact it adds is there with the same outcomes -- and no baseline says it was seeded from this file"
+    }];
   let added = 0;
-  for (const record of factHistoryDelta(seededWith, history)) added += record.attempts;
-  return added === human.attemptCount;
+  for (const record of delta) added += record.attempts;
+  if (added !== human.attemptCount)
+    return [{
+      path: "facts",
+      problem: "the declared baseline does not account for this race's answers"
+    }];
+  return [];
+}
+function factHistoryAccounts(file, state, seededWith, history) {
+  return factHistoryMergeIssues(file, state, seededWith, history).length === 0;
 }
 function withFactHistory(file, history) {
   const next = cloneSave(file);
@@ -2178,30 +2320,34 @@ function factHistoryIssues(facts) {
 function commitRace(file, state, history, candidate, seededWith) {
   const issues = [];
   const key = recordKeyOf(state);
-  const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
-  const factIssues = factHistoryIssues(merged);
-  const next = factIssues.length === 0 ? withFactHistory(file, merged) : cloneSave(file);
-  for (const issue of factIssues) issues.push(issue);
-  if (factIssues.length === 0 && !factHistoryAccounts(state, seededWith, history))
-    issues.push({
-      path: "facts",
-      problem: "the declared baseline does not account for this race's answers"
-    });
+  const mergeIssues = factHistoryMergeIssues(file, state, seededWith, history);
+  for (const issue of mergeIssues) issues.push(issue);
+  let next = cloneSave(file);
+  let factsUpdated = false;
+  if (mergeIssues.length === 0) {
+    const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
+    const factIssues = factHistoryIssues(merged);
+    for (const issue of factIssues) issues.push(issue);
+    if (factIssues.length === 0) {
+      next = withFactHistory(file, merged);
+      factsUpdated = true;
+    }
+  }
   const standing = Object.prototype.hasOwnProperty.call(next.records, key) ? next.records[key] : null;
-  if (candidate === null) return { file: next, recordUpdated: false, record: standing, issues };
+  if (candidate === null) return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   if (!isRecordEligible(state)) {
     issues.push({ path: "records." + key, problem: "the race is not one that sets records" });
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   }
   const badEntry = recordEntryIssues(key, candidate);
   if (badEntry.length > 0) {
     for (const issue of badEntry) issues.push(issue);
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   }
   if (!beatsRecord(standing, candidate))
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   next.records[key] = cloneRecord(candidate);
-  return { file: next, recordUpdated: true, record: next.records[key], issues };
+  return { file: next, factsUpdated, recordUpdated: true, record: next.records[key], issues };
 }
 
 // src/engine/index.ts
@@ -2254,6 +2400,7 @@ export {
   accuracyPercent,
   aoeVictims,
   applyFloor,
+  baselineIsFile,
   beatsRecord,
   bestRecord,
   cardByBellringerName,
@@ -2294,10 +2441,12 @@ export {
   extraQuestions,
   factAnswer,
   factHistoryAccounts,
+  factHistoryAlreadyHolds,
   factHistoryDelta,
   factHistoryEntry,
   factHistoryForRace,
   factHistoryIssues,
+  factHistoryMergeIssues,
   factHistoryOf,
   factLabel,
   factLeft,
@@ -2322,6 +2471,7 @@ export {
   mayAttack,
   mergeFactHistory,
   mergeSignals,
+  migrateLegacyGarageSettings,
   migrateSave,
   mindOf,
   newFactRecord,
@@ -2354,6 +2504,9 @@ export {
   recordStep,
   replay,
   repositoryBootstrap,
+  resetFacts,
+  resetRecords,
+  resetSettings,
   resultsBoard,
   rivalObserve,
   rivalStep,

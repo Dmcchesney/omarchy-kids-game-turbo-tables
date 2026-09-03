@@ -159,7 +159,14 @@ export function recordKeys(records: SaveRecords): string[] {
 export function recordKey(preset: PresetId, tables: readonly number[]): string {
   if (preset !== "choose") return preset;
   const sorted = tables.slice().sort((left, right) => left - right);
-  return "choose:" + sorted.join("-");
+  // Ascending *and* de-duplicated, the same two normalisations `tablesForPreset`
+  // makes before a race ever sees its tables. Sorting alone left `recordKey`
+  // able to build a key `isRecordKey` refuses -- `[5, 5, 1]` gave
+  // `choose:1-5-5` -- so the writer and the validator disagreed about what a
+  // key is.
+  const unique: number[] = [];
+  for (const table of sorted) if (unique.indexOf(table) === -1) unique.push(table);
+  return "choose:" + unique.join("-");
 }
 
 export function recordKeyOf(state: RaceState): string {
@@ -169,8 +176,25 @@ export function recordKeyOf(state: RaceState): string {
 const FIXED_PRESETS: readonly string[] = ["2-5", "2-10", "1-12"];
 const CHOOSE_KEY = /^choose:(?:[1-9]|1[0-2])(?:-(?:[1-9]|1[0-2]))*$/;
 
+/**
+ * A `choose:` key is the tables it chose, **strictly ascending**, and that is
+ * not decoration: `recordKey` sorts and `tablesForPreset` de-duplicates, so
+ * `choose:3-2` and `choose:2-2` are keys this build cannot write. Accepting
+ * them would let one race own two slots in the file -- a child's best time
+ * filed under `choose:2-3` and another under `choose:3-2`, with only one of
+ * them ever consulted again. Strict ascent rejects both the unsorted key and
+ * the duplicated table in one rule.
+ */
 export function isRecordKey(key: string): boolean {
-  return FIXED_PRESETS.indexOf(key) !== -1 || CHOOSE_KEY.test(key);
+  if (FIXED_PRESETS.indexOf(key) !== -1) return true;
+  if (!CHOOSE_KEY.test(key)) return false;
+  let previous = 0;
+  for (const part of key.slice("choose:".length).split("-")) {
+    const table = Number(part);
+    if (!(table > previous)) return false;
+    previous = table;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,8 +362,12 @@ function validateTimeline(value: unknown, path: string, issues: SaveIssue[]): vo
     }
     unknownKeys(sample, SAMPLE_KEYS, at, issues);
     checkRange(sample.atMs, 0, 86400000, at + ".atMs", issues);
-    if (!isWholeNumber(sample.progress))
-      issues.push({ path: at + ".progress", problem: "expected a whole number" });
+    // Progress is `laps x 12 + correct - (need - 12)` (ghost.ts). A record can
+    // only come from a card-free run, so `need` is always 12 and progress is
+    // the count of answers behind the kart: never negative. A negative one is
+    // an internally impossible state, and impossible states are rejected here
+    // rather than left for a track view to divide by.
+    checkRange(sample.progress, 0, 100000, at + ".progress", issues);
     if (isWholeNumber(sample.atMs)) {
       if (sample.atMs < previous)
         issues.push({ path: at + ".atMs", problem: "timeline runs backwards" });
@@ -422,6 +450,21 @@ function validateFacts(value: unknown, issues: SaveIssue[]): void {
     }
     if (lastThree.length > FACT_HISTORY_WINDOW)
       issues.push({ path: at + ".lastThree", problem: "more than " + FACT_HISTORY_WINDOW + " outcomes" });
+    // `recordFactOutcome` pushes exactly one outcome for every attempt and
+    // trims to three, and `factHistoryDelta` and `mergeFactHistory` both keep
+    // that. So the window is not merely "at most three": it holds
+    // `min(attempts, 3)` outcomes, always. `attempts: 500, lastThree: []` and
+    // `attempts: 0, lastThree: [correct, correct, correct]` are both states no
+    // writer can reach, and both were accepted before this rule.
+    else if (isWholeNumber(record.attempts)) {
+      const expected = record.attempts < FACT_HISTORY_WINDOW ? record.attempts : FACT_HISTORY_WINDOW;
+      if (lastThree.length !== expected)
+        issues.push({
+          path: at + ".lastThree",
+          problem: "expected " + expected + " outcomes for " + record.attempts
+            + " attempts, got " + lastThree.length,
+        });
+    }
     for (let slot = 0; slot < lastThree.length; slot++) {
       if (typeof lastThree[slot] !== "string" || OUTCOMES.indexOf(lastThree[slot] as string) === -1)
         issues.push({ path: at + ".lastThree[" + slot + "]", problem: "not an outcome" });
@@ -481,6 +524,13 @@ export interface MigrationResult {
  * Bring a parsed file up to `SAVE_VERSION`, or say why it cannot be. A file
  * from the future is never guessed at: a newer build wrote it and this one has
  * no idea what it means.
+ *
+ * The object handed in is never modified. The old code aliased it (`raw =
+ * value`) and then stamped `raw.version = at` on it, so the caller's own parsed
+ * object changed under it; harmless only for as long as `MIGRATIONS` is empty.
+ * The spread is deliberate rather than `Object.assign`: object spread *defines*
+ * properties, so an own `__proto__` that arrived from `JSON.parse` survives as
+ * an own key and is still rejected downstream as an unknown one.
  */
 export function migrateSave(value: unknown): MigrationResult {
   if (!isPlainObject(value))
@@ -496,7 +546,7 @@ export function migrateSave(value: unknown): MigrationResult {
       steps: [],
       problem: "written by a newer build (version " + version + ")",
     };
-  let raw: Record<string, unknown> = value;
+  let raw: Record<string, unknown> = { ...value };
   const steps: number[] = [];
   let at = version;
   while (at < SAVE_VERSION) {
@@ -509,6 +559,118 @@ export function migrateSave(value: unknown): MigrationResult {
     raw.version = at;
   }
   return { raw, from: version, to: SAVE_VERSION, steps, problem: "" };
+}
+
+/** The garage's own 0-based vocabulary, as the first `ui/Store.qml` wrote it. */
+const LEGACY_GARAGE_KEYS: readonly string[] = [
+  "kartBody", "kartPaint", "kartNumber", "rivalLevel", "raceMode", "mathSet",
+  "sound", "reducedMotion", "scanlines",
+];
+
+export interface LegacyGarageResult {
+  /** The settings the legacy file meant, or null when there are none to take. */
+  settings: SaveSettings | null;
+  /** Empty when `settings` is filled in; otherwise why it is not. */
+  problem: string;
+}
+
+/**
+ * The one file shape that is not a version of this schema and still has to be
+ * read: what the first `ui/Store.qml` wrote before the schema existed.
+ *
+ * It claims `version: 1`, like this schema does, but its `settings` are the
+ * garage's own vocabulary -- `kartBody`, `kartPaint`, `kartNumber` counted from
+ * zero, `rivalLevel` as an index, plus `raceMode` and `mathSet`, which the
+ * design's Data row does not list -- and its `facts` is an object rather than
+ * an array. It is not a schema version, so it cannot go in `MIGRATIONS`, which
+ * is keyed by the version it upgrades *from* and would need two different
+ * entries for the number 1. But it is still file-format knowledge, so it lives
+ * here, in the module whose docstring says it is the schema, where `npm test`
+ * can reach it -- and not in a QML file nothing in `npm test` can load.
+ *
+ * It converts settings and nothing else, because the old shape had no route
+ * that ever wrote a record or a fact outcome. If one turns up anyway, this
+ * refuses rather than dropping it: a file holding something this build cannot
+ * read is a file to quarantine, not to silently rewrite.
+ */
+export function migrateLegacyGarageSettings(value: unknown): LegacyGarageResult {
+  if (!isPlainObject(value)) return { settings: null, problem: "not an object" };
+  const settings = value.settings;
+  if (!isPlainObject(settings)) return { settings: null, problem: "no settings object" };
+  if (!Object.prototype.hasOwnProperty.call(settings, "kartBody"))
+    return { settings: null, problem: "not the garage's own settings shape" };
+  for (const key in settings) {
+    if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
+    if (LEGACY_GARAGE_KEYS.indexOf(key) === -1)
+      return { settings: null, problem: "unknown legacy setting: " + key };
+  }
+  const records = value.records;
+  if (records !== undefined && (!isPlainObject(records) || Object.keys(records).length > 0))
+    return { settings: null, problem: "the legacy shape never held a record, and this one does" };
+  const facts = value.facts;
+  const factsEmpty =
+    facts === undefined
+    || (Array.isArray(facts) && facts.length === 0)
+    || (isPlainObject(facts) && Object.keys(facts).length === 0);
+  if (!factsEmpty)
+    return { settings: null, problem: "the legacy shape never held a fact history, and this one does" };
+
+  const level = RIVAL_LEVEL_ORDER[clampWhole(settings.rivalLevel, 0, RIVAL_LEVEL_ORDER.length - 1, 1)]!;
+  return {
+    settings: {
+      sound: settings.sound !== false,
+      reducedMotion: settings.reducedMotion === true,
+      scanlines: settings.scanlines === true,
+      kart: clampWhole(toNumber(settings.kartBody) + 1, 1, KART_BODIES, 1),
+      paint: clampWhole(toNumber(settings.kartPaint) + 1, 1, PAINT_SWATCHES, 1),
+      number: clampWhole(settings.kartNumber, KART_NUMBER_MIN, KART_NUMBER_MAX, 1),
+      rivalLevel: level,
+      streakThreshold: STREAK_THRESHOLD,
+    },
+    problem: "",
+  };
+}
+
+function toNumber(value: unknown): number {
+  return typeof value === "number" && isFinite(value) ? value : NaN;
+}
+
+function clampWhole(value: unknown, low: number, high: number, fallback: number): number {
+  const number = Math.round(toNumber(value));
+  if (!isFinite(number)) return fallback;
+  return number < low ? low : number > high ? high : number;
+}
+
+// ---------------------------------------------------------------------------
+// resetting
+// ---------------------------------------------------------------------------
+
+/**
+ * Design, Data, the "Reset by" column: `settings` is reset by Settings,
+ * `records` by "Reset garage records", `facts` by "Reset fact history".
+ *
+ * Three operations, one per key, and each one touches exactly its own key. That
+ * separation is the whole point of the column: a child who wants a clean
+ * leaderboard must not lose the mastery the fact history holds, and a parent
+ * clearing the fact history must not reset the kart. None of these mutates the
+ * file it is given.
+ */
+export function resetSettings(file: SaveFile): SaveFile {
+  const next = cloneSave(file);
+  next.settings = defaultSettings();
+  return next;
+}
+
+export function resetRecords(file: SaveFile): SaveFile {
+  const next = cloneSave(file);
+  next.records = {};
+  return next;
+}
+
+export function resetFacts(file: SaveFile): SaveFile {
+  const next = cloneSave(file);
+  next.facts = [];
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,26 +830,128 @@ export function factHistoryDelta(
 }
 
 /**
- * Whether the baseline the caller declared actually accounts for the race.
+ * Whether the baseline the caller declared is this file's own fact history.
  *
- * `race.ts` files exactly one fact outcome for every answer it counts -- every
- * `attemptCount += 1` is paired with one `fileOutcome`, on the correct, wrong,
- * revealed and pit-crew paths alike -- so a race's own contribution to the
- * history is exactly the child's `attemptCount`, and nothing else can change
- * it. A caller that hands `commitRace` a baseline that is not what it seeded
- * with breaks that identity, and this is where it is noticed rather than
- * assumed.
+ * `null` means "the race was seeded with nothing", so it matches a file whose
+ * fact history is empty and nothing else. Equality is on the whole record --
+ * fact, attempts, correct and the window -- because "the file I seeded from"
+ * is a statement about the file as it stands, not about its totals.
  */
+export function baselineIsFile(
+  file: SaveFile,
+  seededWith: readonly FactRecord[] | null,
+): boolean {
+  const baseline = seededWith ?? [];
+  if (baseline.length !== file.facts.length) return false;
+  for (let index = 0; index < baseline.length; index++) {
+    const left = baseline[index]!;
+    const right = file.facts[index]!;
+    if (left.fact !== right.fact) return false;
+    if (left.attempts !== right.attempts) return false;
+    if (left.correct !== right.correct) return false;
+    if (left.lastThree.length !== right.lastThree.length) return false;
+    for (let slot = 0; slot < left.lastThree.length; slot++)
+      if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether the file already contains every last thing this delta would add.
+ *
+ * For each fact the delta touches: the file has at least as many attempts and
+ * at least as many correct, and the file's window *ends with* the delta's
+ * window -- which is what a merge that has already happened leaves behind. An
+ * empty delta adds nothing and is not evidence of anything, so it is not
+ * "already held".
+ *
+ * This is what makes a repeat commit visible. It is deliberately a statement
+ * about the file, because a repeat commit is invisible in the race alone: the
+ * second call passes the same state, the same history and the same baseline as
+ * the first, and only the file has changed between them.
+ */
+export function factHistoryAlreadyHolds(
+  file: SaveFile,
+  delta: readonly FactRecord[],
+): boolean {
+  if (delta.length === 0) return false;
+  for (const record of delta) {
+    const saved = factRecordOf(file.facts, record.fact);
+    if (saved === null) return false;
+    if (saved.attempts < record.attempts) return false;
+    if (saved.correct < record.correct) return false;
+    const tail = saved.lastThree.slice(saved.lastThree.length - record.lastThree.length);
+    if (tail.length !== record.lastThree.length) return false;
+    for (let slot = 0; slot < tail.length; slot++)
+      if (tail[slot] !== record.lastThree[slot]) return false;
+  }
+  return true;
+}
+
+/**
+ * Everything wrong with folding this race into this file, or nothing.
+ *
+ * Two rules, and which one applies is decided by the baseline the caller
+ * declared -- never by the counts, because counts cannot tell a repeat commit
+ * from an honest second race. Two clean runs of the twos leave *identical*
+ * numbers behind; the only thing that separates them is where each race said
+ * it started from.
+ *
+ *   - **The race was seeded from this file** (`baselineIsFile`). Then the merge
+ *     is arithmetic and it is checkable: `race.ts` files exactly one fact
+ *     outcome for every answer it counts -- every `attemptCount += 1` is paired
+ *     with one `fileOutcome`, on the correct, wrong, revealed and pit-crew
+ *     paths alike -- so the delta must add up to the child's `attemptCount`. A
+ *     second commit of the same race lands here with a delta of nothing and is
+ *     refused by that count.
+ *   - **The race was seeded somewhere else** (a vector replay, a race started
+ *     before the file loaded). The delta still has to add up to `attemptCount`,
+ *     and on top of that the file must not already hold it: if every fact this
+ *     race would add is already there, with the same window at the end of it,
+ *     then either this race has already been committed or nothing here can
+ *     tell that it has not. Either way, adding it again would double a child's
+ *     earned counts, so it is refused and said out loud.
+ *
+ * The one thing that is refused and should not be is an unseeded race whose
+ * every fact happens to be covered by the file already. That is a conservative
+ * failure -- nothing is lost, nothing is inflated, and the caller is told -- and
+ * the way out of it is the way the store already works: declare the baseline.
+ */
+export function factHistoryMergeIssues(
+  file: SaveFile,
+  state: RaceState,
+  seededWith: readonly FactRecord[] | null,
+  history: readonly FactRecord[],
+): SaveIssue[] {
+  const human = state.racers.find((racer) => racer.id === state.humanId);
+  if (human === undefined)
+    return [{ path: "facts", problem: "the race has no human racer to account for" }];
+  const delta = factHistoryDelta(seededWith, history);
+  if (!baselineIsFile(file, seededWith) && factHistoryAlreadyHolds(file, delta))
+    return [{
+      path: "facts",
+      problem:
+        "this race is already in the file -- every fact it adds is there with the same outcomes"
+        + " -- and no baseline says it was seeded from this file",
+    }];
+  let added = 0;
+  for (const record of delta) added += record.attempts;
+  if (added !== human.attemptCount)
+    return [{
+      path: "facts",
+      problem: "the declared baseline does not account for this race's answers",
+    }];
+  return [];
+}
+
+/** `factHistoryMergeIssues` as a predicate, for callers that only want yes or no. */
 export function factHistoryAccounts(
+  file: SaveFile,
   state: RaceState,
   seededWith: readonly FactRecord[] | null,
   history: readonly FactRecord[],
 ): boolean {
-  const human = state.racers.find((racer) => racer.id === state.humanId);
-  if (human === undefined) return false;
-  let added = 0;
-  for (const record of factHistoryDelta(seededWith, history)) added += record.attempts;
-  return added === human.attemptCount;
+  return factHistoryMergeIssues(file, state, seededWith, history).length === 0;
 }
 
 export function withFactHistory(file: SaveFile, history: readonly FactRecord[]): SaveFile {
@@ -747,6 +1011,12 @@ export function mergeFactHistory(
 
 export interface CommitResult {
   file: SaveFile;
+  /**
+   * True when this race's answers were folded into the fact history. False
+   * means the merge was refused -- `issues` says why -- and `file.facts` is
+   * exactly what it was. A commit never half-writes a fact history.
+   */
+  factsUpdated: boolean;
   /** True when this run displaced the record for its preset. */
   recordUpdated: boolean;
   /** The record that now stands for this race's preset, if there is one. */
@@ -794,8 +1064,17 @@ export function factHistoryIssues(facts: readonly FactRecord[]): SaveIssue[] {
  * `factHistoryDelta`); `candidate` is what `recordFromRace(state, timeline)`
  * returned -- null when the design allows no record.
  *
- * Two rules and one invariant:
+ * Three rules and one invariant:
  *
+ *   - **The fact history is merged only when the merge is sound.** What makes
+ *     it sound is `factHistoryMergeIssues`: the delta has to add up to the
+ *     child's `attemptCount`, and a race that did not declare this file as its
+ *     baseline must not be one the file already holds. When it is unsound the
+ *     merge is refused outright and said out loud -- `factsUpdated` is false
+ *     and `file.facts` is untouched -- because a commit that writes counts it
+ *     has just called wrong is worse than one that writes nothing. This is
+ *     what makes a second commit of one race fail instead of doubling a
+ *     child's history in silence.
  *   - **Records -- clean modes only.** Design, Modes: "Time trial and ghost set
  *     records; Grand Prix never does", and Grand Prix's own row: "places and
  *     times are shown, never stored as records". `recordFromRace` refuses to
@@ -820,34 +1099,44 @@ export function commitRace(
   const issues: SaveIssue[] = [];
   const key = recordKeyOf(state);
 
-  // ---- the fact history: always merged, never replaced ---------------------
-  const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
-  const factIssues = factHistoryIssues(merged);
-  const next = factIssues.length === 0 ? withFactHistory(file, merged) : cloneSave(file);
-  for (const issue of factIssues) issues.push(issue);
-  if (factIssues.length === 0 && !factHistoryAccounts(state, seededWith, history))
-    issues.push({
-      path: "facts",
-      problem: "the declared baseline does not account for this race's answers",
-    });
+  // ---- the fact history: merged when the merge is sound, else refused ------
+  //
+  // Order matters and used to be the other way round: `next` was built from
+  // the merge first and the accounting was consulted afterwards, so a caller
+  // that lied about its baseline got the wrong counts written with an advisory
+  // note attached. A merge this function has just declared unsound is a merge
+  // it must not hand back.
+  const mergeIssues = factHistoryMergeIssues(file, state, seededWith, history);
+  for (const issue of mergeIssues) issues.push(issue);
+  let next = cloneSave(file);
+  let factsUpdated = false;
+  if (mergeIssues.length === 0) {
+    const merged = mergeFactHistory(file.facts, factHistoryDelta(seededWith, history));
+    const factIssues = factHistoryIssues(merged);
+    for (const issue of factIssues) issues.push(issue);
+    if (factIssues.length === 0) {
+      next = withFactHistory(file, merged);
+      factsUpdated = true;
+    }
+  }
 
   const standing = Object.prototype.hasOwnProperty.call(next.records, key)
     ? next.records[key]!
     : null;
 
-  if (candidate === null) return { file: next, recordUpdated: false, record: standing, issues };
+  if (candidate === null) return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   if (!isRecordEligible(state)) {
     issues.push({ path: "records." + key, problem: "the race is not one that sets records" });
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   }
   const badEntry = recordEntryIssues(key, candidate);
   if (badEntry.length > 0) {
     for (const issue of badEntry) issues.push(issue);
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
   }
   if (!beatsRecord(standing, candidate))
-    return { file: next, recordUpdated: false, record: standing, issues };
+    return { file: next, factsUpdated, recordUpdated: false, record: standing, issues };
 
   next.records[key] = cloneRecord(candidate);
-  return { file: next, recordUpdated: true, record: next.records[key]!, issues };
+  return { file: next, factsUpdated, recordUpdated: true, record: next.records[key]!, issues };
 }

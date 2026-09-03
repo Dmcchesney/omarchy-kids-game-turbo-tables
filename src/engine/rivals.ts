@@ -298,8 +298,6 @@ export interface RivalMind {
   answersSincePolicy: number;
   /** Whether the hand this rival last spent landed on the child. */
   lastHandAttackedHuman: boolean;
-  /** True for the one rival that sent the race's GOOD GAME. */
-  sentGoodGame: boolean;
 }
 
 export interface RivalsState {
@@ -335,7 +333,6 @@ export function cloneMind(mind: RivalMind): RivalMind {
     answersTaken: mind.answersTaken,
     answersSincePolicy: mind.answersSincePolicy,
     lastHandAttackedHuman: mind.lastHandAttackedHuman,
-    sentGoodGame: mind.sentGoodGame,
   };
 }
 
@@ -386,7 +383,6 @@ export function createRivals(state: RaceState, configs: readonly RivalConfig[]):
       answersTaken: 0,
       answersSincePolicy: 0,
       lastHandAttackedHuman: false,
-      sentGoodGame: false,
     };
     schedule(rivals, mind, state.startedAtMs);
     rivals.minds.push(mind);
@@ -684,7 +680,6 @@ function observeInto(
       const speaker = pickSpeaker(rivals, state);
       if (speaker === null) continue;
       rivals.sentGoodGame = true;
-      speaker.sentGoodGame = true;
       signals.push(signalEvent(speaker.id, "goodGame", event.at));
     }
   }
