@@ -25,7 +25,9 @@ import "shell"
 // is up and the next press does nothing.
 //
 // `keepLoaded: true` in the manifest is what keeps this item alive between
-// summons, so the garage a child left is the garage they come back to.
+// summons, so the garage a child left is the garage they come back to. It
+// keeps the QML items; it does not keep the window's Wayland surface, which is
+// a separate decision this file makes below.
 //
 // ---------------------------------------------------------------------------
 // KEYBOARD, WHICH IS THE WHOLE GAME
@@ -38,7 +40,71 @@ import "shell"
 //     first-party emojis overlay leaves it Exclusive unconditionally and
 //     relies on the window being hidden; binding it to `opened` says the same
 //     thing to the compositor in as many words, and is what the design asks
-//     for.
+//     for. A critic A/B'd the two forms on minimal overlays and measured no
+//     difference between them: this binding is not what makes an overlay slow
+//     to take the keyboard, and an earlier round of this file was wrong to say
+//     it was.
+//   - The layer surface is never destroyed between summons. That is the whole
+//     of the handover latency, and it is worth the paragraph it takes to say
+//     why.
+//
+//     A layer-shell compositor applies keyboard interactivity when the surface
+//     commits, and a surface that has just been created cannot commit until
+//     the client has a first frame to put in it. Hiding a `PanelWindow`
+//     destroys its surface, so `visible: root.opened` made every summon pay
+//     that cost again -- and until it was paid the compositor was still
+//     sending the keyboard to whatever was underneath. Measured in the Omarchy
+//     VM, three trials, `hyprctl layers` polled from before the summon:
+//
+//       listed -> alpha 1   this file, window rebuilt per summon  362/432/492 ms
+//                           the same, with the game visible:false 331/407/410 ms
+//                           omarchy.emojis                          75/72/75 ms
+//
+//     Those 400 ms were not spent drawing the game -- the second row is the
+//     same window with nothing in it -- so it is the window and its surface,
+//     not the garage's first frame, and `keepLoaded` does not help because it
+//     keeps items rather than surfaces. What it cost, on the oracle that
+//     matters: five keys struck the instant the summon returned, three trials,
+//     counted where they landed.
+//
+//       keys delivered to the desktop instead of the game
+//         this file, window rebuilt per summon    5 of 5, in 5 of 5 trials
+//         this file as it stands                  0 of 5, in 32 of 32 trials
+//         omarchy.emojis                          2 to 5 of 5, every trial
+//
+//     A key struck in that window was not dropped -- it was typed into whatever
+//     application had the keyboard, a terminal in the critic's reproduction,
+//     which is worse than losing it.
+//
+//     A surface that outlives the summon has to earn its keep, and the way it
+//     does that is by being one pixel. While the overlay is closed the window
+//     drops its bottom and right anchors and becomes a 1x1 transparent surface
+//     in the top-left corner: the Wayland surface, the GL context and the
+//     scene graph all stay alive -- which is the whole point -- but there is
+//     no fullscreen surface sitting over the desktop for the hours a day
+//     nobody is playing. `mask: Region {}` empties its input region on top of
+//     that, so even that pixel takes no clicks, and `WlrKeyboardFocus.None`
+//     keeps it out of the keyboard path. `hyprctl layers` reads
+//     `xywh: 0 0 1 1` closed and `0 0 1920 1200` open. Measured: 0 CPU ticks
+//     over 20 s closed, and the desktop takes keys exactly as before.
+//
+//     What the one pixel costs is the resize on open, which blocks the event
+//     loop while the first fullscreen frame is built: the child's first
+//     keystroke is queued rather than misdirected, and reaches the game 221 to
+//     571 ms after the summon -- at the same moment the garage first appears,
+//     so the first frame they see already has it applied. Leaving the surface
+//     full screen all session instead removes that queue (40-114 ms) and
+//     measures identically on the leak oracle; the evidence file says why the
+//     pixel won anyway.
+//
+//     The one-pixel form is deliberate belt-and-braces. `mask: Region {}` is
+//     the pattern Omarchy's own OSD uses for exactly this, and its own comment
+//     says so -- but the OSD is only mapped while it is on screen, and this
+//     window is mapped all session. There is no pointer-injection tool in the
+//     development VM, so the empty input region could not be proved with a
+//     real click; sizing the closed surface to one pixel means that if the
+//     mask ever stopped working, what it could swallow is one pixel at 0,0
+//     rather than the whole screen.
 //   - `open()` puts focus on the key catcher and then hands it straight down
 //     to the hosted screen's own `focusTarget`, on `Qt.callLater` so it lands
 //     after the layer surface is mapped. No click is needed and none is
@@ -82,7 +148,7 @@ Item {
   // Read by the entry-point fixture. Not chrome: it is the answer to "is the
   // keyboard actually in the game", which is the one question this file exists
   // to get right.
-  readonly property bool gameHasFocus: garage.activeFocus
+  readonly property bool gameHasFocus: game.activeFocus
 
   // ------------------------------------------------------------- the API
   function open(payloadJson) {
@@ -118,9 +184,9 @@ Item {
     if (!root.opened)
       return
     keyCatcher.forceActiveFocus()
-    garage.forceActiveFocus()
-    if (garage.focusTarget)
-      garage.focusTarget.forceActiveFocus(Qt.TabFocusReason)
+    game.forceActiveFocus()
+    if (game.focusTarget)
+      game.focusTarget.forceActiveFocus(Qt.TabFocusReason)
   }
 
   // The save adapter, held untyped on purpose. `ui/Store` is a plain adapter
@@ -198,13 +264,33 @@ Item {
   PanelWindow {
     id: panel
 
-    visible: root.opened
+    // Mapped for the life of the session, not for the length of a summon. The
+    // header says why at length; the short version is that creating this
+    // surface costs 400 ms in the VM and the compositor sends the child's
+    // keystrokes somewhere else for every one of them.
+    visible: true
+
+    // While the overlay is closed this window must not be in anybody's way.
+    // An empty layer-shell input region means the compositor never routes a
+    // click to it, so the desktop underneath behaves as though it were not
+    // there; `null` restores the default whole-surface region when the game
+    // is up. The same pattern, and the same one-line reason, as
+    // omarchy/shell/plugins/osd/Osd.qml.
+    mask: root.opened ? null : closedMask
+    property Region closedMask: Region {}
+
+    // Anchored to all four edges the layer surface is the whole screen;
+    // anchored to two it is `implicitWidth` by `implicitHeight`. So a closed
+    // overlay is one transparent pixel in the corner and an open one is the
+    // screen, and the surface itself is never destroyed in between.
     anchors {
       top: true
-      bottom: true
+      bottom: root.opened
       left: true
-      right: true
+      right: root.opened
     }
+    implicitWidth: 1
+    implicitHeight: 1
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "turbo-tables"
@@ -213,11 +299,12 @@ Item {
       ? WlrKeyboardFocus.Exclusive
       : WlrKeyboardFocus.None
 
-    // The garage paints its own ground edge to edge. This is under it so that
+    // The flow paints its own ground edge to edge. This is under it so that
     // a frame between the surface being mapped and the screen being laid out
     // is the game's own dark rather than the desktop showing through.
     Rectangle {
       anchors.fill: parent
+      visible: root.opened
       color: Theme.ground
     }
 
@@ -228,6 +315,7 @@ Item {
     // Escape key, both of which say what they do.
     MouseArea {
       anchors.fill: parent
+      visible: root.opened
       acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
       onClicked: function (mouse) { mouse.accepted = true }
     }
@@ -236,6 +324,14 @@ Item {
       id: keyCatcher
 
       anchors.fill: parent
+
+      // Everything inside the window is gated on `opened` rather than the
+      // window itself. `visible` is also what makes an item focusable, so the
+      // order in `open()` matters: `opened` is set first and `takeFocus` runs
+      // on `Qt.callLater`, by which time this scope and the game under it can
+      // hold focus -- measured at 35 ms from the summon, with the game
+      // holding the focus, which is one frame and change.
+      visible: root.opened
       focus: true
       Keys.priority: Keys.BeforeItem
 
@@ -250,7 +346,7 @@ Item {
         // Anything else means focus is somewhere the game does not own -- so
         // put it back, and let this key go by unaccepted rather than
         // swallowing it. The next one lands in the game.
-        if (!garage.activeFocus)
+        if (!game.activeFocus)
           Qt.callLater(root.takeFocus)
       }
 
@@ -259,26 +355,23 @@ Item {
           Qt.callLater(root.takeFocus)
       }
 
-      Garage {
-        id: garage
+      // The flow, and the whole game under it. `ui/Game.qml` owns which screen
+      // is up -- garage, countdown, race, results, settings -- and exposes the
+      // same two things the garage did: a `focusTarget` for `takeFocus` to hand
+      // focus to, and a `leaveRequested` for the way out. The overlay's job
+      // stops at the boundary of the surface and the keyboard, which is what it
+      // always was.
+      Game {
+        id: game
 
         anchors.fill: parent
         focus: true
 
         // The garage's own LEAVE control and its Escape key both come out
-        // here. `dismiss` rather than `close`, because the game closing itself
-        // is exactly the case the host has to be told about.
+        // here, through the flow. `dismiss` rather than `close`, because the
+        // game closing itself is exactly the case the host has to be told
+        // about.
         onLeaveRequested: root.dismiss()
-
-        // READY starts a race. The race screen and the screen flow that owns
-        // the handover are another piece's work and are landing in `ui/` while
-        // this is written, so this overlay hosts the garage and nothing else:
-        // when the flow exists, the screen is loaded here and handed the same
-        // `focusTarget` treatment `takeFocus` already gives the garage, and
-        // that is the whole of the change. Nothing is stubbed in its place --
-        // a screen that pretends to start a race and does not is worse than a
-        // control that is honestly not wired yet.
-        onRaceRequested: {}
       }
     }
   }

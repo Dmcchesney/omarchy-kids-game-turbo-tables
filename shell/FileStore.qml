@@ -25,8 +25,9 @@ import Quickshell.Io
 // So `load()` here answers with exactly three outcomes and there is no fourth:
 //
 //   the file's text     the read succeeded. FileView said `loaded`.
-//   null                the file is genuinely not there. FileView said
-//                       `loadFailed(FileNotFound)` and nothing else.
+//   null                the file is *proved* not to be there. See below: a
+//                       not-found verdict is where that proof starts, never
+//                       where it ends.
 //   a thrown Error      everything else, including silence.
 //
 // "Including silence" is the whole point. A permissions error, a path that is
@@ -42,13 +43,60 @@ import Quickshell.Io
 //   missing file   text() == ""        loadFailed(FileNotFound=2)   loaded=false
 //   readable file  text() == contents  loaded()                     loaded=true
 //   chmod 000      text() == ""        loadFailed(PermissionDenied) loaded=TRUE
-//   a directory    text() == ""        loadFailed(NotAFile)         loaded=TRUE
+//   a directory    text() == ""        loadFailed(NotAFile=4)       loaded=TRUE
 //
 // Note the third and fourth rows. FileView's `loaded` *property* is
 // `isLoadedOrAsync` and reads true for a file that could not be read at all, so
 // it is not a verdict and this file never consults it. The verdict comes only
 // from the `loaded()` and `loadFailed(error)` signals, which -- also measured --
 // fire synchronously inside `text()` while `blockLoading` is true.
+//
+// ---------------------------------------------------------------------------
+// WHY `FileNotFound` IS NOT PROOF OF ABSENCE
+// ---------------------------------------------------------------------------
+//
+// An earlier version of this file believed it was, and a critic destroyed a
+// real save with it in the VM: a 260-byte defaults file over a save holding a
+// record and a child's fact history. Measured, on this Quickshell build
+// (evidence: piece7-ours.md, "the parent-directory probe"):
+//
+//   file inside a chmod 000 directory      loadFailed(FileNotFound=2)
+//   file inside a chmod 666 directory      loadFailed(FileNotFound=2)
+//   file that genuinely is not there       loadFailed(FileNotFound=2)
+//
+// The kernel returns EACCES for a path whose directory component cannot be
+// walked into; Quickshell asks `exists()` first, `exists()` answers false, and
+// every one of those cases arrives here as the same number. So
+// `FileNotFound` means "I did not find it", and "I did not find it" is the
+// exact sentence this whole file exists to stop being read as "it is not
+// there". The realistic triggers are ordinary: an fscrypt home not yet
+// unlocked when the shell starts, `~/.local/share` left root-owned by a sudo
+// mishap, `$XDG_DATA_HOME` on a network mount that is briefly away.
+//
+// Absence is therefore *earned*, by `_absenceIsProven()`, and the proof is
+// positive rather than inferential:
+//
+//   1. Walk up from the path. For each ancestor directory, ask FileView what
+//      it is. `NotAFile` means "this exists and is not a regular file" -- the
+//      directory is there.
+//   2. For the first ancestor that is there, ask FileView about `<ancestor>/.`
+//      as well. That path can only be resolved by walking *into* the ancestor,
+//      so `NotAFile` for it is positive proof of a directory this process can
+//      traverse -- measured to track the +x bit exactly, including the
+//      awkward modes: chmod 111 (traversable, unreadable) proves traversable,
+//      chmod 666 (readable, untraversable) does not.
+//   3. Only then is a `FileNotFound` below that ancestor genuine absence.
+//      Every other outcome -- a shut directory, a `PermissionDenied`, an
+//      ancestor that turns out to be a regular file, a walk that runs out of
+//      steps -- is "I could not find out", which is a throw.
+//
+// And because a directory can unlock between the read and the first write --
+// which is precisely how the save was destroyed: locked when the shell
+// started, open by the time the child pressed a key -- the proof is taken
+// again, from scratch, immediately before the first write over a path this
+// object believes is absent. If that second look finds a readable file where
+// there was supposed to be nothing, the write is refused and the session
+// stops writing. A save that reappears is a save, not an empty slot.
 //
 // ---------------------------------------------------------------------------
 // WRITING
@@ -88,6 +136,26 @@ QtObject {
   }
   property string path: dataHome + "/turbo-tables-solo/garage.json"
 
+  // Nothing in the plugin moves the path at runtime; the entry-point fixture
+  // does, and so would anyone testing this file. Without this the verdict is
+  // sticky across the move and FileView serves the *previous* file's text with
+  // no signal, so a store pointed at a new path would answer with file A's
+  // contents and, worse, write them to path B. A new path is a new file and
+  // nothing is known about it until it has been read.
+  onPathChanged: {
+    _verdict = "unknown"
+    _lastError = -1
+    _lastErrorName = ""
+    _everLoaded = false
+    _absenceProven = false
+    _absenceReproven = false
+    _writable = true
+    _hasPending = false
+    _pending = ""
+    if (debounce)
+      debounce.stop()
+  }
+
   // ---------------------------------------------------------- the protocol
   //
   // "text"   load() hands back the file's own bytes and save() takes the text
@@ -115,7 +183,9 @@ QtObject {
   //
   //   "unknown"     no read has completed. Nothing may be written.
   //   "present"     the file was read.
-  //   "absent"      the file is genuinely not there.
+  //   "absent"      FileView did not find the file. On its own this is not a
+  //                 claim that the file is not there -- see the header. Only
+  //                 `_absenceIsProven()` turns it into one.
   //   "unreadable"  the file is there and could not be read.
   readonly property string verdict: _verdict
   property string _verdict: "unknown"
@@ -129,6 +199,22 @@ QtObject {
   // by one that does not keep its own.
   readonly property bool everLoaded: _everLoaded
   property bool _everLoaded: false
+
+  // True once `_absenceIsProven()` has agreed with an "absent" verdict, which
+  // is the only way `load()` may answer null. Read by the entry-point fixture.
+  readonly property bool absenceProven: _absenceProven
+  property bool _absenceProven: false
+
+  // The first write over a path believed absent re-proves it. Set once that
+  // second proof has passed, so the walk is not repeated on every keystroke.
+  property bool _absenceReproven: false
+
+  // How many directory levels the walk may climb before it gives up and calls
+  // the answer "I could not find out". A save path is four levels below the
+  // home directory; twenty is far more than the design can ever need and
+  // bounds the number of blocking stat calls this file makes on the GUI
+  // thread, which matters on a save path that lives on a slow mount.
+  readonly property int maxAncestorProbes: 20
 
   // False once a write has failed. A full disk or a directory the process no
   // longer owns must not be retried on every keystroke for the rest of the
@@ -148,11 +234,125 @@ QtObject {
 
   property int debounceMs: 400
 
+  // ------------------------------------------------- proving absence
+  //
+  // One throwaway FileView per question. A fresh object is used rather than
+  // this store's own `file` because FileView caches: a second read of an
+  // unchanged path emits no signal at all, so a reused view cannot be asked a
+  // second question and be trusted to answer it. Measured, both ways.
+  property Component _probeComponent: Component {
+    FileView {
+      // -1 means the read succeeded; anything >= 0 is a FileViewError; -2
+      // means the read produced no verdict at all, which is also an answer.
+      property int outcome: -2
+      blockLoading: true
+      blockWrites: true
+      printErrors: false
+      watchChanges: false
+      onLoaded: outcome = -1
+      onLoadFailed: function (error) { outcome = error }
+    }
+  }
+
+  function _probeRead(probePath) {
+    var probe = _probeComponent.createObject(null, { "path": probePath })
+    if (!probe)
+      return { "outcome": -2, "text": "" }
+    var text = ""
+    try {
+      text = probe.text()
+    } catch (error) {
+      // A throw out of text() is not a verdict either; `outcome` still holds
+      // whatever the signals said, and -2 if they said nothing.
+    }
+    var answer = { "outcome": probe.outcome, "text": text }
+    probe.destroy()
+    return answer
+  }
+
+  function _probe(probePath) {
+    return _probeRead(probePath).outcome
+  }
+
+  function _parentOf(childPath) {
+    var cut = childPath.lastIndexOf("/")
+    if (cut < 0)
+      return ""
+    if (cut === 0)
+      return "/"
+    return childPath.substring(0, cut)
+  }
+
+  // Positive proof that nothing lives at `targetPath`. See the header for why
+  // a not-found verdict is only ever the beginning of this question.
+  function _absenceIsProven(targetPath) {
+    var child = targetPath
+    for (var step = 0; step < maxAncestorProbes; step++) {
+      var parent = _parentOf(child)
+      if (parent === "" || parent === child)
+        return false                       // walked off the top of the path
+
+      var parentOutcome = _probe(parent)
+
+      if (parentOutcome === FileViewError.NotAFile) {
+        // The directory is there. Whether this process may walk into it is a
+        // different question, and the only one that decides this: a directory
+        // that cannot be entered answers FileNotFound for everything inside
+        // it, which is exactly the lie that destroyed a save. `<parent>/.`
+        // can only be resolved by entering `<parent>`.
+        return _probe(parent + "/.") === FileViewError.NotAFile
+      }
+
+      if (parentOutcome === FileViewError.FileNotFound) {
+        // Either the directory is missing -- in which case nothing beneath it
+        // exists and the proof continues one level up -- or its own parent
+        // cannot be walked into, which the next turn of this loop catches.
+        child = parent
+        continue
+      }
+
+      // A readable regular file where a directory should be, a permissions
+      // error, or no verdict at all. All of them are "I could not find out".
+      return false
+    }
+    return false
+  }
+
   // --------------------------------------------------------------- reading
   //
   // Three outcomes, no fourth. See the header.
   function load() {
     var text = file.text()
+
+    // FileView serves a cached read and emits nothing at all when it believes
+    // the answer has not changed. Measured on this build: after `path` moves,
+    // neither `text()` nor `reload()` followed by `text()` produces a verdict
+    // for the new path -- the view stays on the old answer and stays silent
+    // about it. Silence is not a verdict, so the question is put to a fresh
+    // view, which has no cache to serve from. Nothing in the plugin moves the
+    // path; the fixture does, and a store that answered for the wrong file
+    // would write one file's contents to another's name.
+    if (_verdict === "unknown") {
+      file.reload()
+      text = file.text()
+    }
+    if (_verdict === "unknown") {
+      var reread = _probeRead(path)
+      if (reread.outcome === -1) {
+        _verdict = "present"
+        _lastError = -1
+        _lastErrorName = ""
+        text = reread.text
+      } else if (reread.outcome === FileViewError.FileNotFound) {
+        _verdict = "absent"
+        _lastError = reread.outcome
+        _lastErrorName = "no such file"
+      } else if (reread.outcome >= 0) {
+        _verdict = "unreadable"
+        _lastError = reread.outcome
+        _lastErrorName = FileViewError.toString(reread.outcome)
+      }
+    }
 
     if (_verdict === "present") {
       _everLoaded = true
@@ -167,14 +367,26 @@ QtObject {
       } catch (error) {
         throw new Error("the save file at " + path + " is not JSON: " + error)
       }
-      if (parsed === null || typeof parsed !== "object")
+      // `typeof [] === "object"`, so the array has to be named or a JSON
+      // array walks straight through a check whose message says it did not.
+      // A Store handed an array reads every key off it as undefined, adopts
+      // the defaults, and writes them over the file on the next keystroke --
+      // the same destruction with different bytes in front of it.
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
         throw new Error("the save file at " + path + " is not a JSON object")
       return parsed
     }
 
     if (_verdict === "absent") {
-      // The one case that may mean "fresh install", and it is the one case
-      // where the operating system said so in as many words.
+      // The one case that may mean "fresh install" -- and the one case that
+      // has to be earned, because FileView answers FileNotFound both for a
+      // path that is not there and for a path it was not allowed to look at.
+      if (!_absenceIsProven(path)) {
+        throw new Error("the save file at " + path + " was not found, and its absence"
+                        + " could not be established: a directory above it could not be"
+                        + " read into. Refusing to treat this as a fresh install.")
+      }
+      _absenceProven = true
       _everLoaded = true
       return null
     }
@@ -241,6 +453,30 @@ QtObject {
     var text = _pending
     _hasPending = false
     _pending = ""
+
+    // The last look before the first byte lands on a path this object was
+    // told is empty. The save that was destroyed in the VM was destroyed in
+    // exactly this gap: the directory was shut when the shell started and
+    // open by the time the child pressed a key, so the read said "nothing
+    // here" and the write found a real file to land on. A fresh probe costs
+    // one stat and closes it. It runs once -- after the first write this
+    // object owns the file it is writing.
+    if (_verdict === "absent" && !_absenceReproven) {
+      var second = _probe(path)
+      if (second === -1) {
+        stopWriting("the save file at " + path + " was not found when the game started"
+                    + " and is readable now, so the defaults in memory are not what is"
+                    + " on disk. Refusing to write over it")
+        return
+      }
+      if (second !== FileViewError.FileNotFound || !_absenceIsProven(path)) {
+        stopWriting("the save file at " + path + " could not be shown to be absent a"
+                    + " second time, so this session does not know what is on disk."
+                    + " Refusing to write over it")
+        return
+      }
+      _absenceReproven = true
+    }
 
     var failuresBefore = _saveFailures
     var savesBefore = _saves

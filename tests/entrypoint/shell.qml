@@ -63,12 +63,26 @@ import qs.Commons
 //     requirement, which is that a theme change retints the garage while the
 //     child is looking at it.
 //
-//  5. THE SAVE FILE'S THREE DESTRUCTION DOORS ARE ASSERTED. Three times the
-//     save layer was destroyed by reading "I could not find out" as "there is
-//     no file". The three checks at the end are those doors: a path that is not
-//     a file must throw rather than answer null, a path that is genuinely
-//     absent must answer null, and nothing may be written before a read has
+//  5. THE SAVE FILE'S DESTRUCTION DOORS ARE ASSERTED. Four times the save
+//     layer was destroyed by reading "I could not find out" as "there is no
+//     file". The checks at the end are those doors: a path that is not a file
+//     must throw rather than answer null, a path that is genuinely absent must
+//     answer null *and* say its absence was proved, a path that FileView calls
+//     missing because an ancestor is not a directory must throw and must
+//     refuse every write, an array is not a JSON object, a store moved to a
+//     new path forgets the old one, and nothing is written before a read has
 //     answered.
+//
+//     The fourth door -- the one a critic destroyed a real save through -- is
+//     a save file behind a directory this process cannot walk into, which
+//     Quickshell reports with the same FileNotFound as a file that is not
+//     there. It cannot be built here: a fixture that runs inside the plugin
+//     folder cannot chmod a directory, and `omarchy plugin validate` would
+//     not have it if it could. The shape of it that *can* be built without
+//     privileges is asserted instead -- an ancestor that is a regular file,
+//     which reaches this code as the identical verdict by the identical route
+//     (`exists()` is false, so FileNotFound) -- and the chmod cases are in the
+//     VM battery in the evidence, run against this same file.
 //
 // HOW TO RUN IT, and why it takes four lines of setup rather than one.
 //
@@ -404,6 +418,40 @@ ShellRoot {
       source: root.saveStoreUrl
       onLoaded: item.path = root.pluginRoot + "tests/entrypoint/does-not-exist/never.json"
     }
+
+    // A path whose *ancestor* is not a directory. Quickshell answers
+    // FileNotFound for it -- the same number a genuinely missing file gets --
+    // because it asks `exists()` first and the kernel says ENOTDIR. This is
+    // the door a critic destroyed a real save through, in its one shape that
+    // needs no chmod and no privileges: a not-found verdict that is not proof
+    // of absence.
+    Loader {
+      id: storeUnderAFile
+      asynchronous: false
+      source: root.saveStoreUrl
+      onLoaded: item.path = root.pluginRoot + "manifest.json/garage.json"
+    }
+
+    // Read one file, then be pointed at another. The verdict must not survive
+    // the move, or this store answers with the previous file's contents and
+    // would write them to the new path.
+    Loader {
+      id: storeMoved
+      asynchronous: false
+      source: root.saveStoreUrl
+      onLoaded: item.path = root.pluginRoot + "manifest.json"
+    }
+
+    // The object protocol, handed a JSON array. `typeof [] === "object"`.
+    Loader {
+      id: storeOnAnArray
+      asynchronous: false
+      source: root.saveStoreUrl
+      onLoaded: {
+        item.format = "object"
+        item.path = root.pluginRoot + "tests/entrypoint/not-an-object.json"
+      }
+    }
   }
 
   function checkSaveFileDoors() {
@@ -444,6 +492,65 @@ ShellRoot {
     assertTrue(fresh === null, "a genuinely absent save file answers null")
     assertEqual(onNothing.verdict, "absent",
                 "a genuinely absent save file is recorded as absent")
+    assertTrue(onNothing.absenceProven,
+               "a genuinely absent save file has its absence positively proved,"
+               + " not inferred from the not-found verdict")
+
+    // 2b. The same not-found verdict, and this time it is a lie. Nothing may
+    //     be inferred from it, and nothing may be written under it.
+    var underAFile = storeUnderAFile.item
+    var lieThrew = false
+    var lieAnswered = undefined
+    try {
+      lieAnswered = underAFile.load()
+    } catch (error) {
+      lieThrew = true
+    }
+    assertTrue(lieThrew,
+               "a save path that FileView reports missing because an ancestor is not a"
+               + " directory throws rather than answering")
+    assertTrue(lieAnswered === undefined,
+               "a not-found verdict that could not be proved never answers null")
+    assertTrue(!underAFile.absenceProven,
+               "a not-found verdict that could not be proved is not recorded as proved")
+    assertTrue(!underAFile.everLoaded,
+               "a not-found verdict that could not be proved never counts as loaded")
+    underAFile.save("{\"version\": 1}\n")
+    underAFile.flushNow()
+    assertTrue(!underAFile.writable,
+               "nothing is written under a not-found verdict that could not be proved")
+
+    // 2c. An array is not an object, however hard `typeof` insists it is.
+    var onAnArray = storeOnAnArray.item
+    var arrayThrew = false
+    var arrayAnswered = undefined
+    try {
+      arrayAnswered = onAnArray.load()
+    } catch (error) {
+      arrayThrew = true
+    }
+    assertTrue(arrayThrew, "a save file holding a JSON array throws on the object protocol")
+    assertTrue(arrayAnswered === undefined,
+               "a save file holding a JSON array is never handed to the Store")
+
+    // 2d. A store that is moved to another path knows nothing about the new
+    //     one until it has read it.
+    var moved = storeMoved.item
+    var firstRead = moved.load()
+    assertTrue(typeof firstRead === "string" && firstRead.length > 0,
+               "a save store reads the file it is pointed at")
+    assertEqual(moved.verdict, "present", "a readable file is recorded as present")
+    moved.path = root.pluginRoot + "tests/entrypoint/does-not-exist/moved.json"
+    assertEqual(moved.verdict, "unknown",
+                "moving a save store to another path discards the old file's verdict")
+    var secondRead = "unset"
+    try {
+      secondRead = moved.load()
+    } catch (error) {
+      fail("a moved save store threw on a genuinely absent path: " + error)
+    }
+    assertTrue(secondRead === null,
+               "a moved save store answers for the new path, not the old file's text")
 
     // 3. Nothing is written before a read has answered. This is the hot-reload
     //    door: a rebuilt object that has not yet found out what is on disk.
