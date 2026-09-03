@@ -92,6 +92,20 @@ export const PAINT_SWATCHES = 8;
 export const KART_NUMBER_MIN = 1;
 export const KART_NUMBER_MAX = 99;
 
+/**
+ * The range a saved streak threshold may take.
+ *
+ * Design, Decisions: "Streak threshold: **12.** ... The bellringer's 15 stays
+ * in the test vectors as a parity case", and the Data row lists "streak
+ * threshold if exposed" among the settings. So a file may legitimately carry
+ * something other than this build's `STREAK_THRESHOLD`, and anything that
+ * reads a file has to carry that value back out again rather than substituting
+ * its own. One is the smallest threshold that means anything; 144 is twelve lap
+ * decks of twelve, past which no lap could charge a hand.
+ */
+export const STREAK_THRESHOLD_MIN = 1;
+export const STREAK_THRESHOLD_MAX = 144;
+
 export function defaultSettings(): SaveSettings {
   return {
     sound: true,
@@ -338,7 +352,13 @@ function validateSettings(value: unknown, issues: SaveIssue[]): void {
   checkRange(value.number, KART_NUMBER_MIN, KART_NUMBER_MAX, "settings.number", issues);
   if (typeof value.rivalLevel !== "string" || RIVAL_LEVEL_ORDER.indexOf(value.rivalLevel as RivalLevel) === -1)
     issues.push({ path: "settings.rivalLevel", problem: "expected rookie, pro or champion" });
-  checkRange(value.streakThreshold, 1, 144, "settings.streakThreshold", issues);
+  checkRange(
+    value.streakThreshold,
+    STREAK_THRESHOLD_MIN,
+    STREAK_THRESHOLD_MAX,
+    "settings.streakThreshold",
+    issues,
+  );
 }
 
 function validateTimeline(value: unknown, path: string, issues: SaveIssue[]): void {
@@ -784,7 +804,11 @@ export function factHistoryForRace(file: SaveFile): FactRecord[] {
  * `history` is `factHistoryOf(state)`. `seededWith` is exactly what the race
  * was created with -- the array `factHistoryForRace(file)` returned -- or null
  * when it was created with nothing (a vector replay, a fresh install, a race
- * started before the file loaded).
+ * started before the file loaded). This is arithmetic on two arrays and asks
+ * no questions about a file; `factHistoryMergeIssues` is what decides whether a
+ * given baseline may be believed, and it will only believe one that is the
+ * file's own history, so a null baseline commits into an empty file and into no
+ * other.
  *
  * This exists because the question it answers cannot be asked of the numbers.
  * The predicate it replaces, `raceWasSeededFrom`, tried to *infer* provenance
@@ -829,6 +853,14 @@ export function factHistoryDelta(
   return delta;
 }
 
+/** Whether two fact records carry the same window, outcome for outcome. */
+function sameWindow(left: FactRecord, right: FactRecord): boolean {
+  if (left.lastThree.length !== right.lastThree.length) return false;
+  for (let slot = 0; slot < left.lastThree.length; slot++)
+    if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+  return true;
+}
+
 /**
  * Whether the baseline the caller declared is this file's own fact history.
  *
@@ -849,73 +881,129 @@ export function baselineIsFile(
     if (left.fact !== right.fact) return false;
     if (left.attempts !== right.attempts) return false;
     if (left.correct !== right.correct) return false;
-    if (left.lastThree.length !== right.lastThree.length) return false;
-    for (let slot = 0; slot < left.lastThree.length; slot++)
-      if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+    if (!sameWindow(left, right)) return false;
   }
   return true;
 }
 
 /**
- * Whether the file already contains every last thing this delta would add.
+ * Everything wrong with the per-fact arithmetic of a declared baseline, or
+ * nothing.
  *
- * For each fact the delta touches: the file has at least as many attempts and
- * at least as many correct, and the file's window *ends with* the delta's
- * window -- which is what a merge that has already happened leaves behind. An
- * empty delta adds nothing and is not evidence of anything, so it is not
- * "already held".
+ * A race that was really seeded from `baseline` can only have *added* to it:
+ * every fact the baseline knows is still in the race's history, with attempts
+ * and correct no lower, and no fact can have come back with more correct
+ * answers than attempts. A baseline that fails either test is not the array
+ * this race was created with, whatever the caller says, and the failure is
+ * named **per fact** rather than summed: `save.ts` used to compare one total
+ * against `attemptCount`, so a baseline that understated one fact and
+ * overstated another by the same amount passed with `issues: []` and wrote
+ * per-fact counts that were wrong while the total was right. The design's Data
+ * row is "fact history is kept locally **per fact**", so the check is too.
  *
- * This is what makes a repeat commit visible. It is deliberately a statement
- * about the file, because a repeat commit is invisible in the race alone: the
- * second call passes the same state, the same history and the same baseline as
- * the first, and only the file has changed between them.
+ * The overstating half is the one that does damage: `factHistoryDelta` drops a
+ * fact whose delta is not positive, so an overstated baseline silently loses
+ * that fact's real answers. Here it is an issue with the fact's own path.
  */
-export function factHistoryAlreadyHolds(
-  file: SaveFile,
-  delta: readonly FactRecord[],
-): boolean {
-  if (delta.length === 0) return false;
-  for (const record of delta) {
-    const saved = factRecordOf(file.facts, record.fact);
-    if (saved === null) return false;
-    if (saved.attempts < record.attempts) return false;
-    if (saved.correct < record.correct) return false;
-    const tail = saved.lastThree.slice(saved.lastThree.length - record.lastThree.length);
-    if (tail.length !== record.lastThree.length) return false;
-    for (let slot = 0; slot < tail.length; slot++)
-      if (tail[slot] !== record.lastThree[slot]) return false;
+export function factHistoryDeltaIssues(
+  baseline: readonly FactRecord[],
+  history: readonly FactRecord[],
+): SaveIssue[] {
+  const issues: SaveIssue[] = [];
+  for (const before of baseline) {
+    const after = factRecordOf(history, before.fact);
+    const attempts = after === null ? 0 : after.attempts;
+    const correct = after === null ? 0 : after.correct;
+    if (attempts < before.attempts || correct < before.correct) {
+      issues.push({
+        path: "facts." + before.fact,
+        problem:
+          "the declared baseline does not account for this race's answers: it claims more of this"
+          + " fact than the race's own history holds",
+      });
+      continue;
+    }
+    // A fact the race never asked cannot have moved. Its window is the one
+    // place a zero delta can still hide a disagreement, because a delta of no
+    // attempts is dropped rather than merged, and the file's window would then
+    // stand where the race's belongs.
+    if (after !== null && attempts === before.attempts && !sameWindow(before, after))
+      issues.push({
+        path: "facts." + before.fact,
+        problem:
+          "the declared baseline does not account for this race's answers: the race asked this"
+          + " fact no times and its last outcomes still differ from the baseline's",
+      });
   }
-  return true;
+  for (const record of history) {
+    const before = factRecordOf(baseline, record.fact);
+    const attempts = record.attempts - (before === null ? 0 : before.attempts);
+    const correct = record.correct - (before === null ? 0 : before.correct);
+    if (attempts < 0) continue; // already named above
+    if (correct > attempts)
+      issues.push({
+        path: "facts." + record.fact,
+        problem:
+          "the declared baseline does not account for this race's answers: more correct answers"
+          + " than attempts for this fact",
+      });
+  }
+  return issues;
 }
 
 /**
  * Everything wrong with folding this race into this file, or nothing.
  *
- * Two rules, and which one applies is decided by the baseline the caller
- * declared -- never by the counts, because counts cannot tell a repeat commit
- * from an honest second race. Two clean runs of the twos leave *identical*
- * numbers behind; the only thing that separates them is where each race said
- * it started from.
+ * **The caller has to prove where the race came from. Nothing here guesses.**
  *
- *   - **The race was seeded from this file** (`baselineIsFile`). Then the merge
- *     is arithmetic and it is checkable: `race.ts` files exactly one fact
- *     outcome for every answer it counts -- every `attemptCount += 1` is paired
- *     with one `fileOutcome`, on the correct, wrong, revealed and pit-crew
- *     paths alike -- so the delta must add up to the child's `attemptCount`. A
- *     second commit of the same race lands here with a delta of nothing and is
- *     refused by that count.
- *   - **The race was seeded somewhere else** (a vector replay, a race started
- *     before the file loaded). The delta still has to add up to `attemptCount`,
- *     and on top of that the file must not already hold it: if every fact this
- *     race would add is already there, with the same window at the end of it,
- *     then either this race has already been committed or nothing here can
- *     tell that it has not. Either way, adding it again would double a child's
- *     earned counts, so it is refused and said out loud.
+ * Three rounds of this function tried to recognise a race by its numbers --
+ * first "every saved fact appears in the history with counts at least as high",
+ * then nothing at all, then "the file's window ends with the delta's" -- and
+ * each of the three had a hole worth a dozen of a child's answers. The last one
+ * failed because a window is three outcomes long and *forgets*: once any later
+ * commit pushed a race's outcomes out of the tail, that race became
+ * re-committable in full, and because the predicate was all-or-nothing across
+ * the delta, one mismatching fact re-admitted all twelve. 13 + 12 answers
+ * became 38 with `issues: []`.
  *
- * The one thing that is refused and should not be is an unseeded race whose
- * every fact happens to be covered by the file already. That is a conservative
- * failure -- nothing is lost, nothing is inflated, and the caller is told -- and
- * the way out of it is the way the store already works: declare the baseline.
+ * So the guessing is gone. There is exactly one rule left and it is not about
+ * content:
+ *
+ *   - **The declared baseline must be this file's fact history** as it stands
+ *     right now (`baselineIsFile`). A `null` baseline says "seeded with
+ *     nothing", which is true of a file whose history is empty and of no other.
+ *     Anything else is refused: an unproved provenance is not a licence to
+ *     inspect the counts and hope.
+ *
+ * That one rule closes the repeat commit *by construction* rather than by
+ * recognising one. A successful commit changes the file, so the same race
+ * offered a second time carries a baseline that is no longer the file and is
+ * refused -- and if the caller honestly re-declares the new file as its
+ * baseline, the delta is empty and the accounting below refuses it instead.
+ * There is no window to decay, no all-or-nothing predicate, and nothing left
+ * that a later commit can re-admit.
+ *
+ * On top of provenance, two arithmetic checks the baseline must survive:
+ *
+ *   - **Per fact** (`factHistoryDeltaIssues`): nothing may go backwards, and no
+ *     fact may return more correct answers than attempts.
+ *   - **In total**: `race.ts` files exactly one fact outcome for every answer it
+ *     counts -- every `attemptCount += 1` is paired with one `fileOutcome`, on
+ *     the correct, wrong, revealed and pit-crew paths alike -- so the delta must
+ *     add up to the child's `attemptCount`.
+ *
+ * Together those make the merge exact rather than merely plausible: with the
+ * baseline equal to the file and no fact going backwards, `file.facts + delta`
+ * is `history`, fact by fact. The file that comes out is the history the race
+ * carried, which is the one thing here that is known to be true.
+ *
+ * What this costs: a race that genuinely was not seeded from this file -- a
+ * vector replay, a race started before the file loaded -- can no longer be
+ * committed into a file that already holds anything. It is refused, out loud,
+ * with the path back stated: seed the race from the file (`factHistoryForRace`)
+ * and hand that array in. The proposed `ui/Store.qml` already does exactly
+ * that, on every race and after every commit, so it costs the real caller
+ * nothing.
  */
 export function factHistoryMergeIssues(
   file: SaveFile,
@@ -926,16 +1014,18 @@ export function factHistoryMergeIssues(
   const human = state.racers.find((racer) => racer.id === state.humanId);
   if (human === undefined)
     return [{ path: "facts", problem: "the race has no human racer to account for" }];
-  const delta = factHistoryDelta(seededWith, history);
-  if (!baselineIsFile(file, seededWith) && factHistoryAlreadyHolds(file, delta))
+  if (!baselineIsFile(file, seededWith))
     return [{
       path: "facts",
       problem:
-        "this race is already in the file -- every fact it adds is there with the same outcomes"
-        + " -- and no baseline says it was seeded from this file",
+        "the declared baseline is not this file's fact history, so nothing here can tell where"
+        + " this race came from -- seed the race from the file and declare that array",
     }];
+  const baseline = seededWith ?? [];
+  const perFact = factHistoryDeltaIssues(baseline, history);
+  if (perFact.length > 0) return perFact;
   let added = 0;
-  for (const record of delta) added += record.attempts;
+  for (const record of factHistoryDelta(baseline, history)) added += record.attempts;
   if (added !== human.attemptCount)
     return [{
       path: "facts",
@@ -1014,7 +1104,8 @@ export interface CommitResult {
   /**
    * True when this race's answers were folded into the fact history. False
    * means the merge was refused -- `issues` says why -- and `file.facts` is
-   * exactly what it was. A commit never half-writes a fact history.
+   * exactly what it was, byte for byte. A commit never half-writes a fact
+   * history: a race is folded in whole or not at all.
    */
   factsUpdated: boolean;
   /** True when this run displaced the record for its preset. */
@@ -1066,15 +1157,17 @@ export function factHistoryIssues(facts: readonly FactRecord[]): SaveIssue[] {
  *
  * Three rules and one invariant:
  *
- *   - **The fact history is merged only when the merge is sound.** What makes
- *     it sound is `factHistoryMergeIssues`: the delta has to add up to the
- *     child's `attemptCount`, and a race that did not declare this file as its
- *     baseline must not be one the file already holds. When it is unsound the
- *     merge is refused outright and said out loud -- `factsUpdated` is false
- *     and `file.facts` is untouched -- because a commit that writes counts it
- *     has just called wrong is worse than one that writes nothing. This is
- *     what makes a second commit of one race fail instead of doubling a
- *     child's history in silence.
+ *   - **The fact history is merged only when the caller can prove where the
+ *     race came from.** What makes it sound is `factHistoryMergeIssues`: the
+ *     declared baseline has to *be* this file's fact history, no fact may go
+ *     backwards, and the delta has to add up to the child's `attemptCount`.
+ *     When any of that fails the merge is refused outright and said out loud --
+ *     `factsUpdated` is false and `file.facts` is untouched -- because a commit
+ *     that writes counts it has just called wrong is worse than one that writes
+ *     nothing. A second commit of one race fails by construction rather than by
+ *     being recognised: the first commit changed the file, so the second call's
+ *     baseline is either stale (not the file) or honest and empty (accounts for
+ *     none of the race's answers), and both are refused.
  *   - **Records -- clean modes only.** Design, Modes: "Time trial and ghost set
  *     records; Grand Prix never does", and Grand Prix's own row: "places and
  *     times are shown, never stored as records". `recordFromRace` refuses to

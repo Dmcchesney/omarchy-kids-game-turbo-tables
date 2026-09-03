@@ -1698,6 +1698,8 @@ var KART_BODIES = 6;
 var PAINT_SWATCHES = 8;
 var KART_NUMBER_MIN = 1;
 var KART_NUMBER_MAX = 99;
+var STREAK_THRESHOLD_MIN = 1;
+var STREAK_THRESHOLD_MAX = 144;
 function defaultSettings() {
   return {
     sound: true,
@@ -1896,7 +1898,13 @@ function validateSettings(value, issues) {
   checkRange(value.number, KART_NUMBER_MIN, KART_NUMBER_MAX, "settings.number", issues);
   if (typeof value.rivalLevel !== "string" || RIVAL_LEVEL_ORDER.indexOf(value.rivalLevel) === -1)
     issues.push({ path: "settings.rivalLevel", problem: "expected rookie, pro or champion" });
-  checkRange(value.streakThreshold, 1, 144, "settings.streakThreshold", issues);
+  checkRange(
+    value.streakThreshold,
+    STREAK_THRESHOLD_MIN,
+    STREAK_THRESHOLD_MAX,
+    "settings.streakThreshold",
+    issues
+  );
 }
 function validateTimeline(value, path, issues) {
   if (!isPlainObject(value)) {
@@ -2214,6 +2222,12 @@ function factHistoryDelta(seededWith, history) {
   }
   return delta;
 }
+function sameWindow(left, right) {
+  if (left.lastThree.length !== right.lastThree.length) return false;
+  for (let slot = 0; slot < left.lastThree.length; slot++)
+    if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+  return true;
+}
 function baselineIsFile(file, seededWith) {
   const baseline = seededWith != null ? seededWith : [];
   if (baseline.length !== file.facts.length) return false;
@@ -2223,38 +2237,56 @@ function baselineIsFile(file, seededWith) {
     if (left.fact !== right.fact) return false;
     if (left.attempts !== right.attempts) return false;
     if (left.correct !== right.correct) return false;
-    if (left.lastThree.length !== right.lastThree.length) return false;
-    for (let slot = 0; slot < left.lastThree.length; slot++)
-      if (left.lastThree[slot] !== right.lastThree[slot]) return false;
+    if (!sameWindow(left, right)) return false;
   }
   return true;
 }
-function factHistoryAlreadyHolds(file, delta) {
-  if (delta.length === 0) return false;
-  for (const record of delta) {
-    const saved = factRecordOf(file.facts, record.fact);
-    if (saved === null) return false;
-    if (saved.attempts < record.attempts) return false;
-    if (saved.correct < record.correct) return false;
-    const tail = saved.lastThree.slice(saved.lastThree.length - record.lastThree.length);
-    if (tail.length !== record.lastThree.length) return false;
-    for (let slot = 0; slot < tail.length; slot++)
-      if (tail[slot] !== record.lastThree[slot]) return false;
+function factHistoryDeltaIssues(baseline, history) {
+  const issues = [];
+  for (const before of baseline) {
+    const after = factRecordOf(history, before.fact);
+    const attempts = after === null ? 0 : after.attempts;
+    const correct = after === null ? 0 : after.correct;
+    if (attempts < before.attempts || correct < before.correct) {
+      issues.push({
+        path: "facts." + before.fact,
+        problem: "the declared baseline does not account for this race's answers: it claims more of this fact than the race's own history holds"
+      });
+      continue;
+    }
+    if (after !== null && attempts === before.attempts && !sameWindow(before, after))
+      issues.push({
+        path: "facts." + before.fact,
+        problem: "the declared baseline does not account for this race's answers: the race asked this fact no times and its last outcomes still differ from the baseline's"
+      });
   }
-  return true;
+  for (const record of history) {
+    const before = factRecordOf(baseline, record.fact);
+    const attempts = record.attempts - (before === null ? 0 : before.attempts);
+    const correct = record.correct - (before === null ? 0 : before.correct);
+    if (attempts < 0) continue;
+    if (correct > attempts)
+      issues.push({
+        path: "facts." + record.fact,
+        problem: "the declared baseline does not account for this race's answers: more correct answers than attempts for this fact"
+      });
+  }
+  return issues;
 }
 function factHistoryMergeIssues(file, state, seededWith, history) {
   const human = state.racers.find((racer) => racer.id === state.humanId);
   if (human === void 0)
     return [{ path: "facts", problem: "the race has no human racer to account for" }];
-  const delta = factHistoryDelta(seededWith, history);
-  if (!baselineIsFile(file, seededWith) && factHistoryAlreadyHolds(file, delta))
+  if (!baselineIsFile(file, seededWith))
     return [{
       path: "facts",
-      problem: "this race is already in the file -- every fact it adds is there with the same outcomes -- and no baseline says it was seeded from this file"
+      problem: "the declared baseline is not this file's fact history, so nothing here can tell where this race came from -- seed the race from the file and declare that array"
     }];
+  const baseline = seededWith != null ? seededWith : [];
+  const perFact = factHistoryDeltaIssues(baseline, history);
+  if (perFact.length > 0) return perFact;
   let added = 0;
-  for (const record of delta) added += record.attempts;
+  for (const record of factHistoryDelta(baseline, history)) added += record.attempts;
   if (added !== human.attemptCount)
     return [{
       path: "facts",
@@ -2394,6 +2426,8 @@ export {
   SIGNAL_CATALOG,
   SPUTTER_MS,
   STREAK_THRESHOLD,
+  STREAK_THRESHOLD_MAX,
+  STREAK_THRESHOLD_MIN,
   TABLE_MAX,
   TABLE_MIN,
   TABLE_NAMES,
@@ -2441,8 +2475,8 @@ export {
   extraQuestions,
   factAnswer,
   factHistoryAccounts,
-  factHistoryAlreadyHolds,
   factHistoryDelta,
+  factHistoryDeltaIssues,
   factHistoryEntry,
   factHistoryForRace,
   factHistoryIssues,
