@@ -108,22 +108,34 @@ Item {
     visible: !button.oneLine
     spacing: Math.round(button.iconSize * 0.5)
 
-    PixelIcon {
+    // The icon aligns to the middle of the heading, not to the middle of the
+    // two-line block. Centred on the block it landed in the gap between the
+    // heading and its sub-line -- 16 px low on RACE A FRIEND -- so it belonged
+    // to neither line.
+    Item {
       visible: button.art.length > 0
       anchors.verticalCenter: parent.verticalCenter
       width: button.iconSize
-      height: button.iconSize
-      art: button.art
-      color: button.primary ? button.inkColor : button.toneColor
-      inks: ({ "A": button.primary ? button.inkColor : button.toneColor,
-               "B": "transparent" })
+      height: stack.height
+
+      PixelIcon {
+        width: button.iconSize
+        height: button.iconSize
+        y: Math.round(headline.y + headline.height / 2 - height / 2)
+        art: button.art
+        color: button.primary ? button.inkColor : button.toneColor
+        inks: ({ "A": button.primary ? button.inkColor : button.toneColor,
+                 "B": "transparent" })
+      }
     }
 
     Column {
+      id: stack
       anchors.verticalCenter: parent.verticalCenter
       spacing: Math.round(button.sublabelSize * 0.28)
 
       Text {
+        id: headline
         textFormat: Text.PlainText
         text: button.label
         color: button.primary ? button.inkColor : button.toneColor

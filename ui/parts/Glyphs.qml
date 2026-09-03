@@ -10,31 +10,36 @@ import QtQuick
 // composition now; real art replaces the grids without touching a caller.
 QtObject {
   // ------------------------------------------------------- policy rail
+  // A padlock: solid shackle, solid body, and a keyhole that is a straight
+  // vertical slot. The previous grid widened the slot in its middle row, so
+  // the hole came out cross-shaped and the icon read as a first-aid kit.
   readonly property var lock: [
     "............",
     "....####....",
-    "...#....#...",
-    "...#....#...",
-    "...#....#...",
+    "...##..##...",
+    "...##..##...",
+    "...##..##...",
     ".##########.",
     ".##########.",
     ".####..####.",
-    ".###....###.",
+    ".####..####.",
     ".####..####.",
     ".##########.",
-    "............"]
+    ".##########."]
 
+  // Broadcast: two arcs spreading from a source. The previous grid was a
+  // dashed box around an asterisk and read as nothing at all.
   readonly property var broadcast: [
     "............",
-    ".#........#.",
-    "#..#....#..#",
-    "#.#......#.#",
-    "#.#..##..#.#",
-    "#.#.####.#.#",
-    "#.#..##..#.#",
-    "#.#......#.#",
-    "#..#....#..#",
-    ".#........#.",
+    "...######...",
+    "..##....##..",
+    ".##......##.",
+    "##........##",
+    "............",
+    "....####....",
+    "...##..##...",
+    "............",
+    ".....##.....",
     ".....##.....",
     "............"]
 
@@ -137,41 +142,56 @@ QtObject {
   // Thumbs up: a raised thumb with a gap down its middle, a fist ruled into
   // three fingers, and a cuff at the wrist. The old grid was one blob with a
   // nub on it and read as a mitten.
+  // Thumbs up: a tapered thumb, a fist ruled into fingers, and a cuff.
+  //
+  // Every separating rule keeps its outer columns inked. The previous grid's
+  // second-to-last row was "..oooooooooo.." -- a rule with nothing filled on
+  // either side of it -- so the bottom row was cut clean off the icon and
+  // floated 4 px under the fist as a loose bar.
   readonly property var thumbUp: [
-    "..####........",
-    ".######.......",
-    ".######.......",
-    ".######.......",
-    ".######.......",
+    "..###.........",
+    "..###.........",
+    ".####.........",
+    ".####.........",
+    ".####.........",
     ".############.",
     ".############.",
     ".#oooooooooo#.",
     ".############.",
     ".#oooooooooo#.",
     ".############.",
-    "..##########..",
-    "..oooooooooo..",
+    ".############.",
+    ".#oooooooooo#.",
     "..##########.."]
 
-  // Rematch: two curved arrows closing a loop, each ending in a solid
-  // triangular head -- one pointing down on the right, one pointing up on the
-  // left. The old grid was a broken ring of dots with no head at either end
-  // and read as a loading spinner.
+  // Rematch: a circular arrow -- a thick C-shaped arc with one solid
+  // triangular head at its open end, pointing the way the arc travels.
+  //
+  // Round one had no arrowheads. Round two had heads that were described in
+  // the source as solid triangles and rasterised as five-cell plus shapes,
+  // because the ring was two cells thick, the heads sat on top of the ring
+  // instead of at its end, and both were fighting for the same cells. This
+  // grid was rasterised from real geometry -- annulus plus triangle -- and
+  // then checked by rendering it at the 74 px the tile actually displays,
+  // where the cell lands on 4 px: the head is 7 cells across against a
+  // 3-cell stroke, so it survives as a triangle at that size. One head reads
+  // better than two here; two of them at this scale collide with the ring
+  // and each other and the whole glyph goes back to being a blob.
   readonly property var rematch: [
-    ".....####.....",
-    "...##....##...",
-    "..#........#..",
-    ".#..........#.",
-    ".#.......#####",
-    "..........###.",
-    "...........#..",
-    "..#...........",
-    ".###..........",
-    "#####.........",
-    "..#...........",
-    "..#........#..",
-    "...##....##...",
-    ".....####....."]
+    "................",
+    "......###.......",
+    "....#######.....",
+    "...#########....",
+    "..####...##.....",
+    "..###........###",
+    ".###.....######.",
+    ".###......#####.",
+    ".###.......###..",
+    "..###.......##..",
+    "..####...###....",
+    "...#########....",
+    "....#######.....",
+    "......###......."]
 
   // An open hand: four fingers, splayed so the outer one starts a row lower,
   // and a thumb out to the left. The old grid had four prongs and no thumb
@@ -220,6 +240,18 @@ QtObject {
     ".#.....#....",
     ".#######....",
     "............"]
+
+  // A tick, for the chosen paint swatch. Ten columns by eight rows so the
+  // diagonal has whole cells to land on at swatch size.
+  readonly property var check: [
+    "........##",
+    ".......##.",
+    "......##..",
+    "#....##...",
+    "##..##....",
+    ".####.....",
+    "..##......",
+    ".........."]
 
   // A key cap, for the keyboard legend on the policy rail.
   readonly property var keycap: [

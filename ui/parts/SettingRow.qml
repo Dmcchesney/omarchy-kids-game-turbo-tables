@@ -117,13 +117,19 @@ Item {
       }
     }
 
+    // A button looks like a button and a status chip does not. Round two gave
+    // `1 OF 1` and `FIXED` the same pill, border, radius and size as the three
+    // CHANGE buttons at the same x, so a child had to read the words to find
+    // out which two of the five rows they could not touch. The status rows now
+    // carry no fill and no border at all -- they are plain text in the column
+    // where the buttons are.
     Rectangle {
+      visible: row.changeable
       anchors.fill: parent
       radius: Theme.cornerRadiusSmall
-      color: row.changeable ? Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
-                            : "transparent"
+      color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
       border.width: 1
-      border.color: row.changeable ? Theme.lineStrong : Theme.lineStrong
+      border.color: Theme.lineStrong
     }
 
     Text {

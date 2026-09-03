@@ -30,8 +30,20 @@ Item {
   // so that the bottom-left corner of the bay is bare floor: round one parked
   // the KART BODY stepper on the dais and the amber rim grazed its edge.
   readonly property real daisX: 600
-  readonly property real daisY: 430
-  readonly property real daisRadius: 248
+  readonly property real daisY: 408
+  readonly property real daisRadius: 256
+  // The dais is a solid plinth, not a painted disc: `daisRy` is the top
+  // face's minor axis and `daisRim` the height of the course below it, which
+  // is the surface that catches the amber rim light and carries the kerb.
+  //
+  // The ratio daisRy/daisRadius is 0.406, which is sin(24 degrees). The kart
+  // is drawn by a camera pitched 25 degrees above the floor, and a circle on
+  // the floor seen from there projects to an ellipse of exactly that ratio.
+  // Round two used 60/248 = 0.24, a much flatter disc than the kart standing
+  // on it -- two different cameras in one picture, which is part of why the
+  // kart read as pasted on rather than standing there.
+  readonly property real daisRy: 104
+  readonly property real daisRim: 26
 
   function vx(x) { return originX + x * unit }
   function vy(y) { return originY + y * unit }
@@ -165,6 +177,31 @@ Item {
       }
       rect(120, 336, 122, 6, "#1a0f0e")
 
+      // -------------------------------------------------------- pegboard
+      // The wall right of the roller door was a large dead expanse. The
+      // COLOR panel covers everything below y=156 on that side, so this sits
+      // in the strip that is actually visible, and it is kept dark on purpose
+      // -- the brief for this round is that nothing in the corner of the bay
+      // should outrank the kart.
+      rect(946, 44, 214, 104, "#191c24")
+      rect(946, 44, 214, 4, "#272c38")
+      for (var pgx = 954; pgx < 1156; pgx += 12)
+        for (var pgy = 56; pgy < 142; pgy += 12)
+          rect(pgx, pgy, 2, 2, "#232733")
+      // A spanner, a hammer and two hooks, as silhouettes.
+      rect(968, 58, 6, 54, "#3a4050")
+      rect(963, 56, 16, 8, "#3a4050")
+      rect(963, 104, 16, 8, "#3a4050")
+      rect(1000, 58, 7, 40, "#333947")
+      rect(994, 56, 19, 9, "#464d5e")
+      rect(1036, 58, 5, 30, "#333947")
+      rect(1030, 86, 17, 7, "#3a4050")
+      rect(1074, 58, 5, 44, "#2f3441")
+      rect(1068, 58, 17, 6, "#3a4050")
+      rect(1110, 58, 5, 36, "#2f3441")
+      rect(1104, 58, 17, 6, "#3a4050")
+      rect(946, 146, 214, 3, "#0d0f14")
+
       // ------------------------------------------------------- tire walls
       function tyreStack(x, yBase, count, w) {
         for (var t = 0; t < count; t++) {
@@ -174,9 +211,13 @@ Item {
           rect(x, ty, w, 4, "#24272f")
         }
       }
+      // Only the left stack is drawn. There were two more at x=1010 and
+      // x=1096, and the opaque COLOR panel begins at x=889 and runs to the
+      // bottom-right corner, so neither of them was ever visible on any
+      // screen at any size -- the composition scales as one factor, so what
+      // is covered at 1920 is covered everywhere. Scenery nothing can see is
+      // scenery that gets counted in a report and not in the picture.
       tyreStack(24, 316, 4, 84)
-      tyreStack(1096, 316, 5, 80)
-      tyreStack(1010, 316, 3, 76)
 
       // ------------------------------------------------------------ floor
       var floor = ctx.createLinearGradient(0, stall.vy(340), 0, stall.vy(560))
@@ -213,33 +254,88 @@ Item {
         line(0, depth[d], 1200, depth[d], 1, "#232833")
       ctx.globalAlpha = 1
 
-      // --------------------------------------------------------- turntable
+      // ------------------------------------------------------------- dais
+      // A plinth with a top face, a rim course under it and its own shadow on
+      // the floor. Round two drew a stack of four flat ellipses and scattered
+      // 40 kerb blocks around the widest of them at a constant *angular*
+      // pitch measured on the wrong ellipse, so the blocks came out 12 to 22
+      // units wide with 15 to 35 unit gaps and several floated clear of the
+      // stroke. Here the kerb is cut from the rim itself -- every block runs
+      // from the top face's edge down to the bottom of the course, so no
+      // block can be detached from it.
       var dx0 = stall.daisX
       var dr = stall.daisRadius
-      ellipse(dx0, 434, dr + 8, 65, "#101319")
-      ellipse(dx0, 430, dr, 60, "#1d222c")
-      ellipse(dx0, 428, dr - 18, 54, "#252b37")
-      ellipse(dx0, 425, dr - 62, 41, "#2c3341")
-      // Amber rim light on the near edge of the dais. Round one stroked this
-      // in amberDeep at 2.5 units and it was invisible at 1:1 -- the report
-      // called a rim a feature that only a 2.4x brightness boost could find.
+      var dcy = stall.daisY
+      var dry = stall.daisRy
+      var rim = stall.daisRim
+
+      function daisPoint(angle, drop) {
+        return [stall.vx(dx0 + Math.cos(angle) * dr),
+                stall.vy(dcy + Math.sin(angle) * dry + drop)]
+      }
+
+      // The plinth's own shadow, thrown away from the work lights overhead.
+      ctx.save()
+      ctx.translate(stall.vx(dx0), stall.vy(dcy + rim + 6))
+      ctx.scale(dr * 1.07 * u, (dry + 14) * u)
+      var daisShadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+      daisShadow.addColorStop(0, Qt.rgba(0, 0, 0, 0.62))
+      daisShadow.addColorStop(0.72, Qt.rgba(0, 0, 0, 0.34))
+      daisShadow.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+      ctx.fillStyle = daisShadow
+      ctx.beginPath()
+      ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+      ctx.fill()
+      ctx.restore()
+
+      // The course, then the top face over it: what stays visible between the
+      // two is the rim, so the plinth has a real thickness.
+      ellipse(dx0, dcy + rim, dr, dry, "#0e1116")
+      ellipse(dx0, dcy + rim * 0.45, dr, dry, "#191d26")
+
+      // The kerb, cut from the rim on a constant arc pitch and anchored to
+      // the top face's own edge at both ends.
+      var kerbs = 30
+      for (var k = 0; k < kerbs; k++) {
+        var a0 = -0.08 * Math.PI + (1.16 * Math.PI) * (k / kerbs)
+        var a1 = -0.08 * Math.PI + (1.16 * Math.PI) * ((k + 0.66) / kerbs)
+        var p0 = daisPoint(a0, 0), p1 = daisPoint(a1, 0)
+        var p2 = daisPoint(a1, rim * 0.62), p3 = daisPoint(a0, rim * 0.62)
+        ctx.fillStyle = (k % 2 === 0) ? "#3d4658" : "#171b23"
+        ctx.beginPath()
+        ctx.moveTo(p0[0], p0[1])
+        ctx.lineTo(p1[0], p1[1])
+        ctx.lineTo(p2[0], p2[1])
+        ctx.lineTo(p3[0], p3[1])
+        ctx.closePath()
+        ctx.fill()
+      }
+
+      ellipse(dx0, dcy, dr, dry, "#242b38")
+      ellipse(dx0, dcy - 2, dr - 26, dry - 12, "#2b3341")
+      ellipse(dx0, dcy - 4, dr - 78, dry - 30, "#313a49")
+
+      // Amber rim light along the near edge of the top face, dying away round
+      // the sides. Round one stroked the whole ellipse in amberDeep at 2.5
+      // units and it was invisible at 1:1.
       ctx.save()
       ctx.beginPath()
-      ctx.translate(stall.vx(dx0), stall.vy(430))
-      ctx.scale(dr * u, 60 * u)
-      ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+      ctx.translate(stall.vx(dx0), stall.vy(dcy))
+      ctx.scale(dr * u, dry * u)
+      ctx.arc(0, 0, 1, 0.04 * Math.PI, 0.96 * Math.PI, false)
       ctx.restore()
-      ctx.strokeStyle = Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.75)
+      ctx.strokeStyle = Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b, 0.82)
       ctx.lineWidth = Math.max(1.5, 3 * u)
       ctx.stroke()
-
-      // Checker ring around the dais edge, in values that read without help.
-      for (var a = 0; a < 40; a++) {
-        var ang = (a / 40) * Math.PI * 2
-        var cx2 = dx0 + Math.cos(ang) * (dr - 10)
-        var cy2 = 430 + Math.sin(ang) * 56
-        rect(cx2 - 7, cy2 - 3.5, 14, 7, a % 2 === 0 ? "#5a6274" : "#14171f")
-      }
+      ctx.save()
+      ctx.beginPath()
+      ctx.translate(stall.vx(dx0), stall.vy(dcy))
+      ctx.scale(dr * u, dry * u)
+      ctx.arc(0, 0, 1, 0.96 * Math.PI, 2.04 * Math.PI, false)
+      ctx.restore()
+      ctx.strokeStyle = Qt.rgba(Theme.amberDeep.r, Theme.amberDeep.g, Theme.amberDeep.b, 0.5)
+      ctx.lineWidth = Math.max(1, 2 * u)
+      ctx.stroke()
 
       // ------------------------------------------------------ work lights
       function workLight(x, y, w) {
@@ -277,12 +373,12 @@ Item {
       workLight(794, 34, 180)
 
       // A pool of warm light on the floor under the kart.
-      var pool = ctx.createRadialGradient(stall.vx(stall.daisX), stall.vy(426), 0,
-                                          stall.vx(stall.daisX), stall.vy(426), stall.vs(300))
+      var pool = ctx.createRadialGradient(stall.vx(stall.daisX), stall.vy(stall.daisY - 4), 0,
+                                          stall.vx(stall.daisX), stall.vy(stall.daisY - 4), stall.vs(300))
       pool.addColorStop(0, Qt.rgba(1, 0.75, 0.34, 0.18))
       pool.addColorStop(1, Qt.rgba(1, 0.7, 0.3, 0))
       ctx.fillStyle = pool
-      ctx.fillRect(stall.vx(stall.daisX - 300), stall.vy(350), stall.vs(600), stall.vs(210))
+      ctx.fillRect(stall.vx(stall.daisX - 300), stall.vy(330), stall.vs(600), stall.vs(230))
 
       // ----------------------------------------------------------- signage
       // The pit terminal, left wall.
@@ -303,19 +399,49 @@ Item {
       rect(252, 168, 152, 2, "#243544")
 
       // Hanging checkered flag, on the wall right of the door.
-      for (var fr = 0; fr < 7; fr++) {
-        for (var fc = 0; fc < 6; fc++) {
-          var lightSquare = (fr + fc) % 2 === 0
-          rect(856 + fc * 11, 66 + fr * 11 + (fc > 3 ? 4 : 0), 11, 11,
-               lightSquare ? "#c9cdd8" : "#15171d")
+      //
+      // Two faults here in round two. The drape was a single hard step -- the
+      // last two columns dropped by four units in one jump -- which read as a
+      // texture seam rather than as cloth. And at #c9cdd8 the prop measured a
+      // 95th-percentile luminance of 0.446 against the kart's 0.359, so the
+      // highest-contrast object in the stall was a decoration in the corner
+      // rather than the thing the screen exists for.
+      //
+      // The drape is now a smooth per-column curve, and the check's phase is
+      // taken from the column and row indices rather than from the offset
+      // position, so no amount of drape can put the pattern out of register.
+      // The light square is dropped to a value that sits under the kart.
+      rect(852, 60, 72, 5, "#2b3040")
+      rect(854, 64, 68, 6, "#131620")
+      for (var fc = 0; fc < 6; fc++) {
+        var drape = Math.round(Math.abs(Math.sin((fc + 0.4) * 0.7)) * 3)
+        for (var fr = 0; fr < 7; fr++) {
+          rect(856 + fc * 11, 68 + drape + fr * 11, 11, 11,
+               (fr + fc) % 2 === 0 ? "#8a90a0" : "#131620")
         }
       }
-      rect(852, 62, 72, 4, "#2b3040")
 
-      // Traffic cone, near left.
-      rect(46, 400, 56, 8, "#7a3a14")
+      // Traffic cone. It used to stand at x=46 with its base at y=400, and
+      // the KART BODY card's top edge falls at y=386 -- so the card cut the
+      // cone off at the ankles, with no base, no floor contact and no shadow.
+      // Moved back and right, it stands on open floor 14 px above the card
+      // and 144 px clear of the dais, with its whole base visible.
+      var coneX = 250, coneBase = 372
+      ctx.save()
+      ctx.translate(stall.vx(coneX + 28), stall.vy(coneBase + 3))
+      ctx.scale(34 * u, 7 * u)
+      var coneShadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+      coneShadow.addColorStop(0, Qt.rgba(0, 0, 0, 0.6))
+      coneShadow.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+      ctx.fillStyle = coneShadow
+      ctx.beginPath()
+      ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+      ctx.fill()
+      ctx.restore()
+      rect(coneX, coneBase - 8, 56, 8, "#7a3a14")
+      rect(coneX, coneBase - 10, 56, 2, "#94491c")
       for (var cn = 0; cn < 6; cn++)
-        rect(52 + cn * 3, 400 - cn * 11 - 11, 44 - cn * 6, 11,
+        rect(coneX + 6 + cn * 3, coneBase - 8 - cn * 11 - 11, 44 - cn * 6, 11,
              cn === 2 || cn === 3 ? "#d8d9dd" : "#c25a1c")
 
       // There is no oil drum. Round one drew one on the right, where the
@@ -358,7 +484,9 @@ Item {
     Text {
       text: "> READY"
       textFormat: Text.PlainText
-      color: "#2f7d51"
+      // 6.26:1 against the lighter scanline band of the CRT, 6.94:1 against
+      // the darker. The previous #2f7d51 measured 3.42:1 and 3.79:1.
+      color: "#4fae74"
       font.family: Theme.mono
       font.pixelSize: Math.max(6, stall.vs(13))
     }

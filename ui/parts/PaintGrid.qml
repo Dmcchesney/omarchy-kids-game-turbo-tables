@@ -57,20 +57,40 @@ Item {
         anchors.fill: parent
         radius: Theme.cornerRadiusSmall
         color: Theme.paint(index)
-        border.width: index === grid.selected ? Math.max(2, Math.round(grid.cellH * 0.12)) : 1
+        border.width: index === grid.selected ? 3 : 1
         border.color: index === grid.selected
                       ? "#ffffff"
                       : Qt.rgba(0, 0, 0, 0.55)
       }
 
-      // The tick: a shape, so the chosen paint is not signalled by colour.
-      Rectangle {
+      // The tick: a shape, so the chosen paint is not signalled by colour
+      // alone. It sits in the corner rather than the middle. Round two put a
+      // solid 16 x 16 white square dead centre of a 59 x 53 swatch -- 14 % of
+      // the swatch, no shape language, and it obscured the one thing the
+      // control exists to show, so the chosen red read as white-on-red.
+      PixelIcon {
         visible: index === grid.selected
-        anchors.centerIn: parent
-        width: Math.round(grid.cellH * 0.30)
-        height: width
-        radius: 1
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Math.round(grid.cellH * 0.13)
+        width: Math.round(grid.cellW * 0.34)
+        height: Math.round(width * 0.8)
+        art: Glyphs.check
         color: Theme.ink(Theme.paint(index))
+      }
+
+      // Where the arrows are, as distinct from what is chosen. The group ring
+      // below says "you are in the swatches"; this says "and you are on this
+      // one". Round two had only the white selection ring, so a child could
+      // not tell where they were from what they had picked.
+      Rectangle {
+        visible: grid.activeFocus && index === grid.selected
+        anchors.fill: parent
+        anchors.margins: -4
+        radius: Theme.cornerRadiusSmall + 3
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.focusRing
       }
     }
   }

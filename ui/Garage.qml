@@ -182,7 +182,10 @@ FocusScope {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: "//"
-          color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.6)
+          // 0.6 alpha measured 3.44:1 on the shipped frame -- the only string
+          // on the screen under 4.5:1. It is decorative, but a floor that has
+          // an exception is not a floor.
+          color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.85)
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: garage.fs(34)
@@ -204,16 +207,20 @@ FocusScope {
       // rail below, and no more: round one said it three times in the top
       // 190 px, with the value stacked above its own label, and hung a
       // decorative glyph square beside it wearing a control's border and fill.
+      // Round two spent a 268 x 62 chip at 34 px on a word that the policy
+      // rail already says 50 px below it, in more useful terms. It stays --
+      // "offline" is the one fact a parent glancing at this screen wants --
+      // but at the size of a status readout rather than of a heading.
       Readout {
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        width: garage.px(268)
-        height: garage.px(62)
+        width: garage.px(148)
+        height: garage.px(44)
         value: "OFFLINE"
         valueColor: Theme.lime
-        valueSize: garage.fs(34)
-        valueSpacing: garage.px(4)
-        rivetInset: garage.px(7)
+        valueSize: garage.fs(20)
+        valueSpacing: garage.px(2)
+        rivetInset: garage.px(5)
         rivetSize: garage.px(2)
       }
     }
@@ -351,7 +358,10 @@ FocusScope {
 
       KartSprite {
         id: heroKart
-        width: stall.vs(536)
+        // Sized so the whole kart stands on the plinth. At 536 the nose's
+        // lower corner fell outside the dais ellipse and crossed the amber
+        // rim; the fit is checked against the ellipse, not by eye.
+        width: stall.vs(486)
         height: width * vbH / vbW
         x: stall.vx(stall.daisX) - width / 2
         y: stall.vy(stall.daisY) - height * groundFraction
