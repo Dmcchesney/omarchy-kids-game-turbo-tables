@@ -47,6 +47,12 @@ FocusScope {
   // test can ask it which path it took. Nothing outside drives it in play: the
   // lurch and the pull-back come from the engine's events.
   readonly property alias trackView: track
+  // The powerup panel, exposed for the same reason the road is: a keyboard
+  // walkthrough has to be able to ask which card is chosen and what the panel
+  // is telling the child, and reading it off the panel is the only way to check
+  // the screen rather than a second copy of its state. Nothing outside drives
+  // it; the digit arbitration below is the only caller.
+  readonly property alias handPanel: picker
 
   readonly property bool reducedMotion: Store.setting("reducedMotion") === true
 
@@ -78,6 +84,25 @@ FocusScope {
   }
   readonly property int elapsedMs: state ? Math.max(0, nowMs - state.startedAtMs) : 0
   readonly property bool stalled: (state && human) ? Engine.isStalled(human, nowMs) : false
+
+  // The hand the child is holding, and the rivals a targeted card may be aimed
+  // at. Both are handed to `ui/Picker.qml`, and the rival list is the caller's
+  // job rather than the panel's: the design puts a finished racer out of reach,
+  // so a racer who has crossed the line is not in this list, and the picker
+  // clamps its aim when the list shrinks under it.
+  readonly property var hand: (human && human.hand) ? human.hand : []
+  readonly property var liveRivals: {
+    var out = []
+    if (!state)
+      return out
+    for (var i = 0; i < state.racers.length; i++) {
+      var r = state.racers[i]
+      if (r.kind === "human" || r.finished)
+        continue
+      out.push({ "id": r.id, "name": race.nameOf(r.id), "number": race.numberOf(r) })
+    }
+    return out
+  }
 
   function clockNow() { return clockBase + frames.elapsedTime * 1000 }
 
@@ -186,6 +211,12 @@ FocusScope {
       })
     }
     minimap.setRacers(dots)
+    // A new race is a new hand. A card chosen against the race that was here
+    // before this one is a stale index into a hand that no longer exists, and a
+    // pass waiting to be shown belongs to a race that is over.
+    picker.reset()
+    race.pendingPasses = []
+
     race.viewProgress = progress[0]
     race.smoothProgress = progress.slice()
     track.humanProgress = progress[0]
@@ -247,7 +278,7 @@ FocusScope {
         break
       case "cardUsed":
         if (e.racerId === me) {
-          hand.reset()
+          picker.reset()
           var label = Engine.CARDS[e.card].label.toUpperCase()
           say(e.targetId === "" ? label : label + " ▸ " + nameOf(e.targetId), Theme.amber)
           if (e.card === "turbo" || e.card === "nitro")
@@ -256,7 +287,7 @@ FocusScope {
         break
       case "handDealt":
         if (e.racerId === me)
-          hand.reset()
+          picker.reset()
         break
       case "hit":
         if (e.racerId === me) {
@@ -276,11 +307,11 @@ FocusScope {
         break
       case "passed":
         if (e.racerId === me)
-          say("PASSED " + nameOf(e.otherId), Theme.lime)
+          holdCallout(e.otherId, true)
         break
       case "passedBy":
         if (e.racerId === me)
-          say(nameOf(e.otherId) + " SLIPPED PAST", Theme.hazard)
+          holdCallout(e.otherId, false)
         break
       case "signal":
         say(signalText(e.signal) + "  ·  " + nameOf(e.racerId), Theme.teal)
@@ -319,6 +350,70 @@ FocusScope {
     var first = calloutSlots.itemAt(0)
     if (first)
       first.say(message, tone)
+  }
+
+  // -------------------------------------------- passes, said when they show
+  //
+  // `passed` and `passedBy` come out of the engine the instant the ORDER flips,
+  // and the order flips on effective progress. The karts on screen are drawn
+  // from `smoothProgress`, which eases toward that target over roughly two
+  // hundred milliseconds -- so round one printed PASSED GASKET while Gasket was
+  // still visibly in front, and a child reading the road saw the HUD contradict
+  // it. A callout that describes the race has to describe the race the child
+  // can see.
+  //
+  // So a pass is held until the two karts have actually crossed on screen, and
+  // released at the latest after `passHoldMs` -- because the engine is still the
+  // authority and a pass must never be swallowed, only deferred. Under reduced
+  // motion the smoothing is off, the karts cut, and the hold releases on the
+  // very next frame.
+  property var pendingPasses: []
+  property int passHoldMs: 900
+
+  function holdCallout(otherId, gained) {
+    var next = race.pendingPasses.slice()
+    next.push({ "otherId": otherId, "gained": gained, "atMs": race.nowMs })
+    race.pendingPasses = next
+  }
+
+  function indexOfRacer(racerId) {
+    if (!state)
+      return -1
+    for (var i = 0; i < state.racers.length; i++)
+      if (state.racers[i].id === racerId)
+        return i
+    return -1
+  }
+
+  function sayPass(entry) {
+    if (entry.gained)
+      say("PASSED " + nameOf(entry.otherId), Theme.lime)
+    else
+      say(nameOf(entry.otherId) + " SLIPPED PAST", Theme.hazard)
+  }
+
+  function releasePasses() {
+    if (race.pendingPasses.length === 0)
+      return
+    var mine = indexOfRacer(state.humanId)
+    var keep = []
+    for (var i = 0; i < race.pendingPasses.length; i++) {
+      var entry = race.pendingPasses[i]
+      var other = indexOfRacer(entry.otherId)
+      var expired = (race.nowMs - entry.atMs) >= race.passHoldMs
+      var visible = false
+      if (mine >= 0 && other >= 0
+          && race.smoothProgress.length > mine && race.smoothProgress.length > other) {
+        visible = entry.gained
+                  ? race.smoothProgress[mine] >= race.smoothProgress[other]
+                  : race.smoothProgress[other] >= race.smoothProgress[mine]
+      }
+      if (visible || expired)
+        race.sayPass(entry)
+      else
+        keep.push(entry)
+    }
+    race.pendingPasses = keep
   }
 
   // ------------------------------------------------------------ the view
@@ -362,6 +457,10 @@ FocusScope {
     race.smoothSpeed = race.smoothSpeed * 0.90 + want * 0.10
     track.speed = race.smoothSpeed
 
+    // A pass is announced on the frame the karts cross, not the frame the
+    // engine's order flips.
+    race.releasePasses()
+
     track.advance(dtMs)
   }
 
@@ -387,13 +486,61 @@ FocusScope {
   // the engine's `racer.entry` string, drawn below, and the digits go through
   // `step` like everything else.
   //
-  // 1, 2 and 3 do two things at once, and they have to: the design gives them
-  // to the powerup picker and also needs them as digits, because plenty of
-  // answers begin with one of them. So they always type, and while a hand is
-  // held they also move the picker's selection. Enter then decides: with
-  // something typed it submits the answer, and with the entry empty it plays
-  // the selected card. Nothing is ever spent by a keystroke that was meant as
-  // a digit.
+  // ---------------------------------------------------------------------------
+  // 1, 2 AND 3 ARE BOTH CARD KEYS AND DIGITS, AND THIS IS WHERE THAT IS SETTLED
+  // ---------------------------------------------------------------------------
+  //
+  // The design gives 1, 2 and 3 to the powerup hand and also needs them as
+  // digits, because a third of the answers in the 1-12 tables begin with one of
+  // them. Round one sent the digit unconditionally and also moved the hand's
+  // selection, and `Engine.typeDigit` submits the instant the entry is as long
+  // as the answer. Two things followed, both measured on this file with real key
+  // events:
+  //
+  //   - fact `1 x 6`, a hand held, one press of `1`: submitted as the answer to
+  //     a question the child had not attempted. Streak gone, a `missed` fact
+  //     recorded, that fact printed under FACTS TO LOOK AT on the results
+  //     screen, and its mastery lamp put out. Nine of the twelve answers in the
+  //     ones lap are one digit.
+  //   - fact `1 x 10`, a hand held, `1` then Enter -- and Enter is the only key
+  //     the panel printed: the stray `1` was submitted as the answer, the streak
+  //     went, a miss was recorded, and the card was not played. Three losses and
+  //     no gain. The working sequence was `1 Backspace Enter`, and nothing on
+  //     the screen mentioned Backspace.
+  //
+  // That broke the design's second pillar -- "Mistakes cost the streak, never
+  // the position" -- by charging the streak for a deliberate, correct action.
+  // The race screen is the only place that can fix it, because it is the only
+  // place that knows the expected answer; the picker cannot see it and should
+  // not. The arbitration, in full:
+  //
+  //   With a hand held and the field empty, a press of 1, 2 or 3 is read
+  //   against the answer that is on screen right now.
+  //
+  //   a. The answer is one digit and the key IS that answer (`1 x 1`, press 1).
+  //      The press is unambiguously the answer. It types, the engine submits it,
+  //      the child is right, and the hand is not touched.
+  //   b. The answer is one digit and the key is NOT that answer (`1 x 6`, press
+  //      1). Typing it would submit a wrong answer the instant it landed, which
+  //      no child ever means to do, so it chooses the card and types nothing.
+  //   c. The answer is two digits or more (`1 x 10`, press 1). It chooses the
+  //      card AND types the digit, because the child may well be starting to
+  //      type `10`. Nothing is submitted -- the entry is short -- and the digit
+  //      is held as PROVISIONAL: it belongs to the card press, not to an answer.
+  //
+  //   Enter then decides, and `provisional` is what it decides on. If every
+  //   character in the field was typed by the press that chose the card, the
+  //   child meant the card: the digits are taken back with the engine's own
+  //   backspace and the card is played. If the child typed anything of their
+  //   own after choosing, the field is an answer and Enter submits it.
+  //
+  //   Escape takes the provisional digits back too, which is the other half of
+  //   the same fix: round one left a stray `1` in the field after Escape, so the
+  //   next digit the child typed was appended to a `1` they thought they had
+  //   just undone.
+  //
+  // Nothing is ever spent by a keystroke that was meant as a digit, and no
+  // answer in the tables has become untypable while a hand is held.
   Item {
     id: keys
     anchors.fill: parent
@@ -406,29 +553,38 @@ FocusScope {
       var key = event.key
 
       if (key === Qt.Key_Escape) {
-        if (hand.targeting)
-          hand.cancelTarget()
-        else if (hand.selected >= 0)
-          hand.selected = -1
-        else
+        // One meaning: back out of a card choice if there is one, and otherwise
+        // leave the race. Round one had three, and the middle one neither left
+        // nor cleared the digit it had caused.
+        if (picker.chosen >= 0) {
+          race.takeBackProvisional()
+          picker.reset()
+        } else {
           race.leaveRequested()
+        }
         event.accepted = true
         return
       }
 
       if (key === Qt.Key_Return || key === Qt.Key_Enter) {
-        if (race.human && race.human.entry.length > 0) {
-          hand.selected = -1
-          hand.targeting = false
+        if (race.enterSpendsCard()) {
+          race.takeBackProvisional()
+          picker.confirm()
+        } else if (race.entryLength() > 0) {
+          race.clearProvisional()
+          picker.reset()
           race.send({ "kind": "submit" })
-        } else if (hand.selected >= 0) {
-          hand.confirm()
+        } else if (picker.chosen >= 0) {
+          picker.confirm()
         }
         event.accepted = true
         return
       }
 
       if (key === Qt.Key_Backspace) {
+        // A backspace of the child's own retires the provisional claim: what is
+        // left in the field is theirs now.
+        race.clearProvisional()
         race.send({ "kind": "backspace" })
         event.accepted = true
         return
@@ -441,21 +597,98 @@ FocusScope {
       }
 
       if (key === Qt.Key_Left || key === Qt.Key_Right) {
-        if (hand.targeting)
-          hand.moveTarget(key === Qt.Key_Left ? -1 : 1)
+        if (picker.targeting)
+          picker.stepTarget(key === Qt.Key_Left ? -1 : 1)
         event.accepted = true
         return
       }
 
       if (key >= Qt.Key_0 && key <= Qt.Key_9) {
-        var digit = key - Qt.Key_0
-        if (digit >= 1 && digit <= 3 && hand.cards.length >= digit)
-          hand.select(digit - 1)
-        race.send({ "kind": "digit", "value": digit })
+        race.typeKey(key - Qt.Key_0)
         event.accepted = true
         return
       }
     }
+  }
+
+  // ------------------------------------------------- the digit arbitration
+  //
+  // How many digits currently in the field were typed by the press that chose
+  // the card. 0 or 1 in practice: the second digit a child types is their own
+  // and retires the claim.
+  property int provisional: 0
+
+  function clearProvisional() { race.provisional = 0 }
+
+  function entryLength() { return race.human ? race.human.entry.length : 0 }
+
+  // The answer to the question on screen, as the string the child has to type.
+  function expectedAnswer() {
+    if (!race.human || race.human.currentFact < 0)
+      return ""
+    return String(Engine.factAnswer(race.human.currentFact))
+  }
+
+  // Enter spends the card exactly when the field holds nothing but the digits
+  // the card press put there.
+  function enterSpendsCard() {
+    if (picker.chosen < 0)
+      return false
+    return race.entryLength() === race.provisional
+  }
+
+  function takeBackProvisional() {
+    while (race.provisional > 0 && race.entryLength() > 0) {
+      race.send({ "kind": "backspace" })
+      race.provisional -= 1
+    }
+    race.provisional = 0
+  }
+
+  function typeKey(digit) {
+    var typed = race.entryLength()
+    var holding = race.hand.length >= digit
+    if (digit >= 1 && digit <= 3 && typed === 0 && holding) {
+      var expected = race.expectedAnswer()
+      if (expected.length === 1) {
+        if (expected === String(digit)) {
+          // (a) the key is the answer. Type it and leave the hand alone.
+          race.clearProvisional()
+          race.send({ "kind": "digit", "value": digit })
+          return
+        }
+        // (b) typing it would submit a wrong answer on the spot. Choose only.
+        race.clearProvisional()
+        picker.choose(digit - 1)
+        return
+      }
+      // (c) two digits or more to come: choose, type, and hold the digit as
+      // provisional so Enter can give it back.
+      picker.choose(digit - 1)
+      race.send({ "kind": "digit", "value": digit })
+      race.provisional = race.entryLength()
+      return
+    }
+    // A digit of the child's own, typed on top of something already in the
+    // field. They are answering, not spending: the field is theirs from here,
+    // and the card the first press chose is put back rather than left selected
+    // under an Enter that would spend it once the answer clears the field.
+    if (typed > 0) {
+      race.clearProvisional()
+      picker.reset()
+    }
+    race.send({ "kind": "digit", "value": digit })
+  }
+
+  // Digits the child typed on the countdown's GO beat, handed over by the flow.
+  // `ui/Countdown.qml` prints TYPE THE ANSWER on that beat, so the keys pressed
+  // on it are the child's answer to the first fact and they arrive here rather
+  // than being dropped on the floor between two screens.
+  function typeAhead(digits) {
+    if (!digits || digits.length === 0)
+      return
+    for (var i = 0; i < digits.length; i++)
+      race.typeKey(Number(digits[i]))
   }
 
   // =========================================================== the picture
@@ -571,6 +804,167 @@ FocusScope {
     }
   }
 
+  // ---------------------------------------------------- the position ladder
+  //
+  // Design, the comparison table: "Looking down the track, positions visible at
+  // a glance." At a glance was doing no work. The HUD said `PLACE 2nd` and the
+  // minimap put four dots on one loop, and in the first seconds of a race those
+  // dots sit on top of one another; between the left readouts and the minimap
+  // ran 890 px of nothing. A critic's verdict on the whole screen was that you
+  // cannot see the race.
+  //
+  // This is the standings, in the strip that was empty. It invents nothing: the
+  // order is `Engine.raceOrder`, and the gap is the difference in effective
+  // progress, which the design defines as position itself -- "Position is
+  // effective progress". The number is therefore in questions, which is the
+  // unit the child is already counting in, and it is the same number the karts
+  // on the road are drawn from.
+  //
+  // It appears only when there is somebody to be ahead of or behind. In the
+  // three solo modes the strip stays empty, because there are no positions and
+  // a ladder of one would be furniture.
+  readonly property var ladder: {
+    var out = []
+    if (!state || state.racers.length < 2)
+      return out
+    var order = Engine.raceOrder(state)
+    var mine = 0
+    for (var h = 0; h < state.racers.length; h++)
+      if (state.racers[h].id === state.humanId)
+        mine = Engine.effectiveProgress(state.racers[h], state.questionsPerLap)
+    for (var i = 0; i < order.length; i++) {
+      var index = race.indexOfRacer(order[i])
+      if (index < 0)
+        continue
+      var racer = state.racers[index]
+      out.push({
+        "place": i + 1,
+        "name": race.nameOf(racer.id),
+        "number": race.numberOf(racer),
+        "paint": race.paintOf(racer),
+        "isHuman": racer.kind === "human",
+        "finished": racer.finished === true,
+        "gap": Engine.effectiveProgress(racer, state.questionsPerLap) - mine
+      })
+    }
+    return out
+  }
+
+  Item {
+    id: ladderStrip
+    x: leftHud.x + leftHud.width + race.px(26)
+    y: race.px(24)
+    width: Math.max(0, rightHud.x - x - race.px(26))
+    height: race.px(62)
+    visible: race.ladder.length > 1
+
+    Accessible.role: Accessible.StaticText
+    Accessible.name: "Race order"
+
+    Row {
+      anchors.centerIn: parent
+      spacing: race.px(10)
+
+      Repeater {
+        model: race.ladder
+
+        Rectangle {
+          readonly property bool self: modelData.isHuman === true
+          height: race.px(54)
+          width: rung.width + race.px(22)
+          radius: Theme.cornerRadiusSmall
+          color: self ? Theme.focusFill
+                      : Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.80)
+          border.width: self ? 2 : 1
+          border.color: self ? Theme.focusRing : Theme.line
+
+          Accessible.role: Accessible.StaticText
+          Accessible.name: Engine.ordinal(modelData.place) + ", " + modelData.name
+                           + (modelData.finished
+                              ? ", home"
+                              : (modelData.gap === 0
+                                 ? ""
+                                 : (modelData.gap > 0
+                                    ? ", " + modelData.gap + " questions ahead of you"
+                                    : ", " + (-modelData.gap) + " questions behind you")))
+
+          Row {
+            id: rung
+            anchors.centerIn: parent
+            spacing: race.px(8)
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: Engine.ordinal(modelData.place)
+              color: Theme.textLabel
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: Math.max(11, race.fs(15))
+              font.letterSpacing: 1
+            }
+
+            // The kart's own number plate, in the kart's own paint, so the
+            // rung and the kart on the road are the same object.
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              width: Math.max(race.px(30), plate.implicitWidth + race.px(10))
+              height: race.px(26)
+              radius: race.px(3)
+              color: modelData.paint
+
+              Text {
+                id: plate
+                anchors.centerIn: parent
+                textFormat: Text.PlainText
+                text: String(modelData.number)
+                color: Theme.ink(modelData.paint)
+                font.family: Theme.mono
+                font.bold: true
+                font.pixelSize: Math.max(11, race.fs(16))
+              }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: modelData.name
+              color: parent.parent.self ? Theme.amberGlow : Theme.textBright
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: Math.max(12, race.fs(18))
+              font.letterSpacing: 1
+            }
+
+            // The gap, in questions, with an arrow so it is shape as well as
+            // colour. The child's own rung has no gap to itself.
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              visible: text.length > 0
+              text: {
+                if (modelData.isHuman === true)
+                  return ""
+                if (modelData.finished === true)
+                  return "HOME"
+                if (modelData.gap === 0)
+                  return "LEVEL"
+                return (modelData.gap > 0 ? "\u25B2 " : "\u25BC ") + Math.abs(modelData.gap)
+              }
+              color: modelData.finished === true
+                     ? Theme.teal
+                     : (modelData.gap > 0 ? Theme.hazard : Theme.lime)
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: Math.max(11, race.fs(16))
+              font.letterSpacing: 1
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ------------------------------------------------------------ HUD right
   // The wireframe's order along the top: the minimap, then the clock in the
   // corner.
@@ -655,6 +1049,34 @@ FocusScope {
     minimap.setFinished(flags)
   }
 
+  // ----------------------------------------------------- the fact's ink
+  //
+  // The probe draws the widest fact in the game at a fixed size and reports the
+  // tight bounding box of the glyphs -- the ink, not the em box. The ratio is
+  // the face's own, so the size below follows the shell's font rather than a
+  // constant measured once on this Mac. The probe's own size is fixed, so
+  // nothing here is circular.
+  TextMetrics {
+    id: inkProbe
+    font.family: Theme.mono
+    font.bold: true
+    font.pixelSize: 200
+    text: "12 \u00D7 12"
+  }
+  readonly property real factInkRatio: inkProbe.tightBoundingRect.height > 0
+                                       ? inkProbe.tightBoundingRect.height / 200
+                                       : 0.73
+  readonly property int factPixelSize: {
+    // A tenth of the screen height in ink, with a hair over it so rounding
+    // never lands under the floor.
+    var wanted = Math.ceil((race.height * 0.105) / Math.max(0.25, race.factInkRatio))
+    // ... and never so wide that the widest fact runs off the screen.
+    var widest = inkProbe.advanceWidth > 0
+                 ? Math.floor((race.width - race.px(120)) * 200 / inkProbe.advanceWidth)
+                 : wanted
+    return Math.max(race.fs(118), Math.min(wanted, widest))
+  }
+
   // ------------------------------------------------------- fact and field
   // Design, Pillars: "The question is the track. The fact is the largest thing
   // on screen at every moment of a race." It is, and it sits above the horizon
@@ -674,8 +1096,16 @@ FocusScope {
       color: Theme.cream
       font.family: Theme.mono
       font.bold: true
-      // The largest type on the screen, and never below a tenth of its height.
-      font.pixelSize: Math.max(Math.round(race.height * 0.115), race.fs(118))
+      // The largest type on the screen, and never below a tenth of its height
+      // -- measured as INK, which is the only reading of that rule a child can
+      // see. `font.pixelSize` is an em box with ascent, descent and leading in
+      // it; `12 x 12` in this face draws about 0.73 of it. Round one set the em
+      // box to 124 px on a 1080 screen and called the floor met, and the ink on
+      // the frame measured 91 px -- 8.4% of the screen, under the design's
+      // tenth. The size below is derived from the ink the face actually draws,
+      // so the rule holds at every screen size and in any font the shell hands
+      // down.
+      font.pixelSize: race.factPixelSize
       font.letterSpacing: race.px(6)
       style: Text.Outline
       styleColor: Qt.rgba(0, 0, 0, 0.85)
@@ -830,196 +1260,58 @@ FocusScope {
     }
   }
 
-  // -------------------------------------------------- charge and the hand
-  Column {
-    id: lowerRight
+  // --------------------------------------------- charge, and the one picker
+  //
+  // ROUND 2 -- ONE PANEL, NOT TWO. This file used to draw its own hand panel
+  // here while `ui/Picker.qml` sat unused beside it, and the two disagreed on
+  // everything that mattered. The inline panel printed `HAND`, three keycaps and
+  // a bare `◂ NAME ▸ ⏎` and taught a child none of the keys; it had no footer
+  // and no way at all to find out that Backspace was the key that saved a
+  // streak. `ui/Picker.qml` prints the keys on every frame, names the effect and
+  // the tier of every card, marks the aim with an arrow rather than a colour,
+  // and says so when a card cannot be spent. The inline panel is gone and this
+  // is the plan's shape: the picker is the panel, and the race screen drives it.
+  //
+  // The race screen keeps every key. The picker's own `Keys` handler is intact
+  // for the harness, but here it never has focus -- `keys` above does -- because
+  // the digit arbitration needs the expected answer and only this file has it.
+  Picker {
+    id: picker
+    anchors.fill: parent
+    hand: race.hand
+    rivals: race.liveRivals
+    entryLength: race.entryLength()
+    // The override the picker documents: the digits the card press itself put
+    // in the field are not an answer the child is part-way through, so Enter
+    // still spends.
+    enterSpends: race.enterSpendsCard() || race.entryLength() === 0
+    dockWidth: race.px(500)
+    dockMargin: race.px(30)
+    visible: race.hand.length > 0
+    onCardUsed: function (index, targetId) {
+      race.send({ "kind": "useCard", "index": index, "targetId": targetId })
+    }
+  }
+
+  // The charge sits directly above the picker's dock, so the two read as one
+  // right-hand column and neither is ever drawn over the other.
+  ChargeBar {
+    id: charge
     anchors.right: parent.right
     anchors.rightMargin: race.px(30)
     anchors.bottom: parent.bottom
     anchors.bottomMargin: race.px(28)
-    spacing: race.px(16)
-    width: race.px(320)
-
-    ChargeBar {
-      id: charge
-      width: parent.width
-      value: race.human ? Math.min(race.state.streakThreshold, race.human.streak) : 0
-      segments: race.state ? race.state.streakThreshold : Engine.CHARGE_SEGMENTS
-      glowFrom: Engine.CHARGE_GLOW_FROM
-      reducedMotion: race.reducedMotion
-      holdingHand: race.human ? race.human.hand.length > 0 : false
-      cellHeight: race.px(24)
-      cellGap: race.px(4)
-      titleSize: race.fs(14)
-      visible: race.state ? race.state.powerupsEnabled : false
-    }
-
-    // The picker, as the design describes it: a small panel in the lower
-    // right, never a modal over the question.
-    Rectangle {
-      id: hand
-      width: parent.width
-      visible: cards.length > 0
-      height: handColumn.implicitHeight + race.px(22)
-      radius: Theme.cornerRadius
-      color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.92)
-      border.width: 1
-      border.color: selected >= 0 ? Theme.amber : Theme.line
-
-      readonly property var cards: (race.human && race.human.hand) ? race.human.hand : []
-      property int selected: -1
-      property bool targeting: false
-      property int targetAt: 0
-
-      readonly property var targets: {
-        if (!race.state)
-          return []
-        var out = []
-        for (var i = 0; i < race.state.racers.length; i++) {
-          var r = race.state.racers[i]
-          if (r.kind === "human" || r.finished)
-            continue
-          out.push(r.id)
-        }
-        return out
-      }
-
-      function select(index) {
-        if (index < 0 || index >= cards.length)
-          return
-        hand.selected = index
-        hand.targeting = Engine.CARDS[cards[index]].scope === "targeted" && targets.length > 0
-        hand.targetAt = 0
-      }
-      function moveTarget(delta) {
-        if (!targeting || targets.length === 0)
-          return
-        hand.targetAt = ((hand.targetAt + delta) % targets.length + targets.length) % targets.length
-      }
-      function cancelTarget() {
-        hand.targeting = false
-        hand.selected = -1
-      }
-      function confirm() {
-        if (selected < 0 || selected >= cards.length)
-          return
-        var card = cards[selected]
-        var scope = Engine.CARDS[card].scope
-        if (scope === "targeted") {
-          if (targets.length === 0)
-            return
-          race.send({ "kind": "useCard", "index": selected, "targetId": targets[targetAt] })
-        } else {
-          race.send({ "kind": "useCard", "index": selected })
-        }
-        hand.selected = -1
-        hand.targeting = false
-      }
-
-      // The selection is cleared by the two events that can invalidate it and
-      // by nothing else. Watching the `cards` array instead would clear it ten
-      // times a second, because the engine hands back a fresh state -- and a
-      // fresh hand array -- on every step, whether the hand changed or not.
-      function reset() {
-        hand.selected = -1
-        hand.targeting = false
-      }
-
-      Column {
-        id: handColumn
-        x: race.px(14)
-        y: race.px(11)
-        width: parent.width - race.px(28)
-        spacing: race.px(6)
-
-        Text {
-          textFormat: Text.PlainText
-          text: "HAND"
-          color: Theme.textLabel
-          font.family: Theme.mono
-          font.bold: true
-          font.pixelSize: race.fs(14)
-          font.letterSpacing: 2
-        }
-
-        Repeater {
-          model: hand.cards
-
-          Row {
-            readonly property bool chosen: index === hand.selected
-            spacing: race.px(10)
-
-            Rectangle {
-              width: race.px(24)
-              height: race.px(24)
-              radius: race.px(4)
-              color: parent.chosen ? Theme.amber : "transparent"
-              border.width: 1
-              border.color: parent.chosen ? Theme.amber : Theme.lineStrong
-
-              Text {
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: String(index + 1)
-                color: parent.parent.chosen ? Theme.ink(Theme.amber) : Theme.textLabel
-                font.family: Theme.mono
-                font.bold: true
-                font.pixelSize: race.fs(15)
-              }
-            }
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: Engine.CARDS[modelData].label
-              color: parent.chosen ? Theme.amberGlow : Theme.textBright
-              font.family: Theme.mono
-              font.bold: true
-              font.pixelSize: race.fs(19)
-              font.letterSpacing: 1
-            }
-          }
-        }
-
-        // The target row appears only for a card that needs one, which is the
-        // design's rule: left and right pick a rival, Enter confirms.
-        Row {
-          visible: hand.targeting
-          spacing: race.px(8)
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: "◂"
-            color: Theme.amber
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: race.fs(16)
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: hand.targets.length > 0 ? race.nameOf(hand.targets[hand.targetAt]) : ""
-            color: Theme.amberGlow
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: race.fs(17)
-            font.letterSpacing: 1
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: "▸   ⏎"
-            color: Theme.amber
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: race.fs(16)
-          }
-        }
-      }
-    }
+                          + (picker.visible ? picker.dockHeight + race.px(16) : 0)
+    width: race.px(500)
+    value: race.human ? Math.min(race.state.streakThreshold, race.human.streak) : 0
+    segments: race.state ? race.state.streakThreshold : Engine.CHARGE_SEGMENTS
+    glowFrom: Engine.CHARGE_GLOW_FROM
+    reducedMotion: race.reducedMotion
+    holdingHand: race.hand.length > 0
+    cellHeight: race.px(24)
+    cellGap: race.px(4)
+    titleSize: race.fs(14)
+    visible: race.state ? race.state.powerupsEnabled : false
   }
 
   // ------------------------------------------------------------ pit crew

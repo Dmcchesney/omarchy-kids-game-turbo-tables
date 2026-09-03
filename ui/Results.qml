@@ -358,13 +358,19 @@ FocusScope {
       // Only reaches here when focus is somewhere that did not want it.
       results.raceAgainRequested()
       event.accepted = true
-    } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Right) {
+    } else if (event.key === Qt.Key_Down) {
       results.moveFocus(1)
       event.accepted = true
-    } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Left) {
+    } else if (event.key === Qt.Key_Up) {
       results.moveFocus(-1)
       event.accepted = true
     }
+    // Left and Right are deliberately not here. One arrow contract runs across
+    // the whole flow -- Tab and up/down move, left and right change a value --
+    // and this screen has no value to change, so left and right do nothing,
+    // exactly as they do on the settings screen's reset buttons. Round one had
+    // them moving focus here and changing a value there, which is two key maps
+    // in one game.
   }
 
   Rectangle {
@@ -563,13 +569,21 @@ FocusScope {
 
           // Lit is filled; unlit is an outline. Design, Accessibility: "Every
           // state has shape or text as well as color: lit lamps are filled."
+          //
+          // ROUND 2. The unlit outline was a one-pixel `Theme.textFaint` line --
+          // 0.38 alpha menu text on `Theme.ground` -- and in a 1366 and a 2560
+          // frame ten of twelve lamps were all but invisible, so `2 of 12` was
+          // carried by the number alone and the shape rule failed in practice.
+          // The unlit lamp is now a sunken face with a two-pixel `textLabel`
+          // edge: still unmistakably an outline against a filled amber lamp,
+          // and still there when you look at it.
           Rectangle {
             width: results.px(26)
             height: results.px(34)
             radius: 2
-            color: modelData ? Theme.amber : "transparent"
-            border.width: modelData ? 0 : 1
-            border.color: Theme.textFaint
+            color: modelData ? Theme.amber : Theme.panelSunken
+            border.width: modelData ? 0 : 2
+            border.color: Theme.textLabel
           }
         }
       }

@@ -34,6 +34,12 @@ FocusScope {
 
   signal leaveRequested()
 
+  // The last thing the screen told the child, read back off the banner itself.
+  // A reset is invisible when it works, so what the screen said about it is the
+  // only observable the child has -- and a walkthrough that asserted a second
+  // copy of that string would not be checking the screen.
+  readonly property string bannerText: banner.text
+
   // --------------------------------------------------------------- scaling
   readonly property real s: Math.max(0.42, Math.min(width / 1920, height / 1080))
   function px(v) { return Math.round(v * s) }
@@ -82,7 +88,28 @@ FocusScope {
     return file
   }
 
+  // ROUND 2 -- ONE WRITE, AND IT SAYS SO WHEN THERE WAS NONE.
+  //
+  // Two things were wrong with the version this replaces and both were found by
+  // watching the file rather than the screen's own view of it.
+  //
+  //   - A confirmed RESET SETTINGS patched nine keys through `Store.setSetting`,
+  //     and every one of those flushes the whole save file. Nine atomic writes
+  //     for one button press, and each of the eight intermediate ones left a
+  //     half-reset settings object on disk. The new settings object is built in
+  //     full here and written once, which is what the other two resets already
+  //     did.
+  //   - `Store.setSetting` refuses every write while `Store.loaded` is false,
+  //     which `TurboTables.qml` documents as a real outcome for a save file it
+  //     cannot read. The old code ignored the return value and the banner said
+  //     SETTINGS ARE BACK TO HOW THEY STARTED over a file that had not changed.
+  //     Every path now returns whether anything was written, and `answer()`
+  //     says NOTHING WAS CHANGED when the answer is no.
+  //
+  // Returns true when the save file was actually written.
   function applyReset(which) {
+    if (!Store.loaded)
+      return false
     var file = saveFileFromStore()
     if (which === "settings") {
       var fresh = Engine.resetSettings(file).settings
@@ -90,30 +117,36 @@ FocusScope {
       // and paint from one and names the rival level; the garage indexes both
       // from zero, which is the seam `migrateLegacyGarageSettings` crosses in
       // the other direction.
-      Store.setSetting("sound", fresh.sound)
-      Store.setSetting("reducedMotion", fresh.reducedMotion)
-      Store.setSetting("scanlines", fresh.scanlines)
-      Store.setSetting("kartBody", fresh.kart - 1)
-      Store.setSetting("kartPaint", fresh.paint - 1)
-      Store.setSetting("kartNumber", fresh.number)
-      Store.setSetting("rivalLevel",
-                       Math.max(0, Engine.RIVAL_LEVEL_ORDER.indexOf(fresh.rivalLevel)))
+      var next = {}
+      for (var key in Store.settings)
+        next[key] = Store.settings[key]
+      next["sound"] = fresh.sound
+      next["reducedMotion"] = fresh.reducedMotion
+      next["scanlines"] = fresh.scanlines
+      next["kartBody"] = fresh.kart - 1
+      next["kartPaint"] = fresh.paint - 1
+      next["kartNumber"] = fresh.number
+      next["rivalLevel"] = Math.max(0, Engine.RIVAL_LEVEL_ORDER.indexOf(fresh.rivalLevel))
       // Race mode and math set are the garage's two choices and the engine's
       // settings shape has no column for them, so their reset value is the
       // Store's own default rather than something invented here.
-      Store.setSetting("raceMode", Store.defaultSettings["raceMode"])
-      Store.setSetting("mathSet", Store.defaultSettings["mathSet"])
-      return
+      next["raceMode"] = Store.defaultSettings["raceMode"]
+      next["mathSet"] = Store.defaultSettings["mathSet"]
+      Store.settings = next
+      Store.flush()
+      Store.changed()
+      return true
     }
     if (which === "records") {
       Store.records = Engine.resetRecords(file).records
       Store.flush()
       Store.changed()
-      return
+      return true
     }
     Store.facts = Engine.resetFacts(file).facts
     Store.flush()
     Store.changed()
+    return true
   }
 
   function ask(which) {
@@ -125,11 +158,13 @@ FocusScope {
   function answer(yes) {
     var which = settings.pending
     settings.pending = ""
-    if (yes && which.length > 0)
-      settings.applyReset(which)
+    var done = (yes && which.length > 0) ? settings.applyReset(which) : false
     settings.focusStop(settings.resumeStop)
-    banner.say(yes ? (settings.resetDone(which)) : "NOTHING WAS CHANGED",
-               yes ? Theme.amber : Theme.lime)
+    // The banner reports what happened to the file, not what was asked for. A
+    // save file that could not be read is a save file that cannot be reset, and
+    // saying so is the only honest thing this screen can do about it.
+    banner.say(done ? settings.resetDone(which) : "NOTHING WAS CHANGED",
+               done ? Theme.amber : Theme.lime)
   }
 
   function resetDone(which) {
@@ -296,8 +331,13 @@ FocusScope {
         spacing: settings.px(18)
 
         Repeater {
-          model: [ { key: "TAB", what: "MOVE" },
-                   { key: "ARROWS", what: "CHANGE" },
+          // One arrow contract across every screen of the flow: Tab and the up
+          // and down arrows move, left and right change a value where the stop
+          // has one. `ARROWS CHANGE` was true of four rows on this screen and
+          // false of the other four, and it disagreed with the results screen,
+          // where left and right moved.
+          model: [ { key: "TAB  ↑ ↓", what: "MOVE" },
+                   { key: "◀ ▶", what: "CHANGE" },
                    { key: "ENTER", what: "CHOOSE" },
                    { key: "ESC", what: "BACK" } ]
 

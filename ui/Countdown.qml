@@ -18,8 +18,17 @@ import "../engine/engine.mjs" as Engine
 // this lap, so what stands behind GO is the question the race asks first and
 // not a sample.
 //
-// Nothing is typed here and nothing is chosen here. The only key the screen
-// takes is Escape, which puts the child back in the garage.
+// ROUND 2 -- THE GO BEAT TAKES THE KEYS IT ASKS FOR. The footer flips to
+// `TYPE THE ANSWER` on the GO beat and the race does not take over until the
+// beat after it, so for a full second this screen invited input and dropped it:
+// two digits typed on the GO beat, zero accepted, measured. A child who reads
+// the first fact behind GO and starts typing is doing exactly what the design
+// put the fact there for, and the screen was throwing it away. So the GO beat
+// now buffers digits and Backspace, and `finished()` hands them over -- the
+// keys land in the race in the order they were pressed. Before GO nothing is
+// typed and nothing is chosen: the footer says GET READY and means it.
+//
+// Escape puts the child back in the garage, on every beat.
 FocusScope {
   id: countdown
 
@@ -70,9 +79,15 @@ FocusScope {
   readonly property bool go: beat >= 3
   property bool done: false
 
+  // The digits pressed on the GO beat, in the order they were pressed. Held as
+  // an array of small integers rather than as text so nothing here builds a
+  // string, and read by the flow the instant `finished()` fires.
+  property var typedAhead: []
+
   function restart() {
     countdown.beat = 0
     countdown.done = false
+    countdown.typedAhead = []
   }
 
   // The countdown counts while it is the screen the child is looking at, and
@@ -102,12 +117,36 @@ FocusScope {
   Accessible.name: "Countdown"
   Accessible.description: "The race starts in " + countdown.beatWord
                           + ". The first question is " + countdown.factText
-                          + ". Escape goes back to the garage."
+                          + (countdown.go ? ". You can start typing the answer now." : "")
+                          + " Escape goes back to the garage."
 
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_Escape) {
       ticker.stop()
       countdown.abortRequested()
+      event.accepted = true
+      return
+    }
+    // Only on the GO beat, which is the only beat that asks for an answer.
+    if (!countdown.go)
+      return
+    if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
+      // The longest answer in the 1-12 tables is three digits, so three is all
+      // a child can usefully have typed before the race arrives.
+      if (countdown.typedAhead.length < 3) {
+        var next = countdown.typedAhead.slice()
+        next.push(event.key - Qt.Key_0)
+        countdown.typedAhead = next
+      }
+      event.accepted = true
+      return
+    }
+    if (event.key === Qt.Key_Backspace) {
+      if (countdown.typedAhead.length > 0) {
+        var shorter = countdown.typedAhead.slice()
+        shorter.pop()
+        countdown.typedAhead = shorter
+      }
       event.accepted = true
     }
   }
@@ -270,6 +309,43 @@ FocusScope {
         loops: Animation.Infinite
         NumberAnimation { from: 1.14; to: 1.0; duration: 260; easing.type: Easing.OutCubic }
         PauseAnimation { duration: Math.max(0, countdown.beatMs - 260) }
+      }
+    }
+  }
+
+  // ------------------------------------------------ the type-ahead readout
+  //
+  // What the child has typed on the GO beat, drawn where the race will draw the
+  // answer field, so the keys visibly land instead of vanishing. Empty until
+  // something is pressed, so a child who waits sees nothing new.
+  Row {
+    id: aheadRow
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: Math.round(countdown.height * 0.68)
+    spacing: countdown.px(10)
+    visible: countdown.go && countdown.typedAhead.length > 0
+    z: 4
+
+    Repeater {
+      model: countdown.typedAhead
+
+      Rectangle {
+        width: countdown.px(52)
+        height: countdown.px(70)
+        radius: Theme.cornerRadiusSmall
+        color: Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.94)
+        border.width: 2
+        border.color: Theme.lime
+
+        Text {
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: String(modelData)
+          color: Theme.cream
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: countdown.fs(48)
+        }
       }
     }
   }

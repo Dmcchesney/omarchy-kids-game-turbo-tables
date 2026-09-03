@@ -2,7 +2,7 @@ import QtQuick
 import "parts"
 import "../engine/engine.mjs" as Engine
 
-// The powerup hand, and the four keys that spend it.
+// The powerup hand, and the keys that spend it.
 //
 // Design, Streaks and the powerup hand: "Keys: `1`, `2`, `3` choose a card; for
 // a targeted card, left and right pick a rival, Enter confirms, Escape backs
@@ -24,15 +24,25 @@ import "../engine/engine.mjs" as Engine
 // is typing at speed for the entire race, and a mistyped answer that fires a
 // Turbo and throws away a Pile-Up is exactly the kind of loss the design's
 // fairness section spends its length preventing. Choosing is one key; spending
-// is two. Escape gets the hand back untouched either way.
+// is two.
 //
-// 1, 2 AND 3 ARE ALSO DIGITS. Plenty of answers begin with one of them, and the
-// child is typing for the whole race, so this panel never swallows them: it
-// takes 1, 2 and 3 as a choice and leaves the event unaccepted so the same key
-// reaches the screen behind it as a digit as well. Enter is arbitrated the same
-// way, through `entryLength`: with something already typed the answer wins and
-// Enter is left alone, and only with the field empty does Enter spend the card.
-// Nothing is ever spent by a keystroke that was meant as a digit.
+// ROUND 2 -- THIS PANEL IS DRIVEN, NOT FOCUSED. `ui/Race.qml` owns every key of
+// the race, because the race screen is the only place that knows the expected
+// answer and can therefore tell a card key from a digit. It calls `choose`,
+// `stepTarget`, `confirm` and `back` on this panel and reads `chosen`,
+// `needsTarget` and `targeting` back. The `Keys` handler below is still here
+// and still correct, so the panel is a complete screen on its own in the
+// harness, but in the game it never has focus and never fires.
+//
+// ROUND 2 -- ESCAPE HAS ONE MEANING AND NO ONE-WAY DOOR. The previous version
+// emitted `dismissed()` when Escape was pressed with no card chosen, and
+// printed `ESC HIDE` in the footer, and defined no key anywhere that brought
+// the panel back. A held hand is not something a child can lose: the design
+// says "You may hold a hand as long as you like", and the panel is not a modal,
+// so there is nothing to hide from. Escape now backs out of a *choice* and
+// nothing else, and with no choice made it is left unaccepted so the screen
+// behind can use it to leave the race. That is the same "back one" meaning
+// Escape has on every other screen in this game.
 FocusScope {
   id: picker
 
@@ -42,6 +52,18 @@ FocusScope {
   readonly property real s: Math.max(0.42, Math.min(width / 1920, height / 1080))
   function px(v) { return Math.round(v * s) }
   function fs(v) { return Math.max(8, Math.round(v * s)) }
+  // A floor for the lines that teach a child which key to press. `fs` alone
+  // put the footer at 10 px and the tier word at 9 px on a 1366 x 768 screen,
+  // which is the size this game is most likely to be played at. The panel is
+  // allowed to be small; the instructions are not.
+  function fsFloor(v, floor) { return Math.max(floor, Math.round(v * s)) }
+
+  // ------------------------------------------------------------- the panel
+  // The dock's own geometry, so a host can line its charge bar up with the
+  // panel instead of drawing on top of it.
+  property int dockWidth: picker.px(500)
+  property int dockMargin: picker.px(28)
+  readonly property int dockHeight: picker.visible ? dock.height : 0
 
   // ------------------------------------------------------------- the hand
   //
@@ -70,6 +92,14 @@ FocusScope {
   // the entry belongs to the race, not to this panel.
   property int entryLength: 0
 
+  // Does Enter spend the card as things stand, or does the half-typed answer
+  // own it? Standing on its own this panel's rule is the simple one -- an empty
+  // field lets Enter spend -- and that is the default binding. `ui/Race.qml`
+  // overrides it, because only the race screen knows which of the digits in the
+  // field were typed by the very press that chose the card, and those digits
+  // are not an answer the child is in the middle of.
+  property bool enterSpends: picker.entryLength === 0
+
   // -1 is "no card chosen yet", which is the state a hand sits in for as long
   // as the child likes. The design: "You may hold a hand as long as you like."
   property int chosen: -1
@@ -77,10 +107,21 @@ FocusScope {
 
   readonly property string chosenCard: (chosen >= 0 && chosen < hand.length)
                                        ? String(hand[chosen]) : ""
-  readonly property bool targeting: chosenCard.length > 0
-                                    && Engine.isCard(chosenCard)
-                                    && Engine.CARDS[chosenCard].scope === "targeted"
-                                    && picker.rivals.length > 0
+  // Does the chosen card need a rival at all? This is a property of the card
+  // and nothing else, so it stays true when the rival list empties -- which is
+  // the whole point. The old `targeting` folded "this card is targeted" and
+  // "there is someone to aim at" into one flag, so a Pile-Up chosen with every
+  // rival already home read as an untargeted card, printed `⏎ USE IT`, and
+  // fired `cardUsed(index, "")` into a refusal the child never saw.
+  readonly property bool needsTarget: chosenCard.length > 0
+                                      && Engine.isCard(chosenCard)
+                                      && Engine.CARDS[chosenCard].scope === "targeted"
+  // Aiming is possible only when the card needs a rival AND one is left.
+  readonly property bool targeting: needsTarget && picker.rivals.length > 0
+  // True when the child has chosen a card that can never be spent as things
+  // stand. The panel says so rather than swallowing the press.
+  readonly property bool strandedTarget: needsTarget && picker.rivals.length === 0
+
   readonly property string targetId: (picker.targeting
                                       && targetIndex >= 0 && targetIndex < rivals.length)
                                      ? String(rivals[targetIndex].id) : ""
@@ -91,17 +132,30 @@ FocusScope {
   // index is the position in the hand, 0 to 2. targetId is "" for a card that
   // needs no rival.
   signal cardUsed(int index, string targetId)
-  // Escape with nothing chosen: the child wants the panel to stop asking.
-  signal dismissed()
 
   visible: hand.length > 0
+
+  // Two invariants the previous version did not keep, and both were reachable
+  // in a real Grand Prix.
+  //
+  //  - A rival crossing the line shrinks `rivals` under a live aim. The old
+  //    `targetIndex` stayed where it was, `targetId` fell to "", and NO tile
+  //    carried the `▸` marker -- a targeting panel aiming at nothing, with no
+  //    shape and no text saying so. It is clamped back into range here.
+  //  - A hand is dealt while a card is chosen. `chosen` was a plain writable
+  //    int with no invariant, so a stale index survived into a hand that no
+  //    longer had that card.
+  onRivalsChanged: if (picker.targetIndex >= picker.rivals.length) picker.targetIndex = 0
+  onHandChanged: if (picker.chosen >= picker.hand.length) picker.reset()
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Power-up hand"
   Accessible.description: "Press one, two or three to choose a card."
                           + (picker.targeting
                              ? " Left and right pick a rival, Enter uses it on " + picker.targetName + "."
-                             : " Enter uses it.")
+                             : (picker.strandedTarget
+                                ? " There is no rival left to aim at, so this card cannot be used."
+                                : " Enter uses it."))
                           + " Escape puts the card back. Using a card costs the whole hand."
 
   function choose(index) {
@@ -118,31 +172,44 @@ FocusScope {
     picker.targetIndex = ((picker.targetIndex + delta) % count + count) % count
   }
 
-  function confirm() {
-    if (picker.chosen < 0)
-      return
-    var index = picker.chosen
-    var target = picker.targeting ? picker.targetId : ""
+  function reset() {
     picker.chosen = -1
     picker.targetIndex = 0
-    picker.cardUsed(index, target)
   }
 
+  // True when the card was actually spent. The old version returned nothing and
+  // guarded only `chosen < 0`, so three reachable states fired `cardUsed` into
+  // an engine refusal with nothing on screen changing: a stale index past the
+  // end of a new hand, a targeted card with every rival home, and a targeted
+  // card whose aim had fallen off a shrunk list.
+  function confirm() {
+    if (picker.chosen < 0 || picker.chosen >= picker.hand.length)
+      return false
+    if (picker.needsTarget && picker.targetId.length === 0)
+      return false
+    var index = picker.chosen
+    var target = picker.needsTarget ? picker.targetId : ""
+    picker.reset()
+    picker.cardUsed(index, target)
+    return true
+  }
+
+  // Backing out of a choice is free and always was. With nothing chosen there
+  // is nothing to back out of, and the caller is told so, so the same Escape
+  // can go on to mean "leave the race" on the screen behind.
   function back() {
-    if (picker.chosen >= 0) {
-      // The hand is untouched. Backing out of a choice is free and always was.
-      picker.chosen = -1
-      picker.targetIndex = 0
-      return
-    }
-    picker.dismissed()
+    if (picker.chosen < 0)
+      return false
+    picker.reset()
+    return true
   }
 
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_1 || event.key === Qt.Key_2 || event.key === Qt.Key_3) {
       picker.choose(event.key - Qt.Key_1)
       // Deliberately NOT accepted: the same press is also the digit 1, 2 or 3,
-      // and the screen behind has to see it.
+      // and the screen behind has to see it. In the game the race screen sees
+      // it first and arbitrates; this path is the standalone one.
       return
     }
     if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
@@ -155,15 +222,12 @@ FocusScope {
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
       // A half-typed answer owns Enter. Only an empty field lets Enter spend a
       // card, which is what stops a submit from costing a hand.
-      if (picker.entryLength === 0 && picker.chosen >= 0) {
-        picker.confirm()
-        event.accepted = true
-      }
+      if (picker.enterSpends && picker.chosen >= 0)
+        event.accepted = picker.confirm()
       return
     }
     if (event.key === Qt.Key_Escape) {
-      picker.back()
-      event.accepted = true
+      event.accepted = picker.back()
       return
     }
     // Every other key is left unaccepted on purpose. The race screen behind
@@ -176,9 +240,9 @@ FocusScope {
     id: dock
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    anchors.rightMargin: picker.px(28)
-    anchors.bottomMargin: picker.px(28)
-    width: picker.px(500)
+    anchors.rightMargin: picker.dockMargin
+    anchors.bottomMargin: picker.dockMargin
+    width: picker.dockWidth
     height: body.height + picker.px(30)
 
     Rectangle {
@@ -186,7 +250,8 @@ FocusScope {
       radius: Theme.cornerRadius
       color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.94)
       border.width: 2
-      border.color: picker.chosen >= 0 ? Theme.focusRing : Theme.amberDeep
+      border.color: picker.strandedTarget ? Theme.hazard
+                                          : (picker.chosen >= 0 ? Theme.focusRing : Theme.amberDeep)
     }
 
     Column {
@@ -196,27 +261,29 @@ FocusScope {
       width: parent.width - picker.px(30)
       spacing: picker.px(9)
 
-      Row {
+      // The rule the whole panel turns on sits beside the title where it fits
+      // and drops to its own line where it does not. A `Row` clipped it
+      // mid-word against the panel border at 1366 x 768, and the one line a
+      // child must not lose is the one that says a card costs the hand.
+      Flow {
         width: parent.width
         spacing: picker.px(10)
 
         Text {
-          anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: "POWER-UP HAND"
           color: Theme.amber
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: picker.fs(18)
+          font.pixelSize: picker.fsFloor(18, 15)
           font.letterSpacing: picker.px(3)
         }
         Text {
-          anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: "USING ONE SPENDS ALL THREE"
           color: Theme.textLabel
           font.family: Theme.mono
-          font.pixelSize: picker.fs(13)
+          font.pixelSize: picker.fsFloor(13, 12)
           font.letterSpacing: picker.px(1)
         }
       }
@@ -230,8 +297,8 @@ FocusScope {
           index: model.index + 1
           selected: picker.chosen === model.index
           scaleUnit: picker.s
-          labelSize: picker.fs(22)
-          detailSize: picker.fs(14)
+          labelSize: picker.fsFloor(22, 18)
+          detailSize: picker.fsFloor(14, 13)
         }
       }
 
@@ -242,9 +309,9 @@ FocusScope {
       // the wrong one can see it and press Escape.
       Item {
         width: parent.width
-        height: picker.targeting ? targetColumn.height + picker.px(10) : 0
+        height: picker.needsTarget ? targetColumn.height + picker.px(10) : 0
         clip: true
-        visible: picker.targeting
+        visible: picker.needsTarget
 
         Column {
           id: targetColumn
@@ -254,22 +321,23 @@ FocusScope {
 
           Text {
             textFormat: Text.PlainText
-            text: "AIM AT"
-            color: Theme.teal
+            text: picker.strandedTarget ? "NOBODY LEFT TO AIM AT" : "AIM AT"
+            color: picker.strandedTarget ? Theme.hazard : Theme.teal
             font.family: Theme.mono
             font.bold: true
-            font.pixelSize: picker.fs(14)
+            font.pixelSize: picker.fsFloor(14, 13)
             font.letterSpacing: picker.px(2)
           }
 
           Row {
             spacing: picker.px(8)
+            visible: picker.rivals.length > 0
 
             Repeater {
               model: picker.rivals
 
               Rectangle {
-                readonly property bool aimed: picker.targetIndex === model.index
+                readonly property bool aimed: picker.targeting && picker.targetIndex === model.index
                 width: Math.floor((targetColumn.width - picker.px(8) * Math.max(0, picker.rivals.length - 1))
                                   / Math.max(1, picker.rivals.length))
                 height: picker.px(46)
@@ -288,7 +356,7 @@ FocusScope {
                   color: parent.aimed ? Theme.textBright : Theme.textLabel
                   font.family: Theme.mono
                   font.bold: true
-                  font.pixelSize: picker.fs(16)
+                  font.pixelSize: picker.fsFloor(16, 14)
                   font.letterSpacing: picker.px(1)
                 }
               }
@@ -303,23 +371,27 @@ FocusScope {
         color: Theme.line
       }
 
-      // The keys, always visible, always the same four. A child who has never
-      // held a hand before finds out what to press by looking at the panel.
+      // The keys, always visible, always the same. A child who has never held a
+      // hand before finds out what to press by looking at the panel -- and when
+      // a card cannot be spent, this line is where it says why, rather than the
+      // press going nowhere in silence.
       Text {
         textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap
         text: picker.chosen < 0
-              ? "1 2 3  CHOOSE      ESC  HIDE"
-              : (picker.entryLength > 0
-                 ? "FINISH THE ANSWER FIRST      ESC  BACK"
-                 : (picker.targeting
-                    ? "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
-                    : "⏎  USE IT      ESC  BACK"))
-        color: Theme.text
+              ? "1 2 3  CHOOSE A CARD"
+              : (picker.strandedTarget
+                 ? "ESC  BACK"
+                 : (!picker.enterSpends
+                    ? "FINISH THE ANSWER FIRST      ESC  BACK"
+                    : (picker.targeting
+                       ? "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
+                       : "⏎  USE IT      ESC  BACK")))
+        color: picker.strandedTarget ? Theme.hazard : Theme.text
         font.family: Theme.mono
         font.bold: true
-        font.pixelSize: picker.fs(14)
+        font.pixelSize: picker.fsFloor(14, 15)
         font.letterSpacing: picker.px(1)
         lineHeight: 1.25
       }

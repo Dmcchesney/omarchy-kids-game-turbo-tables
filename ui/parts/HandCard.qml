@@ -167,7 +167,10 @@ Item {
       text: card.tier.toUpperCase()
       color: card.tierColor
       font.family: Theme.mono
-      font.pixelSize: Math.round(card.detailSize * 0.86)
+      // A floor, not a ratio alone. At 1366 x 768 the ratio put this word at
+      // 9 px, which is under every legibility floor in the design and smaller
+      // than anything else the game prints.
+      font.pixelSize: Math.max(12, Math.round(card.detailSize * 0.86))
       font.letterSpacing: 1
     }
   }
