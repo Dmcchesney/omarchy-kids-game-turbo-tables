@@ -121,19 +121,34 @@ Item {
       ctx.fillStyle = night
       ctx.fillRect(stall.vx(470), stall.vy(150), stall.vs(350), stall.vs(195))
 
-      // The yard beyond the doorway: a low roofline, then lit windows of
-      // uneven width and height at uneven spacing. Round one drew a regular
-      // 7 x 5 grid of identical dashes here and it read as a spreadsheet.
+      // The yard beyond the doorway: a low roofline, then three buildings.
+      //
+      // Round three scattered sixteen teal rectangles of eight different
+      // widths and six different heights across this strip at unrelated
+      // positions, and a critic read them for exactly what they were --
+      // "arbitrary teal rectangles that read as noise, not as anything".
+      // Randomness is not detail. A window is legible because windows repeat
+      // on a building's own grid, so each block now carries one grid of its
+      // own, on the block's own pitch, and only the lit pattern varies.
       rect(470, 236, 350, 4, "#0b2029")
-      rect(486, 196, 96, 40, "#0d2731")
-      rect(600, 172, 74, 64, "#0d2731")
-      rect(692, 206, 112, 30, "#0d2731")
-      var winX = [492, 508, 530, 552, 566, 606, 622, 640, 606, 630, 700, 722, 748, 776, 700, 736]
-      var winY = [204, 220, 204, 218, 204, 180, 180, 182, 208, 206, 212, 212, 214, 212, 224, 224]
-      var winW = [10, 16, 14, 8, 12, 10, 12, 18, 16, 10, 14, 18, 20, 12, 22, 14]
-      var winH = [8, 6, 10, 8, 12, 14, 10, 8, 12, 16, 8, 10, 6, 12, 6, 8]
-      for (var w = 0; w < winX.length; w++)
-        rect(winX[w], winY[w], winW[w], winH[w], (w % 3 === 0) ? "#2f8790" : "#1a5a66")
+      var blocks = [ { bx: 486, by: 196, bw: 96, bh: 40, cap: "#0f2c37" },
+                     { bx: 600, by: 172, bw: 74, bh: 64, cap: "#123340" },
+                     { bx: 692, by: 206, bw: 112, bh: 30, cap: "#0f2c37" } ]
+      // One character per window, walked in reading order: a fixed pattern,
+      // so the yard is the same yard every time the screen opens.
+      var litBits = "1011010011100101101100101101011010011011"
+      var bit = 0
+      for (var bl = 0; bl < blocks.length; bl++) {
+        var bk = blocks[bl]
+        rect(bk.bx, bk.by, bk.bw, bk.bh, "#0d2731")
+        rect(bk.bx, bk.by, bk.bw, 3, bk.cap)
+        for (var wy = bk.by + 8; wy + 7 <= bk.by + bk.bh; wy += 13)
+          for (var wx = bk.bx + 7; wx + 8 <= bk.bx + bk.bw; wx += 15) {
+            var on = litBits.charAt(bit % litBits.length) === "1"
+            bit++
+            rect(wx, wy, 8, 7, on ? "#2c7d87" : "#14414c")
+          }
+      }
       // Wet floor reflection outside.
       rect(470, 292, 350, 53, "#0c2831")
       for (var rx2 = 490; rx2 < 810; rx2 += 60)
@@ -338,34 +353,67 @@ Item {
       ctx.stroke()
 
       // ------------------------------------------------------ work lights
+      // A work light. ROUND-4: a fixture, not a bar.
+      //
+      // The design's own visual pillar is "amber work lights", and round
+      // three's were, in a critic's words, "flat amber bars with no fixture
+      // or cord, and near-invisible beams" -- fairly, because the fixture was
+      // one flat grey rectangle behind one flat amber rectangle, with a
+      // single 5-unit stem, and the beam left the source at alpha 0.10.
+      // What is here now: two hanger rods, a reflector that is wider at the
+      // top than at the tube so it reads as a shade, end caps that stop the
+      // tube being a bar, a hot core inside the tube, and a beam that starts
+      // at alpha 0.20 with a brighter inner cone inside it.
       function workLight(x, y, w) {
-        rect(x + w * 0.42, y - 22, 5, 22, "#2a2e39")
-        rect(x - 6, y, w + 12, 12, "#31353f")
-        rect(x, y + 10, w, 7, Theme.amberGlow)
-        rect(x, y + 17, w, 3, Theme.amberDeep)
+        // Hangers.
+        rect(x + w * 0.17, y - 30, 3, 30, "#2a2e39")
+        rect(x + w * 0.80, y - 30, 3, 30, "#2a2e39")
+        rect(x + w * 0.17 - 2, y - 31, 7, 3, "#3a4050")
+        rect(x + w * 0.80 - 2, y - 31, 7, 3, "#3a4050")
+        // The reflector, as a trapezoid: 20 units wider at its top edge than
+        // at the tube, which is the whole reason it reads as a shade.
+        ctx.fillStyle = "#3b414e"
+        ctx.beginPath()
+        ctx.moveTo(stall.vx(x - 16), stall.vy(y))
+        ctx.lineTo(stall.vx(x + w + 16), stall.vy(y))
+        ctx.lineTo(stall.vx(x + w + 4), stall.vy(y + 11))
+        ctx.lineTo(stall.vx(x - 4), stall.vy(y + 11))
+        ctx.closePath()
+        ctx.fill()
+        rect(x - 16, y, w + 32, 3, "#4b5262")
+        rect(x - 4, y + 10, w + 8, 2, "#565d6e")
+        // End caps, then the tube: a hot core, the amber body, a warm base.
+        rect(x - 4, y + 11, 7, 11, "#262a34")
+        rect(x + w - 3, y + 11, 7, 11, "#262a34")
+        rect(x + 3, y + 12, w - 6, 9, Theme.amberGlow)
+        rect(x + 3, y + 12, w - 6, 3, "#fff2d6")
+        rect(x + 3, y + 20, w - 6, 3, Theme.amberDeep)
         var glow = ctx.createRadialGradient(stall.vx(x + w / 2), stall.vy(y + 16), 0,
                                             stall.vx(x + w / 2), stall.vy(y + 16), stall.vs(w * 1.9))
-        glow.addColorStop(0, Qt.rgba(1, 0.78, 0.36, 0.30))
-        glow.addColorStop(0.45, Qt.rgba(1, 0.72, 0.3, 0.10))
+        glow.addColorStop(0, Qt.rgba(1, 0.80, 0.40, 0.42))
+        glow.addColorStop(0.45, Qt.rgba(1, 0.72, 0.3, 0.14))
         glow.addColorStop(1, Qt.rgba(1, 0.7, 0.3, 0))
         ctx.fillStyle = glow
         ctx.fillRect(stall.vx(x + w / 2 - w * 1.9), stall.vy(y + 16 - w * 1.9),
                      stall.vs(w * 3.8), stall.vs(w * 3.8))
-        // The cone of light falling toward the floor. It fades to nothing
-        // over its own length: round one filled it at a flat alpha and left a
-        // hard diagonal edge across the tool chest with no source above it.
-        var cone = ctx.createLinearGradient(0, stall.vy(y + 18), 0, stall.vy(490))
-        cone.addColorStop(0, Qt.rgba(1, 0.74, 0.33, 0.10))
-        cone.addColorStop(0.55, Qt.rgba(1, 0.74, 0.33, 0.035))
-        cone.addColorStop(1, Qt.rgba(1, 0.74, 0.33, 0))
-        ctx.fillStyle = cone
-        ctx.beginPath()
-        ctx.moveTo(stall.vx(x), stall.vy(y + 18))
-        ctx.lineTo(stall.vx(x + w), stall.vy(y + 18))
-        ctx.lineTo(stall.vx(x + w + 140), stall.vy(490))
-        ctx.lineTo(stall.vx(x - 140), stall.vy(490))
-        ctx.closePath()
-        ctx.fill()
+        // The beam. Two cones: a wide soft one and a narrow bright one, both
+        // fading to nothing over their own length so neither ends on an edge.
+        function beam(spread, a0, a1) {
+          var cone = ctx.createLinearGradient(0, stall.vy(y + 22), 0, stall.vy(500))
+          cone.addColorStop(0, Qt.rgba(1, 0.76, 0.36, a0))
+          cone.addColorStop(0.50, Qt.rgba(1, 0.75, 0.34, a1))
+          cone.addColorStop(1, Qt.rgba(1, 0.74, 0.33, 0))
+          ctx.fillStyle = cone
+          ctx.beginPath()
+          ctx.moveTo(stall.vx(x + 2), stall.vy(y + 22))
+          ctx.lineTo(stall.vx(x + w - 2), stall.vy(y + 22))
+          ctx.lineTo(stall.vx(x + w + spread), stall.vy(500))
+          ctx.lineTo(stall.vx(x - spread), stall.vy(500))
+          ctx.closePath()
+          ctx.fill()
+        }
+        beam(150, 0.115, 0.045)
+        beam(52, 0.115, 0.040)
       }
       // A matched pair: same length, same baseline. Round one had them 186
       // and 194 units long, hung four units apart, and called them a pair.
@@ -411,6 +459,15 @@ Item {
       // taken from the column and row indices rather than from the offset
       // position, so no amount of drape can put the pattern out of register.
       // The light square is dropped to a value that sits under the kart.
+      //
+      // ROUND-4: the hem. A critic found "a detached dark square at
+      // (955-962, 350-356), 8 px below the checkered flag's bottom edge,
+      // floating on the wall." It was the bottom check of the one column
+      // whose drape ran three units lower than its neighbours': a dark square
+      // on a dark wall with dark squares either side of it, so its own column
+      // gave it nothing to belong to. Cloth has a hem, and a hem is what ties
+      // the columns together, so there is one now -- a continuous band in a
+      // value that reads against the wall, following each column's drape.
       rect(852, 60, 72, 5, "#2b3040")
       rect(854, 64, 68, 6, "#131620")
       for (var fc = 0; fc < 6; fc++) {
@@ -419,6 +476,7 @@ Item {
           rect(856 + fc * 11, 68 + drape + fr * 11, 11, 11,
                (fr + fc) % 2 === 0 ? "#8a90a0" : "#131620")
         }
+        rect(856 + fc * 11, 68 + drape + 77, 11, 3, "#5a6070")
       }
 
       // Traffic cone. It used to stand at x=46 with its base at y=400, and

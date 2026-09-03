@@ -132,8 +132,15 @@ Item {
       border.color: Theme.lineStrong
     }
 
+    // ROUND-4: the right rail is one line. A chip has no box, so centring its
+    // text in the button's footprint ended it 24 to 29 px short of the
+    // buttons' right edge and left the column ragged. The chips are now
+    // right-aligned on the same rail the button boxes end at, which is the
+    // edge the eye actually reads down.
     Text {
-      anchors.centerIn: parent
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.horizontalCenter: row.changeable ? parent.horizontalCenter : undefined
+      anchors.right: row.changeable ? undefined : parent.right
       textFormat: Text.PlainText
       text: row.changeable ? "CHANGE" : row.fixedLabel
       // A row that cannot change still has to say why, and be read while it

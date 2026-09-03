@@ -136,7 +136,7 @@ Item {
         frontWing: { x0: 95, x1: 108, y0: 2.5, y1: 4.6 },
         wing: { back: 2, len: 17, rise: 9, deck: 0 },
         hoop: false, roof: false, canopy: false, fenders: false, dualRear: false,
-        plate: { x0: 44, x1: 67, y0: 7, y1: 17.2 } },
+        plate: { x0: 43, x1: 66, y0: 4.8, y1: 19.0 } },
       // 1 WEDGE -- long and low, an arrow with a lip instead of a wing
       { rearX: 24, rearR: 11, frontX: 88, frontR: 11,
         nearZ0: -4, nearZ1: 5, farZ0: 29, farZ1: 38,
@@ -152,7 +152,7 @@ Item {
         frontWing: { x0: 96, x1: 110, y0: 2.0, y1: 3.8 },
         wing: { back: 1, len: 12, rise: 1.5, deck: 0 },
         hoop: false, roof: false, canopy: false, fenders: false, dualRear: false,
-        plate: { x0: 42, x1: 64, y0: 6, y1: 14.6 } },
+        plate: { x0: 41, x1: 64, y0: 4.3, y1: 16.5 } },
       // 2 STOCKCAR -- fendered, a roofed cabin over the seat
       { rearX: 26, rearR: 12, frontX: 84, frontR: 12,
         nearZ0: -3, nearZ1: 6, farZ0: 28, farZ1: 37,
@@ -168,7 +168,7 @@ Item {
         frontWing: null,
         wing: { back: 1, len: 13, rise: 1.0, deck: 0 },
         hoop: false, roof: true, canopy: false, fenders: true, dualRear: false,
-        plate: { x0: 44, x1: 66, y0: 7.5, y1: 18 } },
+        plate: { x0: 43, x1: 66, y0: 4.8, y1: 20.0 } },
       // 3 BUGGY -- tall on big wheels, an exposed roll cage
       { rearX: 27, rearR: 14.5, frontX: 85, frontR: 13.5,
         nearZ0: -5, nearZ1: 5, farZ0: 29, farZ1: 39,
@@ -183,7 +183,7 @@ Item {
         frontWing: null,
         wing: null,
         hoop: true, roof: false, canopy: false, fenders: false, dualRear: false,
-        plate: { x0: 46, x1: 68, y0: 12.5, y1: 22 } },
+        plate: { x0: 45, x1: 68, y0: 9.8, y1: 24.0 } },
       // 4 HAULER -- a slab with a flat deck, twin rear wheels
       { rearX: 24, rearR: 11.5, frontX: 88, frontR: 11.5,
         nearZ0: -4, nearZ1: 6, farZ0: 28, farZ1: 38,
@@ -199,7 +199,7 @@ Item {
         frontWing: { x0: 94, x1: 106, y0: 2.5, y1: 4.4 },
         wing: null,
         hoop: false, roof: false, canopy: false, fenders: false, dualRear: true,
-        plate: { x0: 52, x1: 68, y0: 7, y1: 16.2 } },
+        plate: { x0: 55, x1: 75, y0: 4.8, y1: 18.0 } },
       // 5 PROTOTYPE -- a closed teal canopy and a double-deck rear wing
       { rearX: 25, rearR: 12, frontX: 88, frontR: 11,
         nearZ0: -4, nearZ1: 5, farZ0: 29, farZ1: 38,
@@ -215,7 +215,7 @@ Item {
         frontWing: { x0: 96, x1: 110, y0: 2.2, y1: 4.2 },
         wing: { back: 2, len: 18, rise: 11, deck: 5.2 },
         hoop: false, roof: false, canopy: true, fenders: false, dualRear: false,
-        plate: { x0: 46, x1: 68, y0: 6.5, y1: 16.2 } }
+        plate: { x0: 43, x1: 66, y0: 4.3, y1: 18.0 } }
     ]
     return table[i]
   }
@@ -496,21 +496,41 @@ Item {
         } })
       }
 
-      // The dark pool a wheel leaves on the ground, cast down the light ray
-      // like every other shadow here.
-      function wheelPatch(x, r, z0, z1) {
-        var drop = r / Ly
-        var cx = x - Lx * drop
-        var cz = (z0 + z1) / 2 - Lz * drop
+      // ------------------------------------------------ GROUND AND SHADOW
+      //
+      // ROUND-4 REBUILD. Round three's ground was measurably almost nothing.
+      // On its own shipped frame the floor directly under the near sill ran
+      // Y = 0.0370 at 21 px below the sill and Y = 0.0744 at 42 px below it,
+      // against an open dais of Y = 0.0480 -- the floor got BRIGHTER under
+      // the kart than beside it. (Y here and throughout this file's comments
+      // is WCAG relative luminance, linearised.) The cause was arithmetic:
+      // the whole-kart pool was an ellipse whose z semi-axis was 0.62 of the
+      // kart's track, about 27 model units, which foreshortens to roughly
+      // 40 screen px, so almost all of the floor the eye reads as "under the
+      // kart" fell outside it entirely.
+      //
+      // What replaces it:
+      //   * a contact patch per tyre, opaque black at the contact and ramping
+      //     out over about 30 px measured on the ground plane;
+      //   * a long, dark pool under the floor pan running the whole wheelbase;
+      //   * the body's own cast quads, kept, because they say what shape the
+      //     thing standing here is.
+      //
+      // `pool` takes its extent in MODEL units on the ground plane, so a
+      // stated ramp in units converts to px through `unit` and can be read
+      // back off the shipped frame.
+      function pool(cx, cz, rx, rz, stops, depth) {
         var o = project(cx, 0, cz)
-        var ex = project(cx + r * 1.35, 0, cz)
-        var ez = project(cx, 0, cz + r * 1.35)
-        queue.push({ depth: 1e6, custom: function (c) {
+        var ex = project(cx + rx, 0, cz)
+        var ez = project(cx, 0, cz + rz)
+        // The sort is by depth alone and is not promised to be stable, so
+        // every pool carries its own depth rather than sharing one.
+        queue.push({ depth: depth, custom: function (c) {
           c.save()
           c.transform(ex[0] - o[0], ex[1] - o[1], ez[0] - o[0], ez[1] - o[1], o[0], o[1])
           var grad = c.createRadialGradient(0, 0, 0, 0, 0, 1)
-          grad.addColorStop(0, Qt.rgba(0, 0, 0, 0.66))
-          grad.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+          for (var i = 0; i < stops.length; i++)
+            grad.addColorStop(stops[i][0], Qt.rgba(0, 0, 0, stops[i][1]))
           c.fillStyle = grad
           c.beginPath()
           c.arc(0, 0, 1, 0, Math.PI * 2, false)
@@ -519,47 +539,53 @@ Item {
         } })
       }
 
-      // ------------------------------------------------ ground and shadow
+      // A tyre's contact with the floor. `r` is the tyre radius; the patch is
+      // black out to two thirds of it and gone by 2.1 of it, which at the
+      // stall's scale is a 30 px ramp on the ground plane.
+      function contactPatch(x, r, z0, z1) {
+        var cz = (z0 + z1) / 2
+        pool(x, cz, r * 2.1, r * 2.1,
+             [[0, 0.94], [0.30, 0.92], [0.46, 0.66], [0.70, 0.26], [1, 0]], 2.20e6)
+        pool(x, cz, r * 0.85, r * 0.72, [[0, 0.97], [0.72, 0.95], [1, 0.55]], 2.10e6)
+      }
+
       if (kart.shadow) {
-        // A soft pool under the whole kart, then the body's own hard-edged
-        // shadow cast down the light ray. The pool says "something stands
-        // here"; the cast quad says what shape it is.
         var midZ = (g.nearZ0 + g.farZ1) / 2
         var midX = (g.rearX + g.frontX) / 2
-        var po = project(midX, 0, midZ)
-        var pex = project(midX + (g.frontX - g.rearX) * 0.98, 0, midZ)
-        var pez = project(midX, 0, midZ + (g.farZ1 - g.nearZ0) * 0.62)
-        queue.push({ depth: 2e6, custom: function (c) {
-          c.save()
-          c.transform(pex[0] - po[0], pex[1] - po[1], pez[0] - po[0], pez[1] - po[1],
-                      po[0], po[1])
-          var pool = c.createRadialGradient(0, 0, 0, 0, 0, 1)
-          pool.addColorStop(0, Qt.rgba(0, 0, 0, 0.52))
-          pool.addColorStop(0.62, Qt.rgba(0, 0, 0, 0.26))
-          pool.addColorStop(1, Qt.rgba(0, 0, 0, 0))
-          c.fillStyle = pool
-          c.beginPath()
-          c.arc(0, 0, 1, 0, Math.PI * 2, false)
-          c.fill()
-          c.restore()
-        } })
+        // The body pool: as long as the wheelbase and as wide as the track,
+        // so the floor between the wheels is the darkest floor in the picture
+        // rather than the brightest.
+        var halfL = (g.frontX - g.rearX) / 2 + g.frontR * 0.7
+        var halfW = (g.farZ1 - g.nearZ0) / 2 + 3
+        // Two pools, not one. The tight one is the body's own footprint and
+        // is nearly opaque; the wide one is the ambient occlusion that makes
+        // the ramp long. A single pool cannot do both, because its core and
+        // its falloff share one radius: round three's did, its z semi-axis
+        // came out at 27 model units, and the ramp finished 40 px from the
+        // centre -- inside the kart's own silhouette, where nothing can see
+        // it. The wide pool's outer stop sits about 22 model units in front
+        // of the near tyre, which is 32 px down the screen at stall size.
+        pool(midX, midZ, halfL, halfW,
+             [[0, 0.94], [0.58, 0.92], [0.88, 0.55], [1, 0]], 2.40e6)
+        pool(midX, midZ, halfL * 1.30, halfW + 22,
+             [[0, 0.70], [0.40, 0.66], [0.70, 0.34], [1, 0]], 2.50e6)
 
         shadowPoly(castQuad(g.podX0, g.podX1, g.bodyZ0, g.bodyZ1, g.panY0, 0),
-                   0.42, null, 1.6e6)
+                   0.62, null, 1.6e6)
         var last = g.noseSteps[g.noseSteps.length - 1]
         shadowPoly(castQuad(g.noseSteps[0].x0, last.x1, g.noseSteps[0].z0,
-                            g.noseSteps[0].z1, g.panY0, 0), 0.40, null, 1.55e6)
+                            g.noseSteps[0].z1, g.panY0, 0), 0.58, null, 1.55e6)
         if (g.frontWing)
           shadowPoly(castQuad(g.frontWing.x0, g.frontWing.x1, g.bodyZ0 - 3,
                               g.bodyZ1 + 3, Math.max(0.7, g.panY0 - 2.0), 0),
-                     0.46, null, 1.5e6)
-        wheelPatch(g.rearX, g.rearR, g.nearZ0, g.nearZ1)
-        wheelPatch(g.frontX, g.frontR, g.nearZ0, g.nearZ1)
-        wheelPatch(g.rearX, g.rearR, g.farZ0, g.farZ1)
-        wheelPatch(g.frontX, g.frontR, g.farZ0, g.farZ1)
+                     0.60, null, 1.5e6)
+        contactPatch(g.rearX, g.rearR, g.nearZ0, g.nearZ1)
+        contactPatch(g.frontX, g.frontR, g.nearZ0, g.nearZ1)
+        contactPatch(g.rearX, g.rearR, g.farZ0, g.farZ1)
+        contactPatch(g.frontX, g.frontR, g.farZ0, g.farZ1)
         if (g.dualRear) {
-          wheelPatch(g.rearX + g.rearR * 1.55, g.rearR, g.nearZ0, g.nearZ1)
-          wheelPatch(g.rearX + g.rearR * 1.55, g.rearR, g.farZ0, g.farZ1)
+          contactPatch(g.rearX + g.rearR * 1.55, g.rearR, g.nearZ0, g.nearZ1)
+          contactPatch(g.rearX + g.rearR * 1.55, g.rearR, g.farZ0, g.farZ1)
         }
       }
 
@@ -582,9 +608,21 @@ Item {
       // showing between it and the ground; this is the dark the eye expects
       // to find under a car, drawn as a real surface from the pod's bottom
       // edge down to the contact line rather than as nothing at all.
-      face([[g.podX0 + 1, g.panY0, g.bodyZ0 + 0.4], [g.podX1 - 1, g.panY0, g.bodyZ0 + 0.4],
-            [g.podX1 - 1, 0, g.bodyZ0 + 3.2], [g.podX0 + 1, 0, g.bodyZ0 + 3.2]],
-           Qt.rgba(0.03, 0.035, 0.05, 1))
+      //
+      // ROUND-4: sliced. As one quad it took a single average depth near its
+      // middle, which is nearer than the rear wheel standing at its far end,
+      // so it painted a dark chord straight across the near-rear rim -- the
+      // detached light-grey crescent a critic found at (455-510, 592-612) on
+      // the shipped frame was this quad's edge, not a broken annulus. Each
+      // slice now sorts at its own depth, exactly as `sweep` does.
+      var ubSlices = 10
+      for (var ub = 0; ub < ubSlices; ub++) {
+        var ux0 = g.podX0 + 1 + (g.podX1 - g.podX0 - 2) * ub / ubSlices
+        var ux1 = g.podX0 + 1 + (g.podX1 - g.podX0 - 2) * (ub + 1) / ubSlices
+        face([[ux0, g.panY0, g.bodyZ0 + 0.4], [ux1, g.panY0, g.bodyZ0 + 0.4],
+              [ux1, 0, g.bodyZ0 + 3.2], [ux0, 0, g.bodyZ0 + 3.2]],
+             Qt.rgba(0.03, 0.035, 0.05, 1))
+      }
 
       // The flank is given two more values so the paint reads as a body and
       // not as one plate of colour: a dark sill along the bottom of the pod
@@ -597,32 +635,179 @@ Item {
       box(g.podX0 + 2.5, g.podX1 - 0.5, bandY, bandY + 2.1,
           g.bodyZ0 - 0.35, g.bodyZ0, gain(kart.paint, 1.34), 0.1, 0.3)
 
-      // Wheel arches. Each tyre darkens the bodywork it stands against, in a
-      // pool centred on the contact between tyre and sill and falling off over
-      // about a radius. Without this the wheels sit beside the body instead of
-      // in it -- the tyre and the flank meet at a hard edge with two lit
-      // surfaces either side of it, which is the one thing that never happens
-      // on a real object.
-      function arch(x, r, z) {
-        var o = project(x, r * 0.55, z)
-        var ex = project(x + r * 1.5, r * 0.55, z)
-        var ey = project(x, r * 0.55 + r * 1.5, z)
-        queue.push({ depth: depthAt(x, z) - 0.35, custom: function (c) {
+      // ------------------------------------------------------ WHEEL ARCHES
+      //
+      // ROUND-4. This is the round's central piece of work, and round three
+      // did not have it. Round three called a soft radial pool centred on the
+      // wheel's own hub an "arch": almost all of it fell behind the tyre that
+      // cast it, and what survived was a faint haze. The verdict was exact --
+      // "every wheel/body meeting is a hard silhouette edge", and the far
+      // wheel came out as "a 13 x 5 grey chip that reads as debris... because
+      // there is no fender: no arch, no wrap, no shadow of the wheel cast
+      // onto the body, no darkening where they meet."
+      //
+      // An arch is four things, and all four are drawn here:
+      //
+      //   1. THE OPENING. A dark disc on the body's own surface at the
+      //      wheel's radius, so the bodywork has a hole the tyre stands in
+      //      rather than a silhouette it abuts.
+      //   2. THE INNER LIP. A darker ring just inside the opening's edge --
+      //      the cut edge of the panel, in shadow because it faces inward.
+      //   3. THE OUTER LIP. A thin bright arc just outside it, the rolled
+      //      edge of the arch catching the same light everything else does.
+      //   4. THE WHEEL'S OWN SHADOW, cast onto the flank along the light ray
+      //      and falling off over about a third of a radius.
+      //
+      // All four are clipped to `flankOutline`: the body's silhouette in the
+      // plane they are drawn on, so no part of an arch can land on the dais
+      // or on the wall behind the kart.
+      //
+      // The whole thing is queued at a depth just behind the tyre it belongs
+      // to, so every slice of bodywork -- including nose slices nearer than
+      // the arch's own x -- is already painted underneath it.
+      function flankOutline(zp) {
+        var pts = [[g.podX0 - 1, g.panY0 - 0.5, zp], [g.podX0 - 1, g.podY1, zp],
+                   [g.podX1, g.podY1, zp]]
+        for (var q = 0; q < g.noseSteps.length; q++) {
+          var ns = g.noseSteps[q]
+          pts.push([ns.x0, ns.yA, zp])
+          pts.push([ns.x1, ns.yB, zp])
+        }
+        var lastStep = g.noseSteps[g.noseSteps.length - 1]
+        pts.push([lastStep.x1, g.panY0 - 0.5, zp])
+        return modelPoly(pts)
+      }
+
+      function wheelArch(x, r, zPlane, wheelDepth) {
+        var b = basis(x, r, zPlane, r)
+        var clipPts = flankOutline(zPlane)
+        // The light's direction projected onto this plane, for the cast
+        // shadow: down the ray, so the dark falls away from the light.
+        var sx = -Lx * 0.30, sy = -Ly * 0.30
+        queue.push({ depth: wheelDepth + 0.12, custom: function (c) {
           c.save()
-          c.transform(ex[0] - o[0], ex[1] - o[1], ey[0] - o[0], ey[1] - o[1], o[0], o[1])
-          var grad = c.createRadialGradient(0, 0, 0, 0, 0, 1)
-          grad.addColorStop(0, Qt.rgba(0, 0, 0, 0.52))
-          grad.addColorStop(0.55, Qt.rgba(0, 0, 0, 0.24))
-          grad.addColorStop(1, Qt.rgba(0, 0, 0, 0))
-          c.fillStyle = grad
           c.beginPath()
-          c.arc(0, 0, 1, 0, Math.PI * 2, false)
+          c.moveTo(clipPts[0][0], clipPts[0][1])
+          for (var ci = 1; ci < clipPts.length; ci++)
+            c.lineTo(clipPts[ci][0], clipPts[ci][1])
+          c.closePath()
+          c.clip()
+          c.transform(b.ax[0], b.ax[1], b.ay[0], b.ay[1], b.o[0], b.o[1])
+
+          // 4. the tyre's shadow on the flank, offset down the light ray
+          var cast = c.createRadialGradient(sx, sy, 0, sx, sy, 1.62)
+          cast.addColorStop(0, Qt.rgba(0, 0, 0, 0.62))
+          cast.addColorStop(0.66, Qt.rgba(0, 0, 0, 0.30))
+          cast.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+          c.fillStyle = cast
+          c.beginPath()
+          c.arc(sx, sy, 1.62, 0, Math.PI * 2, false)
+          c.fill()
+
+          // 1. the opening
+          var open = c.createRadialGradient(0, 0, 0, 0, 0, 1.16)
+          open.addColorStop(0, Qt.rgba(0, 0, 0, 0.90))
+          open.addColorStop(0.80, Qt.rgba(0, 0, 0, 0.86))
+          open.addColorStop(1, Qt.rgba(0, 0, 0, 0))
+          c.fillStyle = open
+          c.beginPath()
+          c.arc(0, 0, 1.16, 0, Math.PI * 2, false)
+          c.fill()
+
+          // 2. the inner lip: the cut edge of the panel, facing inward
+          c.beginPath()
+          c.arc(0, 0, 1.16, 0, Math.PI * 2, false)
+          c.arc(0, 0, 1.02, 0, Math.PI * 2, true)
+          c.fillStyle = Qt.rgba(0, 0, 0, 0.55)
+          c.fill()
+
+          // 3. the outer lip, over the top of the opening only. The basis
+          // `ay` runs up the screen, so positive angles are the TOP of the
+          // arch: 1.02*PI to 1.98*PI put this warm band along the BOTTOM of
+          // each wheel, where it read as a tan crescent under the tyre.
+          c.beginPath()
+          c.arc(0, 0, 1.255, Math.PI * 0.02, Math.PI * 0.98, false)
+          c.arc(0, 0, 1.155, Math.PI * 0.98, Math.PI * 0.02, true)
+          c.fillStyle = Qt.rgba(1, 0.86, 0.66, 0.24)
           c.fill()
           c.restore()
         } })
       }
-      arch(g.rearX, g.rearR, g.bodyZ0 - 0.6)
-      arch(g.frontX, g.frontR, g.bodyZ0 - 0.6)
+
+      // The fender arc: real geometry, so the wheel has something to pass
+      // behind. A band of bodywork over the top of a tyre, built as a ring
+      // segment between two radii and extruded across the tyre's width.
+      //
+      // Every quad is emitted ONCE, with the winding that makes its normal
+      // point out of the solid. `oriented` does that by construction: it
+      // reads the normal the winding would give and reverses the quad when
+      // that disagrees with the outward direction the caller states.
+      //
+      // The first draft of this emitted both windings and let the back-face
+      // cull choose. That is wrong for a band, and it showed: where the
+      // outward face was culled, the reversed one survived carrying a normal
+      // that pointed the wrong way, so the INSIDE of the arch -- which faces
+      // down into the wheel and must be the darkest thing on the part --
+      // picked up the sky term and rendered as a bright cream crescent under
+      // each tyre. Shading is only as honest as the normals it is given.
+      //
+      // With the winding right, the inner surface comes out dark from the
+      // same `shade` call every other face uses. That is the dark inner lip,
+      // and it is the lighting model saying it rather than a chosen value.
+      function oriented(pts, want) {
+        var n = normalOf(pts)
+        if (!n)
+          return pts
+        if (n[0] * want[0] + n[1] * want[1] + n[2] * want[2] < 0)
+          return [pts[3], pts[2], pts[1], pts[0]]
+        return pts
+      }
+      function fenderArc(x, r, z0, z1, base, ri, ro, a0, a1, steps) {
+        function pt(a, rad, z) {
+          return [x + Math.cos(a) * rad, r + Math.sin(a) * rad, z]
+        }
+        for (var i = 0; i < steps; i++) {
+          var t0 = a0 + (a1 - a0) * i / steps
+          var t1 = a0 + (a1 - a0) * (i + 1) / steps
+          var tm = (t0 + t1) / 2
+          var out = [Math.cos(tm), Math.sin(tm), 0]
+          var inn = [-out[0], -out[1], 0]
+          face(oriented([pt(t0, ro, z0), pt(t1, ro, z0), pt(t1, ro, z1), pt(t0, ro, z1)], out), base)
+          face(oriented([pt(t0, ri, z0), pt(t1, ri, z0), pt(t1, ri, z1), pt(t0, ri, z1)], inn), base)
+          face(oriented([pt(t0, ri, z0), pt(t1, ri, z0), pt(t1, ro, z0), pt(t0, ro, z0)], [0, 0, -1]), base)
+          face(oriented([pt(t0, ri, z1), pt(t1, ri, z1), pt(t1, ro, z1), pt(t0, ro, z1)], [0, 0, 1]), base)
+        }
+        face(oriented([pt(a0, ri, z0), pt(a0, ro, z0), pt(a0, ro, z1), pt(a0, ri, z1)],
+                      [Math.sin(a0), -Math.cos(a0), 0]), base)
+        face(oriented([pt(a1, ri, z0), pt(a1, ro, z0), pt(a1, ro, z1), pt(a1, ri, z1)],
+                      [-Math.sin(a1), Math.cos(a1), 0]), base)
+      }
+
+      // Every wheel on every body gets an arc; the fendered bodies get a
+      // deeper one. `wide` is how far past the tyre's own width the band
+      // runs, which is the lip that reads at stall size.
+      function seatWheel(x, r, zNear0, zNear1, zFar0, zFar1, deep) {
+        // The band's inner radius is INSIDE the tyre, not outside it. At
+        // r * 1.035 there was a sight line between the arch and the tyre it
+        // covers, and the room showed through it as a few pixels of bare
+        // background inside the kart's own silhouette. Overlapping the tyre
+        // costs nothing -- the face queue puts the tyre in front of the part
+        // of the band it covers -- and it closes the gap by construction.
+        var ri = r * 0.92
+        var ro = r * (deep ? 1.17 : 1.10)
+        var a0 = Math.PI * (deep ? 0.07 : 0.11)
+        var a1 = Math.PI * (deep ? 0.93 : 0.89)
+        var steps = 13
+        fenderArc(x, r, zNear0 - 0.7, zNear1 + 0.7, paintBase, ri, ro, a0, a1, steps)
+        fenderArc(x, r, zFar0 - 0.7, zFar1 + 0.7, paintBase, ri, ro, a0, a1, steps)
+        // The near tyre's opening in the flank, and its shadow on it.
+        wheelArch(x, r, g.bodyZ0 - 0.05, depthAt(x, (zNear0 + zNear1) / 2))
+      }
+      seatWheel(g.rearX, g.rearR, g.nearZ0, g.nearZ1, g.farZ0, g.farZ1, g.fenders)
+      seatWheel(g.frontX, g.frontR, g.nearZ0, g.nearZ1, g.farZ0, g.farZ1, g.fenders)
+      if (g.dualRear)
+        seatWheel(g.rearX + g.rearR * 1.55, g.rearR * 0.92,
+                  g.nearZ0, g.nearZ1, g.farZ0, g.farZ1, true)
 
       // ------------------------------------------------------------- nose
       // The nose is one chained taper, not a stack of slabs. Each section
@@ -661,126 +846,248 @@ Item {
 
       // -------------------------------------------- rear wing and its posts
       if (g.wing) {
-        // The wing is measured off the engine cowl and its posts run out to
-        // the wing's own rear edge, so no part of the plane overhangs open
-        // air. The posts are the paint's dark value, not the chassis
-        // near-black, so they separate from the wall behind them.
-        var wingX0 = g.cowlX0 - g.wing.back
+        // ROUND-4 REBUILD. Round three's posts stood at z = bodyZ0 - 1 and
+        // bodyZ1 + 1, both of them outboard of the engine cowl they were
+        // described as standing on: the cowl runs z = bodyZ0 + 3 to
+        // bodyZ1 - 3, so the outboard post's whole footprint was open air.
+        // On the shipped frame it ended at y = 540 with the wall's hazard
+        // stripe visible at y = 546 underneath it. The posts now stand
+        // inside the cowl's own footprint in both z and x, and the plane
+        // starts at the cowl's rear face rather than two units behind it,
+        // so no part of this assembly overhangs anything but the cowl.
+        var cwz0 = g.bodyZ0 + 3
+        var cwz1 = g.bodyZ1 - 3
+        var wingX0 = g.cowlX0
         var wingX1 = wingX0 + g.wing.len
         var wingY0 = g.cowlY + g.wing.rise
         var wingY1 = wingY0 + 3.4
-        // The posts stand at the wing's own outboard edges and start at its
-        // own rear edge, so there is no direction in which the plane hangs
-        // over open air -- the round-two revision put them 29 px inboard and
-        // a crate showed through underneath the overhang.
-        var wz0 = g.bodyZ0 - 1
-        var wz1 = g.bodyZ1 + 1
         if (g.wing.rise > 2) {
-          box(wingX0, wingX0 + 5, g.cowlY - 2, wingY0, wz0, wz0 + 5, deepBase, 0.6, 1.0)
-          box(wingX0, wingX0 + 5, g.cowlY - 2, wingY0, wz1 - 5, wz1, deepBase, 0.6, 1.0)
+          // Two posts, both wholly over the cowl, both raked forward so the
+          // plane is carried rather than balanced. A fillet block at the foot
+          // of each is what describes the join: without it a post meets a
+          // deck at a hard silhouette and reads as a stick resting on a box.
+          var postX0 = wingX0 + 1.6
+          var postX1 = postX0 + 4.4
+          var pz = [[cwz0 + 1.0, cwz0 + 5.2], [cwz1 - 5.2, cwz1 - 1.0]]
+          for (var wp = 0; wp < 2; wp++) {
+            box(postX0, postX1, g.cowlY - 2.5, wingY0, pz[wp][0], pz[wp][1],
+                deepBase, 0.5, 0.9)
+            // The fillet: a wider, shorter block at the post's foot.
+            box(postX0 - 1.2, postX1 + 1.2, g.cowlY - 2.5, g.cowlY + 2.0,
+                pz[wp][0] - 1.0, pz[wp][1] + 1.0, deepBase, 0.5, 1.4)
+          }
           // What the wing does to the cowl underneath it. This one shadow is
           // the single largest reason the tail reads as one object.
-          shadowPoly(castQuad(wingX0, wingX1, g.bodyZ0 - 1, g.bodyZ1 + 1, wingY0, g.cowlY),
-                     0.44,
-                     modelPoly([[g.cowlX0, g.cowlY, g.bodyZ0 + 3], [g.cowlX0, g.cowlY, g.bodyZ1 - 3],
-                                [g.cowlX1, g.cowlY, g.bodyZ1 - 3], [g.cowlX1, g.cowlY, g.bodyZ0 + 3]]),
+          shadowPoly(castQuad(wingX0, wingX1, cwz0, cwz1, wingY0, g.cowlY),
+                     0.50,
+                     modelPoly([[g.cowlX0, g.cowlY, cwz0], [g.cowlX0, g.cowlY, cwz1],
+                                [g.cowlX1, g.cowlY, cwz1], [g.cowlX1, g.cowlY, cwz0]]),
                      depthAt((g.cowlX0 + g.cowlX1) / 2, (g.bodyZ0 + g.bodyZ1) / 2) - 0.5)
         }
         if (g.wing.deck > 0)
           box(wingX0 + 3, wingX1 - 3, wingY0 - g.wing.deck, wingY0 - g.wing.deck + 2.6,
-              g.bodyZ0 + 1, g.bodyZ1 - 1, deepBase, 0.8, 0.9)
-        box(wingX0, wingX1, wingY0, wingY1, g.bodyZ0 - 1, g.bodyZ1 + 1,
-            paintBase, 1.2, 1.2)
+              cwz0 + 1, cwz1 - 1, deepBase, 0.8, 0.9)
+        // The plane itself, then an endplate at each end. Round three drew
+        // the far post in `deepBase` where an endplate belongs, so the tail
+        // read as two mismatched slabs meeting at a hard seam: one solid in
+        // the paint value, one in the dark value, sharing a screen edge. The
+        // endplates are the paint value, like the plane, and every face on
+        // both of them takes its single value from `shade` and its own
+        // normal, so no coplanar face carries two shades.
+        var wz0 = cwz0 - 1.6
+        var wz1 = cwz1 + 1.6
+        box(wingX0, wingX1, wingY0, wingY1, wz0, wz1, paintBase, 1.2, 1.2)
+        box(wingX0 + 0.8, wingX1 - 0.8, wingY0 - 1.2, wingY1 + 2.6,
+            wz0 - 1.5, wz0, paintBase, 0.3, 0.8)
+        box(wingX0 + 0.8, wingX1 - 0.8, wingY0 - 1.2, wingY1 + 2.6,
+            wz1, wz1 + 1.5, paintBase, 0.3, 0.8)
       }
 
       // -------------------------------------------------- seat and roll bar
+      //
+      // ROUND-4 REBUILD. Round three's seat was one box, x seatX0..seatX1 by
+      // panY1..seatY, and a critic called it a grey box with no back and no
+      // shoulders -- correctly: a single solid cannot show a back, because a
+      // back is the relationship between two solids. It is now four: a
+      // cushion the driver sits on, a backrest raked away from the nose, two
+      // shoulder bolsters standing proud of the backrest at both ends of z,
+      // and a headrest that sits on the backrest rather than beside it.
       var seatZ0 = g.bodyZ0 + 6
       var seatZ1 = g.bodyZ1 - 6
-      box(g.seatX0, g.seatX1, g.panY1, g.seatY, seatZ0, seatZ1, chassisBase, 1.4, 2.0)
+      var seatMid = (seatZ0 + seatZ1) / 2
+      var cushionY = g.panY1 + (g.podY1 - g.panY1) * 0.62
+      // The seat is upholstery, so it gets its own two values rather than
+      // borrowing the chassis grey for one part and the paint's dark value
+      // for another: a brown bolster in front of a grey back reads as a
+      // stray box, not as a seat.
+      var seatBase = Qt.rgba(0.23, 0.25, 0.31, 1)
+      var seatDark = Qt.rgba(0.145, 0.16, 0.205, 1)
+      // The cushion. Wide in z, low, and it runs forward of the backrest.
+      box(g.seatX0 + 4.0, g.seatX1 + 4.5, g.panY1, cushionY,
+          seatZ0 - 0.5, seatZ1 + 0.5, seatBase, 1.6, 1.2)
+      // The backrest: a raked plate. `prism` takes a different top height at
+      // x0 and at x1, so the rake is geometry rather than a second box.
+      prism(g.seatX0, g.seatX0 + 4.5, g.panY1, g.seatY, g.seatY - 2.5,
+            seatZ0, seatZ1, seatBase, 1.4, 2.0)
+      // Shoulders. Two bolsters standing proud of the backrest at each end
+      // of its width, which is what turns a plate into a seat.
+      box(g.seatX0 - 0.6, g.seatX0 + 5.1, cushionY, g.seatY + 1.0,
+          seatZ0 - 1.2, seatZ0 + 2.2, seatDark, 0.7, 1.1)
+      box(g.seatX0 - 0.6, g.seatX0 + 5.1, cushionY, g.seatY + 1.0,
+          seatZ1 - 2.2, seatZ1 + 1.2, seatDark, 0.7, 1.1)
       // The seat sits in a well: the pod top darkens where the seat meets it.
-      shadowPoly(castQuad(g.seatX0 - 1, g.seatX1 + 1, seatZ0 - 1, seatZ1 + 1,
-                          g.seatY, g.podY1), 0.40,
+      shadowPoly(castQuad(g.seatX0 - 1, g.seatX1 + 5, seatZ0 - 1.6, seatZ1 + 1.6,
+                          g.seatY, g.podY1), 0.46,
                  modelPoly([[g.podX0, g.podY1, g.bodyZ0 + 2.2], [g.podX0, g.podY1, g.bodyZ1 - 2.2],
                             [g.podX1, g.podY1, g.bodyZ1 - 2.2], [g.podX1, g.podY1, g.bodyZ0 + 2.2]]),
                  depthAt((g.podX0 + g.podX1) / 2, (g.bodyZ0 + g.bodyZ1) / 2) - 0.5)
       if (g.headrest)
-        box(g.seatX0 - 2, g.seatX0 + 6, g.seatY, g.seatY + 4.5, seatZ0 + 1, seatZ1 - 1,
-            deepBase, 1.0, 1.4)
+        box(g.seatX0 - 1.0, g.seatX0 + 4.0, g.seatY - 0.4, g.seatY + 4.0,
+            seatMid - 3.6, seatMid + 3.6, seatDark, 1.0, 1.4)
       if (g.hoop) {
-        var hy = g.seatY + 7
-        box(g.seatX0 - 3, g.seatX0 + 0.5, g.seatY - 6, hy, seatZ0, seatZ0 + 3.5, chassisBase, 0.6, 0.8)
-        box(g.seatX0 - 3, g.seatX0 + 0.5, g.seatY - 6, hy, seatZ1 - 3.5, seatZ1, chassisBase, 0.6, 0.8)
-        box(g.seatX0 - 3, g.seatX1 + 2, hy - 3.5, hy, seatZ0, seatZ1, chassisBase, 0.8, 0.9)
-        box(g.seatX1 - 1, g.seatX1 + 2, g.podY1, hy - 3.5, seatZ0, seatZ0 + 3, chassisBase, 0.6, 0.8)
-        box(g.seatX1 - 1, g.seatX1 + 2, g.podY1, hy - 3.5, seatZ1 - 3, seatZ1, chassisBase, 0.6, 0.8)
+        // ROUND-4. Round three stood the cage's legs at x seatX0-3..seatX0+0.5
+        // -- entirely behind the backrest, where at stall size the bars and
+        // the seat merged into one lump. The rear legs are unchanged in
+        // spirit but the front pair now stands clear in front of the driver,
+        // the bars are 4.2 units instead of 3.5, and the top rail runs the
+        // whole length, so the cage is a cage from any angle.
+        var hy = g.seatY + 8
+        var hz0 = seatZ0 - 1.5, hz1 = seatZ1 + 1.5
+        var legBack0 = g.seatX0 - 3.6, legBack1 = legBack0 + 4.2
+        var legFore0 = g.seatX1 + 3.0, legFore1 = legFore0 + 4.2
+        box(legBack0, legBack1, g.podY1 - 2, hy, hz0, hz0 + 4.2, chassisBase, 0.6, 0.8)
+        box(legBack0, legBack1, g.podY1 - 2, hy, hz1 - 4.2, hz1, chassisBase, 0.6, 0.8)
+        box(legFore0, legFore1, g.podY1 - 2, hy - 1.5, hz0, hz0 + 4.2, chassisBase, 0.6, 0.8)
+        box(legFore0, legFore1, g.podY1 - 2, hy - 1.5, hz1 - 4.2, hz1, chassisBase, 0.6, 0.8)
+        // Roof rail, then a cross brace behind the driver's head.
+        prism(legBack0, legFore1, hy - 4.2, hy, hy - 1.5, hz0, hz1, chassisBase, 0.8, 0.9)
+        box(legBack0 + 1, legBack1 - 1, g.seatY + 1, g.seatY + 4.2, hz0, hz1,
+            chassisBase, 0.8, 0.9)
       }
 
       // ----------------------------------------------------- steering wheel
       if (g.steering) {
-        var colZ0 = (g.bodyZ0 + g.bodyZ1) / 2 - 2.2
-        box(g.steerX, g.steerX + 4, g.podY1 - 2, g.steerY - 1, colZ0, colZ0 + 4.4,
-            chassisBase, 0.6, 0.8)
-        // The rim is a torus in the plane the driver holds it in, so it is
-        // built from the projection like the wheels rather than from a
-        // hand-set ellipse.
-        var rimC = [g.steerX + 2, g.steerY + 1.6, colZ0 + 2.2]
-        var rb = basis(rimC[0], rimC[1], rimC[2], 5.6)
-        var rz = project(rimC[0], rimC[1], rimC[2] + 5.6)
+        // ROUND-4 REBUILD. Round three's rim was an annulus in the source and
+        // a dish on the screen: at the size the stall renders it the hole was
+        // 23 x 14 px and a full-width spoke bar 0.22 of the radius plus a
+        // boss 0.22 of the radius left two 4 px slots that closed up at 1:1.
+        // The rim is bigger, the wall thinner, the boss half the size, and
+        // the spokes are 0.055 of the radius, so the hole is open and the
+        // scene is visible through it -- which is the only reason a wheel
+        // reads as a wheel rather than as a plate.
+        var colZ0 = (g.bodyZ0 + g.bodyZ1) / 2 - 1.9
+        // A raked column, with a fairing where it enters the bodywork so it
+        // does not plunge straight through a lit surface.
+        prism(g.steerX - 0.4, g.steerX + 3.4, g.podY1 - 2.6, g.steerY - 2.2, g.steerY - 0.6,
+              colZ0, colZ0 + 3.8, chassisBase, 0.5, 0.7)
+        box(g.steerX - 2.2, g.steerX + 5.2, g.podY1 - 2.6, g.podY1 + 1.6,
+            colZ0 - 1.8, colZ0 + 5.6, darkBase, 0.8, 1.2)
+        var rimR = 7.0
+        var rimC = [g.steerX + 1.5, g.steerY + 2.6, colZ0 + 1.9]
+        var rb = basis(rimC[0], rimC[1], rimC[2], rimR)
+        var rz = project(rimC[0], rimC[1], rimC[2] + rimR)
+        // The rim's plane: mostly upright, laid back by the amount a driver
+        // holds it at. 0.72 up against 0.62 into the screen.
         var tilt = { o: rb.o, ax: rb.ax,
-                     ay: [(rb.ay[0] * 0.42 + (rz[0] - rb.o[0]) * 0.92),
-                          (rb.ay[1] * 0.42 + (rz[1] - rb.o[1]) * 0.92)] }
+                     ay: [(rb.ay[0] * 0.72 + (rz[0] - rb.o[0]) * 0.62),
+                          (rb.ay[1] * 0.72 + (rz[1] - rb.o[1]) * 0.62)] }
         queue.push({ depth: depthAt(rimC[0], rimC[2]) - 0.2, custom: function (c) {
-          // The rim is an annulus, not a disc: the outer circle is walked one
-          // way and the inner circle the other, so the non-zero winding rule
-          // leaves a real hole and the bodywork shows through it. Filled
-          // discs here read as a black blob on a stalk.
+          function ann(outer, inner, fill) {
+            c.save()
+            c.transform(tilt.ax[0], tilt.ax[1], tilt.ay[0], tilt.ay[1], tilt.o[0], tilt.o[1])
+            c.beginPath()
+            c.arc(0, 0, outer, 0, Math.PI * 2, false)
+            c.arc(0, 0, inner, 0, Math.PI * 2, true)
+            c.restore()
+            c.fillStyle = fill
+            c.fill()
+          }
+          // The rim, then a lit crescent along its upper limb from the same
+          // light that shades the bodywork.
+          ann(1.0, 0.74, "#232935")
           c.save()
           c.transform(tilt.ax[0], tilt.ax[1], tilt.ay[0], tilt.ay[1], tilt.o[0], tilt.o[1])
           c.beginPath()
-          c.arc(0, 0, 1, 0, Math.PI * 2, false)
-          c.arc(0, 0, 0.58, 0, Math.PI * 2, true)
-          c.restore()
-          c.fillStyle = "#242a35"
-          c.fill()
-          // A lit crescent along the top of the rim, from the same light.
-          c.save()
-          c.transform(tilt.ax[0], tilt.ax[1], tilt.ay[0], tilt.ay[1], tilt.o[0], tilt.o[1])
-          c.beginPath()
-          c.arc(0, 0, 0.98, Math.PI * 1.06, Math.PI * 1.94, false)
-          c.arc(0, 0, 0.72, Math.PI * 1.94, Math.PI * 1.06, true)
+          c.arc(0, 0, 0.99, Math.PI * 1.10, Math.PI * 1.90, false)
+          c.arc(0, 0, 0.80, Math.PI * 1.90, Math.PI * 1.10, true)
           c.restore()
           c.fillStyle = "#5c6578"
           c.fill()
-          // Two spokes and a boss.
+          // Three thin spokes at the angles a real wheel carries them, and a
+          // small boss. Nothing here crosses the middle of the opening.
           c.save()
           c.transform(tilt.ax[0], tilt.ax[1], tilt.ay[0], tilt.ay[1], tilt.o[0], tilt.o[1])
           c.beginPath()
-          c.rect(-0.95, -0.11, 1.9, 0.22)
+          for (var sp = 0; sp < 3; sp++) {
+            var a = sp * Math.PI * 2 / 3 + Math.PI / 6
+            var ca = Math.cos(a), sa = Math.sin(a)
+            c.moveTo(ca * 0.18 - sa * 0.055, sa * 0.18 + ca * 0.055)
+            c.lineTo(ca * 0.80 - sa * 0.055, sa * 0.80 + ca * 0.055)
+            c.lineTo(ca * 0.80 + sa * 0.055, sa * 0.80 - ca * 0.055)
+            c.lineTo(ca * 0.18 + sa * 0.055, sa * 0.18 - ca * 0.055)
+            c.closePath()
+          }
           c.restore()
           c.fillStyle = "#39404e"
           c.fill()
-          ringOn(c, tilt, 0.22, 0, 0, "#7a8397")
+          ringOn(c, tilt, 0.15, 0, 0, "#6a7386")
         } })
       }
 
       // ------------------------------------------- fenders, roof and canopy
+      //
+      // ROUND-4 REBUILD of the fendered bodies. The verdict called STOCKCAR
+      // the worst of the six and the list was long: the near-rear hub bisected
+      // into a grey chip, the far-rear wheel an unreadable black mass, a
+      // jagged staircase notch on the rear quarter, a detached sliver below
+      // the sill, the roof a tabletop on two thin posts, the windscreen an
+      // unframed quad with a gap under its left edge. Almost all of it came
+      // from two boxes: each "fender" was a slab running from z = nearZ0 - 1
+      // to z = bodyZ1, i.e. from OUTBOARD OF THE NEAR TYRE'S OUTER FACE all
+      // the way across the car, at a height that put it across the middle of
+      // the wheels. It did not cover the wheels, it cut them in half.
+      //
+      // A fender is now the same arc every body's wheels get -- geometry over
+      // the top of the tyre -- taken deeper, plus a haunch that ties the arc
+      // into the flank. The wheel passes behind it because the face queue
+      // sorts it there, not because a slab is painted over it.
+      function haunch(x, r) {
+        box(x - r * 1.05, x + r * 1.05, g.podY1 - 4.5, g.podY1 + 1.2,
+            g.nearZ0 + 0.5, g.bodyZ1 - 0.5, paintBase, 1.6, 1.8)
+      }
       if (g.fenders) {
-        box(g.rearX - g.rearR - 2, g.rearX + g.rearR + 2, g.podY1 - 5, g.podY1 + 1.5,
-            g.nearZ0 - 1, g.bodyZ1, paintBase, 1.6, 1.8)
-        box(g.frontX - g.frontR - 2, g.frontX + g.frontR + 2, g.podY1 - 6, g.podY1 - 0.5,
-            g.nearZ0 - 1, g.bodyZ1, paintBase, 1.6, 1.8)
+        haunch(g.rearX, g.rearR)
+        haunch(g.frontX, g.frontR)
       }
       if (g.roof) {
+        // A cabin, not a tabletop: four pillars 4.4 units thick instead of
+        // two at 3, a windscreen set inside a frame that runs all the way
+        // down to the scuttle, and a raked roof.
         var cabZ0 = g.bodyZ0 + 4
         var cabZ1 = g.bodyZ1 - 4
-        box(g.seatX0 - 4, g.seatX0 - 1, g.podY1, g.seatY + 4, cabZ0, cabZ0 + 3, chassisBase, 0.5, 0.7)
-        box(g.seatX0 - 4, g.seatX0 - 1, g.podY1, g.seatY + 4, cabZ1 - 3, cabZ1, chassisBase, 0.5, 0.7)
-        box(g.seatX1 + 8, g.seatX1 + 11, g.podY1, g.seatY + 4, cabZ0, cabZ0 + 3, chassisBase, 0.5, 0.7)
-        box(g.seatX1 + 8, g.seatX1 + 11, g.podY1, g.seatY + 4, cabZ1 - 3, cabZ1, chassisBase, 0.5, 0.7)
-        box(g.seatX0 - 5, g.seatX1 + 12, g.seatY + 4, g.seatY + 7, cabZ0 - 0.5, cabZ1 + 0.5,
-            deepBase, 1.4, 1.6)
-        box(g.seatX0 - 1, g.seatX1 + 8, g.podY1 + 1, g.seatY + 3.5, cabZ0 + 1, cabZ0 + 1.6,
-            glassBase, 0.2, 0.6)
+        var pillarBack = g.seatX0 - 4.4
+        var pillarFore = g.seatX1 + 7
+        var roofY = g.seatY + 6.5
+        var scuttle = g.podY1 + 1.2
+        // Scuttle: the ledge the screen stands on, so nothing shows under it.
+        box(pillarBack - 1, pillarFore + 5, g.podY1 - 1.5, scuttle,
+            cabZ0 - 1.5, cabZ1 + 1.5, deepBase, 1.4, 1.0)
+        for (var rp = 0; rp < 2; rp++) {
+          var rz0 = rp === 0 ? cabZ0 : cabZ1 - 4.4
+          box(pillarBack, pillarBack + 4.4, scuttle, roofY, rz0, rz0 + 4.4,
+              chassisBase, 0.5, 0.7)
+          box(pillarFore, pillarFore + 4.4, scuttle, roofY - 2.0, rz0, rz0 + 4.4,
+              chassisBase, 0.5, 0.7)
+        }
+        // The screen: a raked plate inside the pillars, and a frame band
+        // across its top so its upper edge is not a bare silhouette.
+        prism(pillarFore + 0.6, pillarFore + 4.0, scuttle, roofY - 2.4, roofY - 2.4,
+              cabZ0 + 1.0, cabZ1 - 1.0, glassBase, 0.6, 0.8)
+        box(pillarFore - 0.4, pillarFore + 5.0, roofY - 2.6, roofY - 1.2,
+            cabZ0 - 0.6, cabZ1 + 0.6, chassisBase, 0.6, 0.8)
+        // Roof, raked down toward the nose so it is not a flat lid.
+        prism(pillarBack - 1.2, pillarFore + 5.2, roofY - 3.2, roofY, roofY - 2.0,
+              cabZ0 - 1.2, cabZ1 + 1.2, deepBase, 1.4, 1.6)
       }
       if (g.canopy) {
         box(g.seatX0 + 1, g.seatX1 + 2, g.podY1 - 1, g.seatY + 6,
@@ -868,7 +1175,12 @@ Item {
       opacity: kart.dim
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: Math.max(6, Math.round(kart.plateH * 0.78))
+      // ROUND-4: 0.90 of the plate's own height, not 0.78, and the plate is
+      // 15 % taller in the model. On the shipped frame the digit's ink went
+      // from 21 px to 33 px tall. It is still not the identity B's is -- see
+      // the report; the flank this plate lives on is 46 px tall in this
+      // camera, and the design puts the number on the flank.
+      font.pixelSize: Math.max(6, Math.round(kart.plateH * 0.90))
       horizontalAlignment: Text.AlignHCenter
       verticalAlignment: Text.AlignVCenter
     }

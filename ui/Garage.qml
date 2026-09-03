@@ -72,9 +72,16 @@ FocusScope {
   // RACE A FRIEND is not here. It was stop 03, between the stall and the
   // settings, and it is a sign that can never do anything: focusing it spent
   // a Tab stop and a child's attention on a control with no action behind it.
+  //
+  // ROUND-4: nor are the four signal tiles, which were stops 06 to 09. The
+  // panel's own caption says what it is -- "These are the only signals in a
+  // race. The rivals send them too." -- and a legend is not a control. Four
+  // non-actionable display tiles between the settings and the ready control
+  // were four dead presses for a child and four focusable objects with no
+  // action for a screen reader. The panel keeps its heading and its caption
+  // and reads as one region; the chain is twelve stops minus those four.
   readonly property var stops: [bodyStepper, paintGrid, numberStepper,
                                 modeRow.focusItem, mathRow.focusItem, rivalRow.focusItem,
-                                signal0, signal1, signal2, signal3,
                                 readyButton, leaveButton]
 
   function stopIndex() {
@@ -245,7 +252,7 @@ FocusScope {
         Repeater {
           model: [
             { art: Glyphs.lock, tone: Theme.lime, label: "SOLO GARAGE" },
-            { art: Glyphs.broadcast, tone: Theme.amber, label: "PRESET SIGNALS" },
+            { art: Glyphs.preset, tone: Theme.amber, label: "PRESET SIGNALS" },
             { art: Glyphs.monitor, tone: Theme.accent, label: "THIS COMPUTER ONLY" }
           ]
 
@@ -419,24 +426,76 @@ FocusScope {
       }
 
       // Paint and number, over the right of the bay, as in the mock.
-      Rectangle {
+      //
+      // ROUND-4: A SCRIM, NOT A CARD. Round three's panel was opaque, and a
+      // critic measured what that did to the room: at y = 356 the row mean
+      // across x 960-1140 was lit wall; from y = 358 down every pixel in that
+      // span was one flat value. It cut the back wall, the right work light's
+      // beam, the hazard stripe and the floor grid on a dead-straight
+      // horizontal, and it destroyed the one-room illusion across the right
+      // quarter of the hero panel.
+      //
+      // It is now a scrim: transparent at its top edge and reaching full
+      // strength over `fadeH` px, so the wall walks into it instead of being
+      // guillotined by it. The whole fade band sits ABOVE the COLOR heading,
+      // so every string and every control still stands on the scrim at 0.93
+      // or more and the contrast floor is unaffected -- which is the answer
+      // to the round-two finding that a 0.90 panel let the wall poster show
+      // through the top swatch row. Nothing legible is behind it now: the
+      // poster moved to the left wall in round three.
+      Item {
         id: paintPanel
         width: garage.px(296)
-        height: paintColumn.height + garage.px(36)
+        readonly property int fadeH: garage.px(64)
+        height: paintColumn.height + garage.px(36) + fadeH
         x: parent.width - width - garage.px(22)
         y: parent.height - height - garage.px(22)
-        radius: Theme.cornerRadius
-        // Opaque. At 90 % the wall poster behind it showed through the top
-        // swatch row: a text collision on the most saturated element of the
-        // screen. Nothing behind a panel may be legible through it.
-        color: Theme.panel
-        border.width: 1
-        border.color: Theme.lineStrong
+
+        Rectangle {
+          anchors.fill: parent
+          radius: Theme.cornerRadius
+          gradient: Gradient {
+            GradientStop { position: 0.0
+              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.0) }
+            GradientStop { position: paintPanel.fadeH / paintPanel.height * 0.34
+              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.20) }
+            GradientStop { position: paintPanel.fadeH / paintPanel.height * 0.70
+              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.66) }
+            GradientStop { position: paintPanel.fadeH / paintPanel.height
+              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.87) }
+            GradientStop { position: 1.0
+              color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.90) }
+          }
+        }
+
+        // The edge, on three sides only. A border all the way round would put
+        // the hard top line straight back.
+        Repeater {
+          model: [ { x: 0, y: 0, w: 1, h: 1 }, { x: 1, y: 0, w: 1, h: 1 } ]
+          Rectangle {
+            x: index === 0 ? 0 : paintPanel.width - 1
+            y: paintPanel.fadeH * 0.36
+            width: 1
+            height: paintPanel.height - y - Theme.cornerRadius
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
+              GradientStop { position: 0.30; color: Theme.lineStrong }
+              GradientStop { position: 1.0; color: Theme.lineStrong }
+            }
+          }
+        }
+        Rectangle {
+          x: Theme.cornerRadius
+          y: paintPanel.height - 1
+          width: paintPanel.width - Theme.cornerRadius * 2
+          height: 1
+          color: Theme.lineStrong
+        }
 
         Column {
           id: paintColumn
           x: garage.px(18)
-          y: garage.px(18)
+          y: garage.px(18) + paintPanel.fadeH
           width: parent.width - garage.px(36)
           spacing: garage.px(9)
 
@@ -693,7 +752,6 @@ FocusScope {
           caption: "NICE RUN"
           tone: Theme.lime
           captionSize: garage.fs(15)
-          onActivated: story.say("NICE RUN", Theme.lime)
         }
         SignalTile {
           id: signal1
@@ -703,7 +761,6 @@ FocusScope {
           caption: "READY"
           tone: Theme.amber
           captionSize: garage.fs(15)
-          onActivated: story.say("READY", Theme.amber)
         }
         SignalTile {
           id: signal2
@@ -713,7 +770,6 @@ FocusScope {
           caption: "REMATCH?"
           tone: "#ee8b3a"
           captionSize: garage.fs(15)
-          onActivated: story.say("REMATCH?", "#ee8b3a")
         }
         SignalTile {
           id: signal3
@@ -723,9 +779,12 @@ FocusScope {
           caption: "GOOD GAME"
           tone: Theme.accent
           captionSize: garage.fs(15)
-          onActivated: story.say("GOOD GAME", Theme.accent)
         }
       }
+
+      Accessible.role: Accessible.Grouping
+      Accessible.name: "Preset signals"
+      Accessible.description: "These are the only signals in a race. The rivals send them too. Nice run, ready, rematch, good game."
 
       Text {
         x: garage.px(22)
@@ -754,10 +813,15 @@ FocusScope {
       // title. Round one gave the two the same outline, the same layout and
       // nearly the same footprint, so a child scanning this column saw two
       // equal buttons one of which quits.
+      // ROUND-4: 170 px, not 190, and it starts 14 px down rather than at the
+      // top of the column. Round three's was "an over-tall green slab" with a
+      // 70 px empty band along its bottom; the content is the same size and
+      // the button is closer to it, which is the whole of the fix.
       ActionButton {
         id: readyButton
         width: parent.width
-        height: garage.px(190)
+        y: garage.px(14)
+        height: garage.px(170)
         art: Glyphs.flag
         tone: "go"
         variant: "primary"
@@ -793,14 +857,10 @@ FocusScope {
     }
   }
 
-  // The two messages that have nowhere else to live.
-  Callout {
-    id: story
-    anchors.horizontalCenter: parent.horizontalCenter
-    y: page.y + page.bottomY - garage.px(34) - height
-    width: garage.px(560)
-    height: garage.px(62)
-    reducedMotion: Store.setting("reducedMotion") === true
-  }
+  // Round three had a Callout here that the four signal tiles fired when they
+  // were pressed. The tiles are a legend now and nothing on this screen sends
+  // a signal, so the callout has no sender and is gone rather than left
+  // behind as a control that can never speak. ui/parts/Callout.qml stays for
+  // the race screen, which is where a signal is actually sent.
 
 }

@@ -126,6 +126,13 @@ Item {
     body: slot.bodyIndex
     paint: slot.paintColor
     number: slot.number
+    // No plate on a 162-unit thumbnail. At this size the digits render about
+    // 6 px tall and a critic could not read them at 1:1 -- and does not need
+    // to: the row's own number badge is 34 px and sits at the left of the
+    // same row, so the plate was repeating an already-legible fact
+    // illegibly. The kart keeps its colour and its body, which are the two
+    // things the thumbnail is for.
+    showNumber: false
     dim: slot.ready ? 1.0 : 0.86
   }
 

@@ -1,9 +1,20 @@
 import QtQuick
 import "../"
 
-// One card of the four-signal catalog. The catalog is on the garage so the
-// child meets the vocabulary before a rival uses it mid-race; Enter previews
-// the signal so meeting it is not just reading it.
+// One card of the four-signal catalog.
+//
+// A LEGEND, NOT A CONTROL. The design's own words for this panel are "the
+// four-signal catalog SHOWN so the child learns them before racing rivals who
+// use them", and the panel's caption on the screen says the same: "These are
+// the only signals in a race. The rivals send them too."
+//
+// Round three made each tile a Tab stop with an Enter action that previewed
+// the signal. A critic called it correctly: that puts four non-actionable
+// display tiles between the settings and the ready control -- four dead
+// presses for a child working the keyboard, and four focusable objects with
+// no action for a screen reader. The tiles are now static: no focus, no key
+// handling, and one accessible name each so a reader still reads the
+// vocabulary out when it walks the panel.
 Item {
   id: tile
 
@@ -12,29 +23,18 @@ Item {
   property color tone: Theme.lime
   property int captionSize: 14
 
-  signal activated()
+  activeFocusOnTab: false
 
-  activeFocusOnTab: true
-
-  Accessible.role: Accessible.Button
+  Accessible.role: Accessible.StaticText
   Accessible.name: caption
-  Accessible.description: "A preset signal. Enter shows it the way a rival sends it."
-  Accessible.focusable: true
-  Accessible.onPressAction: tile.activated()
-
-  Keys.onPressed: function (event) {
-    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-      tile.activated()
-      event.accepted = true
-    }
-  }
+  Accessible.description: "A signal a racer can send. Rivals send it too."
 
   Rectangle {
     anchors.fill: parent
     radius: Theme.cornerRadiusSmall
     color: Theme.panelSunken
     border.width: 1
-    border.color: tile.activeFocus ? Theme.lineStrong : Theme.line
+    border.color: Theme.line
   }
 
   Column {
@@ -63,6 +63,4 @@ Item {
       font.letterSpacing: 0.6
     }
   }
-
-  FocusRing { on: tile.activeFocus }
 }

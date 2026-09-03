@@ -200,13 +200,13 @@ Item {
 
     function test_10_ready_up_and_leave_fire_on_enter() {
       var races = root.raceRequests
-      garage.focusStop(10)
+      garage.focusStop(6)
       compare(garage.focusedName(), "Ready up")
       keyClick(Qt.Key_Return)
       compare(root.raceRequests, races + 1)
 
       var leaves = root.leaveRequests
-      garage.focusStop(11)
+      garage.focusStop(7)
       compare(garage.focusedName(), "Leave")
       keyClick(Qt.Key_Space)
       compare(root.leaveRequests, leaves + 1)
@@ -245,7 +245,6 @@ Item {
                       "Race mode, GRAND PRIX, change",
                       "Math set, TIMES TABLES 1-12, change",
                       "Rivals, PRO, change",
-                      "NICE RUN", "READY", "REMATCH?", "GOOD GAME",
                       "Ready up", "Leave"]
       compare(garage.stops.length, expected.length)
       for (var i = 0; i < expected.length; i++)
@@ -254,7 +253,25 @@ Item {
 
     // A control that can never do anything must not spend a Tab stop. The
     // RACE A FRIEND sign is drawn, is named for a screen reader, and is not
-    // reachable by Tab.
+    // reachable by Tab. ROUND-4: the same now holds for the four signal
+    // tiles, which are a legend -- "These are the only signals in a race" --
+    // and were four dead presses between the settings and the ready control.
+    function test_16_the_signal_legend_is_not_a_focus_stop() {
+      var captions = ["NICE RUN", "READY", "REMATCH?", "GOOD GAME"]
+      for (var i = 0; i < garage.stops.length; i++)
+        for (var c = 0; c < captions.length; c++)
+          compare(garage.focusName(i) === captions[c], false,
+                  "signal tile " + captions[c] + " is stop " + i)
+      // And no number of real Tab presses reaches one.
+      garage.focusStop(0)
+      for (var t = 0; t < garage.stops.length + 3; t++) {
+        var name = garage.focusedName()
+        for (var d = 0; d < captions.length; d++)
+          compare(name === captions[d], false, "Tab reached the signal legend")
+        keyClick(Qt.Key_Tab)
+      }
+    }
+
     function test_15_the_friend_sign_is_not_a_focus_stop() {
       for (var i = 0; i < garage.stops.length; i++)
         verify(garage.focusName(i).indexOf("Race a friend") < 0,

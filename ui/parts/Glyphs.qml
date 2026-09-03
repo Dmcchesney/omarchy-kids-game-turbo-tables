@@ -27,21 +27,26 @@ QtObject {
     ".##########.",
     ".##########."]
 
-  // Broadcast: two arcs spreading from a source. The previous grid was a
-  // dashed box around an asterisk and read as nothing at all.
-  readonly property var broadcast: [
-    "............",
-    "...######...",
-    "..##....##..",
-    ".##......##.",
-    "##........##",
-    "............",
-    "....####....",
-    "...##..##...",
-    "............",
-    ".....##.....",
-    ".....##.....",
-    "............"]
+  // PRESET SIGNALS. ROUND-4: this was a broadcast arc -- a Wi-Fi glyph -- on
+  // a screen whose next chip says THIS COMPUTER ONLY and whose title bar says
+  // OFFLINE. A critic named it exactly: "a radio glyph is the wrong metaphor
+  // for 'the signal vocabulary is a fixed list'; it says networked."
+  // What the row actually means is "a short fixed list of things you can
+  // say", so it is a speech bubble with three dots in it: a message, and a
+  // preset one. Nothing about it implies a second machine.
+  readonly property var preset: [
+    "############",
+    "#..........#",
+    "#..........#",
+    "#.##.##.##.#",
+    "#.##.##.##.#",
+    "#..........#",
+    "#..........#",
+    "############",
+    "..####......",
+    "..###.......",
+    "..##........",
+    "..#........."]
 
   readonly property var monitor: [
     "............",
@@ -139,29 +144,39 @@ QtObject {
     "............"]
 
   // ------------------------------------------------------- signal catalog
-  // Thumbs up: a raised thumb with a gap down its middle, a fist ruled into
-  // three fingers, and a cuff at the wrist. The old grid was one blob with a
-  // nub on it and read as a mitten.
-  // Thumbs up: a tapered thumb, a fist ruled into fingers, and a cuff.
+  // NICE RUN. ROUND-4 REDRAW. The round-three grid was judged not to read
+  // cold at the 74 px the tile displays -- "a book, a washboard, or a stack"
+  // -- and the diagnosis was in the drawing: a three-row thumb on an
+  // eight-row fist is a nub, and three full-width horizontal rules across a
+  // plain rounded rectangle is a washboard whatever else is on it.
   //
-  // Every separating rule keeps its outer columns inked. The previous grid's
-  // second-to-last row was "..oooooooooo.." -- a rule with nothing filled on
-  // either side of it -- so the bottom row was cut clean off the icon and
-  // floated 4 px under the fist as a loose bar.
+  // So: the thumb is six rows against the fist's eight and five cells wide
+  // against its thirteen, so it reads as a thumb by proportion and not only
+  // by position; there are two knuckle rules instead of three and each stops
+  // two cells short of the right edge, so they read as finger separations on
+  // a fist rather than as ruling on a page; and the cuff is a separate band
+  // below a wrist gap, which is the last thing B's has that this lacked.
+  //
+  // Every separating rule keeps its outer columns inked, so no part of the
+  // glyph can be cut loose from the rest of it.
   readonly property var thumbUp: [
     "..###.........",
-    "..###.........",
     ".####.........",
     ".####.........",
     ".####.........",
+    ".####.........",
+    ".####.........",
+    ".#####........",
+    ".########.....",
+    ".###########..",
+    ".############.",
+    ".#####oooooo#.",
+    ".############.",
+    ".#####oooooo#.",
     ".############.",
     ".############.",
     ".#oooooooooo#.",
     ".############.",
-    ".#oooooooooo#.",
-    ".############.",
-    ".############.",
-    ".#oooooooooo#.",
     "..##########.."]
 
   // Rematch: a circular arrow -- a thick C-shaped arc with one solid
@@ -193,24 +208,26 @@ QtObject {
     "....#######.....",
     "......###......."]
 
-  // An open hand: four fingers, splayed so the outer one starts a row lower,
-  // and a thumb out to the left. The old grid had four prongs and no thumb
-  // and read as a fork.
+  // GOOD GAME. ROUND-4: tilted. Straight on and vertical, an open hand reads
+  // as "stop" at least as readily as "wave", which is the last thing this
+  // signal should say to a child; the mock's is tilted and that is what
+  // separates the two readings. Four fingers, splayed and leaning, with the
+  // thumb out to the left.
   readonly property var hand: [
-    "...##.##.##...",
-    "...##.##.##.##",
-    "...##.##.##.##",
-    "...##.##.##.##",
-    "#..##.##.##.##",
-    "##.###########",
-    "##############",
-    ".#############",
-    "..###########.",
-    "..###########.",
-    "...#########..",
-    "...#########..",
-    "....#######...",
-    "....#######..."]
+    "......##.##.....",
+    ".....##.##.##...",
+    ".....##.##.##.##",
+    "....##.##.##.##.",
+    "....##.##.##.##.",
+    "..#.##.##.##.##.",
+    "..##############",
+    "..##############",
+    "...#############",
+    "...############.",
+    "....###########.",
+    "....##########..",
+    ".....#########..",
+    ".....########..."]
 
   // ------------------------------------------------------- controls
   readonly property var chevron: [

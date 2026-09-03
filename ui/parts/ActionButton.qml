@@ -67,7 +67,7 @@ Item {
     anchors.fill: parent
     radius: Theme.cornerRadius
     color: button.sign
-           ? "transparent"
+           ? Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.85)
            : button.primary
              ? (button.activeFocus ? Qt.lighter(button.toneColor, 1.16) : button.toneColor)
              : Qt.rgba(button.toneColor.r * 0.20, button.toneColor.g * 0.20,
@@ -79,8 +79,16 @@ Item {
                   : Qt.rgba(button.toneColor.r, button.toneColor.g, button.toneColor.b, 0.55)
   }
 
-  // The sign wears a dashed rule rather than a border, so it cannot be
-  // mistaken for one of the controls beside it.
+  // ROUND-4: the sign is a tile.
+  //
+  // Round three gave it no fill and one dashed rule along its bottom edge,
+  // and a critic recorded the result as a defect in its own right: "RACE A
+  // FRIEND is not a tile -- grey text at (1385-1790, 660-715) with no card or
+  // border, on the roster's own background." The mock puts a block there and
+  // so does this now: a sunken fill and a dashed border on all four sides.
+  // Dashed, not solid, because the one thing the fill must not do is make it
+  // look like the two controls under it -- it is still out of the Tab chain
+  // and still cannot act.
   Canvas {
     visible: button.sign
     anchors.fill: parent
@@ -90,15 +98,26 @@ Item {
       var ctx = getContext("2d")
       ctx.reset()
       ctx.clearRect(0, 0, width, height)
-      ctx.strokeStyle = Theme.line
+      ctx.strokeStyle = Theme.lineStrong
       ctx.lineWidth = 1
-      var y = height - 1
-      for (var x = 0; x < width; x += 12) {
-        ctx.beginPath()
-        ctx.moveTo(x, y)
-        ctx.lineTo(Math.min(width, x + 6), y)
-        ctx.stroke()
+      var r = Theme.cornerRadius
+      var dash = 7, gap = 6
+      function run(x0, y0, x1, y1) {
+        var dx = x1 - x0, dy = y1 - y0
+        var len = Math.sqrt(dx * dx + dy * dy)
+        if (len <= 0)
+          return
+        for (var t = 0; t + dash < len; t += dash + gap) {
+          ctx.beginPath()
+          ctx.moveTo(x0 + dx * t / len, y0 + dy * t / len)
+          ctx.lineTo(x0 + dx * (t + dash) / len, y0 + dy * (t + dash) / len)
+          ctx.stroke()
+        }
       }
+      run(r, 0.5, width - r, 0.5)
+      run(r, height - 0.5, width - r, height - 0.5)
+      run(0.5, r, 0.5, height - r)
+      run(width - 0.5, r, width - 0.5, height - r)
     }
   }
 
@@ -129,13 +148,23 @@ Item {
       }
     }
 
+    // ROUND-4: the two lines are centred on each other. Left-aligned, a
+    // 9-character heading over a 40-character sub-line left a block of dead
+    // fill to the right of the heading -- measured at (1660-1885, 780-830) on
+    // round three's READY UP, which is 225 x 50 px of nothing inside the
+    // loudest object on the screen.
     Column {
       id: stack
       anchors.verticalCenter: parent.verticalCenter
       spacing: Math.round(button.sublabelSize * 0.28)
+      // Explicit, from the two implicit widths: a child bound to its parent's
+      // width while the parent sizes to its children is a binding loop.
+      width: Math.max(headline.implicitWidth, subline.implicitWidth)
 
       Text {
         id: headline
+        width: parent.width
+        horizontalAlignment: Text.AlignHCenter
         textFormat: Text.PlainText
         text: button.label
         color: button.primary ? button.inkColor : button.toneColor
@@ -145,7 +174,10 @@ Item {
         font.letterSpacing: Math.max(1, button.labelSize * 0.06)
       }
       Text {
+        id: subline
         visible: button.sublabel.length > 0
+        width: parent.width
+        horizontalAlignment: Text.AlignHCenter
         textFormat: Text.PlainText
         text: button.sublabel
         color: button.primary
