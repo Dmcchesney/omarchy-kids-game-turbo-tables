@@ -291,6 +291,13 @@ FocusScope {
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Turbo Tables"
+  // The `S` door has to be ANNOUNCED, not only drawn. Round two: the only way
+  // to Settings and the three save-file resets was a key printed for a sighted
+  // reader and named to nobody, so for a screen-reader user the resets were
+  // exactly as unreachable as they were in round one.
+  Accessible.description: game.screen === "garage"
+                          ? "Press S for settings and resets. Escape leaves the garage."
+                          : "Escape goes back one screen."
 
   // The one key this file owns. Everything else belongs to the screen that is
   // up: a key reaches here only when the focused control and its screen both
@@ -501,6 +508,14 @@ FocusScope {
   Row {
     id: settingsHint
     visible: game.screen === "garage"
+
+    // Named, so the door is a door for a screen reader too. It is a readout and
+    // not a stop in the Tab chain: `S` works from every one of the garage's
+    // eight stops, so putting a ninth stop in front of the child would add a Tab
+    // press to reach the race and change nothing about who can find the key.
+    Accessible.role: Accessible.StaticText
+    Accessible.name: "S, settings and resets"
+    Accessible.description: "Press S to open settings, where sound, motion, the rival level and the three resets are."
     anchors.horizontalCenter: parent.horizontalCenter
     y: game.px(38) + Math.round((game.px(80) - height) / 2)
     spacing: game.px(9)
