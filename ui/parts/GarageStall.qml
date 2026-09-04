@@ -80,16 +80,32 @@ Item {
   // The door opening, in view-box units. The slats are raised further than
   // the design's night version so that the sky is most of what the opening
   // shows: the bar's frame is 40% sky, and the door is this room's frame.
-  readonly property real doorX0: 470
-  readonly property real doorX1: 820
-  readonly property real doorTop: 118
+  //
+  // ROUND-7: wider and higher again. The bar puts the sky at 40% of the
+  // picture and the sun low and large in it; this room can only show sky
+  // through its own opening, so the opening is what had to grow. It went from
+  // 350 x 227 view-box units to 386 x 247 -- 32% of the bay's width and, with
+  // the horizon still at the same place, 57% of the opening is now sky.
+  readonly property real doorX0: 452
+  readonly property real doorX1: 838
+  readonly property real doorTop: 98
   readonly property real doorSill: 345
-  // The horizon sits at 54% of the opening's height, the sun straddles it
-  // at 77% of its width -- a little further right than the bar's 68% so it
+  // The horizon sits at 57% of the opening's height, the sun straddles it
+  // at 80% of its width -- a little further right than the bar's 68% so it
   // clears the kart's wing and shows between the wing and the nose.
   readonly property real horizonY: 240
-  readonly property real sunX: 740
-  readonly property real sunR: 56
+  readonly property real sunX: 762
+  readonly property real sunR: 62
+
+  // ROUND-7. Where the two pieces of signage sit on the back wall, published
+  // as properties because the Canvas draws their cases and the items below
+  // draw their copy: two files' worth of numbers agreeing by accident is how
+  // a caption ends up half off its own poster. They moved right this round to
+  // clear the new corner at x = 118.
+  readonly property real termX: 130
+  readonly property real termY: 64
+  readonly property real posterX: 288
+  readonly property real posterY: 60
 
   function vx(x) { return originX + x * unit }
   function vy(y) { return originY + y * unit }
@@ -143,8 +159,84 @@ Item {
       function rgbaOf(c, a) {
         return Qt.rgba(c.r, c.g, c.b, a)
       }
+      function poly(pts, fill) {
+        ctx.fillStyle = fill
+        ctx.beginPath()
+        ctx.moveTo(stall.vx(pts[0][0]), stall.vy(pts[0][1]))
+        for (var pi = 1; pi < pts.length; pi++)
+          ctx.lineTo(stall.vx(pts[pi][0]), stall.vy(pts[pi][1]))
+        ctx.closePath()
+        ctx.fill()
+      }
 
       var doorCx = (stall.doorX0 + stall.doorX1) / 2
+
+      // ------------------------------------------------ ROUND-7: the room
+      //
+      // The one open note against this scene since round five was that "the
+      // left wall and shelves are still flat", and it was fair: every prop on
+      // that wall was a front-facing rectangle of one tone, with no side, no
+      // cast shadow and no rim, on a wall that was itself a flat gradient.
+      // Three things fix it, and all three follow the same rule the cars
+      // follow -- one key, the sun through the door, low and behind-right.
+      //
+      //   1. The bay has a CORNER. A left return wall runs from the frame's
+      //      edge to a vertical corner at `cornerX`, so the room has two
+      //      planes meeting at an angle instead of one backdrop.
+      //   2. Every prop on the back wall is a BOX, not a rectangle: the one
+      //      side face that turns toward the eye is drawn, and because the
+      //      eye and the door are both to the right of these props, that is
+      //      the same face the sun lights. So each prop carries a warm edge
+      //      on its door side, a cool purple body, and a top face between.
+      //   3. Every prop THROWS A SHADOW, on the wall behind it and on the
+      //      floor under it, away from the door: down and to the left.
+      //
+      // `eyeX`/`eyeY` are where the room's own vanishing point is -- the same
+      // point the floor grid already converges on, at the height of the
+      // camera. `boxProp` pushes a face toward it to get the box's back, so
+      // the depth cue is one point for the whole room rather than a per-prop
+      // guess.
+      var eyeX = 600, eyeY = 268
+
+      // A box standing off the back wall: `t` is how far it comes toward the
+      // camera. Returns nothing; it paints, back to front, the side face, the
+      // top or bottom face, and the front face.
+      function boxProp(x, y, w, h, t, front, side, top, under) {
+        var bx0 = x + (eyeX - x) * t
+        var bx1 = (x + w) + (eyeX - (x + w)) * t
+        var by0 = y + (eyeY - y) * t
+        var by1 = (y + h) + (eyeY - (y + h)) * t
+        // The side that turns toward the eye. Left of the vanishing point
+        // that is the right-hand side, which is also the door's side.
+        if (x + w < eyeX)
+          poly([[x + w, y], [bx1, by0], [bx1, by1], [x + w, y + h]], side)
+        else if (x > eyeX)
+          poly([[x, y], [bx0, by0], [bx0, by1], [x, y + h]], side)
+        // The horizontal face: the top when the box's top is below the eye,
+        // the underside when it is above. They are not the same colour --
+        // an underside sees no sky at all, so it takes `under`, which
+        // defaults to a third of the front face's value rather than to the
+        // top's. Round seven's first pass painted undersides in the top's
+        // tone and the shelf boards read as lit from below.
+        if (y + h < eyeY)
+          poly([[x, y + h], [bx0, by1], [bx1, by1], [x + w, y + h]],
+               under !== undefined ? under : Qt.darker(front, 1.9))
+        else if (y < eyeY)
+          poly([[x, y], [bx0, by0], [bx1, by0], [x + w, y]], top)
+        rect(x, y, w, h, front)
+      }
+
+      // The shadow a wall prop throws: the same face, sheared down and to the
+      // left, drawn before the prop. Purple, never grey -- the ambient in
+      // this room is a magenta sky.
+      function wallShadow(x, y, w, h, reach, alpha) {
+        poly([[x, y + h], [x - reach, y + h + reach * 0.42],
+              [x - reach + w, y + h + reach * 0.42], [x + w, y + h]],
+             Qt.rgba(0.16, 0.04, 0.13, alpha))
+        poly([[x, y], [x - reach * 0.62, y + reach * 0.26],
+              [x - reach * 0.62, y + h + reach * 0.26], [x, y + h]],
+             Qt.rgba(0.16, 0.04, 0.13, alpha * 0.8))
+      }
 
       // ---------------------------------------------------------- back wall
       // Near-black purple, the bar's ground family, and a shade lighter at
@@ -156,73 +248,212 @@ Item {
       ctx.fillStyle = wall
       ctx.fillRect(stall.vx(0), stall.vy(0), stall.vs(1200), stall.vs(360))
 
-      // Wall panel seams and rivets.
+      // Wall panel seams and rivets. The seam's lit side faces the door, so
+      // each seam is a dark groove with a warm hairline on its right lip.
       for (var px = 0; px <= 1200; px += 150) {
         line(px, 0, px, 340, 1, "#341630")
+        line(px + 1.4, 0, px + 1.4, 340, 0.8, rgbaOf(Theme.duskRim, 0.12))
         for (var ry = 30; ry < 340; ry += 60) {
           rect(px - 2, ry, 4, 4, "#48213f")
+          rect(px + 1, ry, 1, 4, rgbaOf(Theme.duskRim, 0.30))
         }
       }
       line(0, 120, 1200, 120, 1, "#30142c")
 
-      // -------------------------------------------------------- shelf unit
-      rect(246, 238, 190, 102, "#1c0c19")
-      for (var sh = 0; sh < 2; sh++) {
-        var sy2 = 238 + sh * 48
-        rect(246, sy2, 190, 6, "#44243e")
-        // crates
-        rect(254, sy2 + 10, 34, 32, sh % 2 === 0 ? "#3f3a2c" : "#4e2c2a")
-        rect(294, sy2 + 16, 26, 26, "#3a2a44")
-        rect(326, sy2 + 12, 40, 30, sh % 2 === 0 ? "#4c302e" : "#35302c")
-        rect(372, sy2 + 20, 22, 22, "#3f2a44")
+      // -------------------------------------------------- left return wall
+      // The corner. Its inner face turns toward the door, so it is lit along
+      // its length and falls off toward the camera, and the corner edge
+      // itself carries the room's brightest warm line outside the opening.
+      var cornerX = 118
+      var returnWall = ctx.createLinearGradient(stall.vx(0), 0, stall.vx(cornerX), 0)
+      returnWall.addColorStop(0, "#120410")
+      returnWall.addColorStop(0.55, "#1e0819")
+      returnWall.addColorStop(1, "#3a1330")
+      ctx.fillStyle = returnWall
+      ctx.beginPath()
+      ctx.moveTo(stall.vx(-4), stall.vy(-52))
+      ctx.lineTo(stall.vx(cornerX), stall.vy(14))
+      ctx.lineTo(stall.vx(cornerX), stall.vy(352))
+      ctx.lineTo(stall.vx(-4), stall.vy(482))
+      ctx.closePath()
+      ctx.fill()
+      // Two courses of block on the return wall, drawn in its own perspective
+      // so the corner reads as a receding plane and not as a painted wedge.
+      for (var rc = 0; rc < 5; rc++) {
+        var f = rc / 4
+        line(-4, -52 + (482 + 52) * f, cornerX, 14 + (352 - 14) * f, 1,
+             rgbaOf(Theme.duskShadow, 0.30))
       }
-      rect(240, 234, 8, 106, "#2e1629")
-      rect(430, 234, 8, 106, "#2e1629")
+      for (var rv = 1; rv < 3; rv++) {
+        var rx = cornerX * rv / 3
+        line(rx, -52 + (66 * rv / 3), rx, 482 - (130 * rv / 3), 1,
+             rgbaOf(Theme.duskShadow, 0.22))
+      }
+      // The corner edge, catching the sun, and the skirting where the return
+      // wall meets the floor -- a receding line is what tells the eye the two
+      // planes are at an angle rather than side by side.
+      rect(cornerX - 2.5, 14, 2.5, 338, rgbaOf(Theme.duskRim, 0.62))
+      rect(cornerX, 14, 3, 338, "#0e030c")
+      poly([[-4, 482], [cornerX, 352], [cornerX, 344], [-4, 466]],
+           rgbaOf(Theme.duskShadow, 0.55))
+      line(-4, 466, cornerX, 344, 1.4, rgbaOf(Theme.duskRim, 0.20))
+
+      // -------------------------------------------------------- shelf unit
+      // A steel rack: two uprights, three boards, and crates on them. Every
+      // piece is a box with its door-side face drawn, so the rack has a lit
+      // right flank, a dark left one, and a shadow on the wall behind it.
+      // ROUND-7 second pass: the rack sits 30 units lower and is 30 shorter
+      // than the first pass made it, because the practice poster hangs on the
+      // same wall and the first pass ran the top crates up BEHIND it -- a
+      // poster cannot be in front of a freestanding rack. The round's own
+      // light audit found it: the top crates' door-side flanks measured
+      // darker than their far ends, and the reason was the poster covering
+      // them.
+      var shX = 260, shY = 250, shW = 168, shH = 84
+      wallShadow(shX, shY, shW, shH, 26, 0.45)
+      rect(shX - 4, shY - 4, shW + 8, shH + 8, "#1a0916")
+      // Three boards, and on each of them a run of crates. Every crate is a
+      // box: a cool front, a warm door-side flank, a top between the two, and
+      // a shadow on the board it stands on. Two crate palettes, so the rack
+      // has something in it rather than a row of identical blocks.
+      // Offsets are spaced so that every crate's door-side flank is clear of
+      // its neighbour: butted crates occlude each other's lit face, which is
+      // exactly what the round's own light audit caught on the first pass.
+      var crates = [[[4, 42, 32, "#4e4231", "#9a7f4c", "#63553a"],
+                     [58, 28, 24, "#3d2c4c", "#74537e", "#4e3a62"],
+                     [100, 46, 32, "#5a332f", "#a15c44", "#714038"]],
+                    [[4, 32, 26, "#5a332f", "#a15c44", "#714038"],
+                     [48, 44, 32, "#3d3a2e", "#6f6a45", "#4c4837"],
+                     [106, 36, 22, "#40304e", "#79587f", "#513c64"]],
+                    [[4, 48, 32, "#3d3a2e", "#6f6a45", "#4c4837"],
+                     [64, 26, 26, "#5a332f", "#a15c44", "#714038"],
+                     [102, 40, 30, "#4e4231", "#9a7f4c", "#63553a"]]]
+      for (var sh = 0; sh < 3; sh++) {
+        var sy2 = shY + sh * 38
+        // The board: its front edge is a box, so the top face reads as a
+        // shelf you could put something on and the underside as a shadow.
+        boxProp(shX, sy2, shW, 8, 0.06, "#4a2742", "#84506a", "#653a56")
+        // The lip catches the sun over the door-side third of its length and
+        // no further, the same break piece C put in the cars' outline.
+        rect(shX + shW * 0.62, sy2, shW * 0.38, 1.6, rgbaOf(Theme.duskRim, 0.40))
+        var run = crates[sh]
+        for (var ci = 0; ci < run.length; ci++) {
+          var cdef = run[ci]
+          var cx3 = shX + cdef[0], cw3 = cdef[1], ch3 = cdef[2]
+          poly([[cx3, sy2], [cx3 - 11, sy2 + 4.5],
+                [cx3 - 11 + cw3, sy2 + 4.5], [cx3 + cw3, sy2]],
+               Qt.rgba(0.13, 0.03, 0.11, 0.55))
+          boxProp(cx3, sy2 - ch3, cw3, ch3, 0.055, cdef[3], cdef[4], cdef[5])
+          // A batten across the face, so a crate reads as a crate.
+          rect(cx3 + 3, sy2 - ch3 * 0.62, cw3 - 6, 2.5,
+               Qt.rgba(0, 0, 0, 0.30))
+          rect(cx3 + cw3 - 1.6, sy2 - ch3, 1.6, ch3, rgbaOf(Theme.duskRim, 0.40))
+        }
+      }
+      // The uprights, drawn last so they stand in front of the boards. They
+      // are plain posts, NOT boxes: a post's flank is against the boards
+      // beside it and cannot be seen, and drawing one anyway put a 24-unit
+      // lit wedge under the crates -- which is what this round's own light
+      // audit caught. Only the right-hand post has a face turned to the open
+      // room, and only it carries the sun.
+      rect(shX - 10, shY - 12, 10, shH + 24, "#2c1527")
+      rect(shX - 1.4, shY - 12, 1.4, shH + 24, Qt.rgba(0, 0, 0, 0.35))
+      rect(shX + shW, shY - 12, 10, shH + 24, "#331829")
+      rect(shX + shW + 8.4, shY - 12, 1.6, shH + 24, rgbaOf(Theme.duskRim, 0.55))
 
       // ------------------------------------------------------ tool chest
-      rect(120, 236, 122, 106, "#5a1f1c")
-      rect(120, 236, 122, 8, "#7a2c26")
+      // The one saturated warm object on this wall, and it keeps its own hue
+      // under the sun exactly as the cars do: a red chest reads red, and the
+      // warmth is on its door-side flank and on the lip of every drawer.
+      var tcX = 130, tcY = 234, tcW = 112, tcH = 108
+      wallShadow(tcX, tcY, tcW, tcH, 30, 0.5)
+      boxProp(tcX, tcY, tcW, tcH, 0.075, "#5a1f1c", "#a04b32", "#7a2c26")
       for (var dr = 0; dr < 4; dr++) {
-        rect(126, 250 + dr * 22, 110, 17, "#481916")
-        rect(150, 256 + dr * 22, 62, 4, "#8f4038")
+        var dy2 = tcY + 14 + dr * 22
+        rect(tcX + 6, dy2, tcW - 12, 17, "#481916")
+        // The drawer's own top lip, lit, and the shadow it drops.
+        rect(tcX + 6, dy2, tcW - 12, 1.6, rgbaOf(Theme.duskRim, 0.42))
+        rect(tcX + 6, dy2 + 17, tcW - 12, 2, "#2a0f0e")
+        rect(tcX + 28, dy2 + 6, 58, 4, "#b5674a")
       }
-      rect(120, 336, 122, 6, "#1a0f0e")
+      rect(tcX + tcW - 2, tcY, 2, tcH, rgbaOf(Theme.duskRim, 0.55))
+      // Its contact shadow on the floor, running toward the camera and left.
+      poly([[tcX, 342], [tcX - 40, 372], [tcX + tcW - 16, 372], [tcX + tcW, 342]],
+           Qt.rgba(0.13, 0.03, 0.11, 0.55))
 
       // -------------------------------------------------------- pegboard
       // The strip of wall right of the roller door that the COLOR panel does
       // not cover. Kept dark on purpose: nothing in the corner of the bay
-      // should outrank the kart.
-      rect(946, 44, 214, 104, "#22101f")
+      // should outrank the kart. It is right of the vanishing point, so the
+      // face that turns toward the eye is its LEFT one -- which is the face
+      // the door lights, and the tools on it catch the sun on the same side.
+      boxProp(946, 44, 214, 104, 0.05, "#22101f", "#4a2440", "#33182d")
       rect(946, 44, 214, 4, "#3a1c35")
+      rect(946, 44, 2, 104, rgbaOf(Theme.duskRim, 0.40))
       for (var pgx = 954; pgx < 1156; pgx += 12)
         for (var pgy = 56; pgy < 142; pgy += 12)
           rect(pgx, pgy, 2, 2, "#331a2f")
-      // A spanner, a hammer and two hooks, as silhouettes.
-      rect(968, 58, 6, 54, "#4a2e45")
-      rect(963, 56, 16, 8, "#4a2e45")
-      rect(963, 104, 16, 8, "#4a2e45")
-      rect(1000, 58, 7, 40, "#40283c")
-      rect(994, 56, 19, 9, "#573a52")
-      rect(1036, 58, 5, 30, "#40283c")
-      rect(1030, 86, 17, 7, "#4a2e45")
-      rect(1074, 58, 5, 44, "#3a2236")
-      rect(1068, 58, 17, 6, "#4a2e45")
-      rect(1110, 58, 5, 36, "#3a2236")
-      rect(1104, 58, 17, 6, "#4a2e45")
+      // A spanner, a hammer and two hooks, as silhouettes, each with the sun
+      // on its left edge because the door is left of this wall.
+      function tool(x, y, w, h, body) {
+        rect(x, y, w, h, body)
+        rect(x, y, Math.max(1, w * 0.34), h, rgbaOf(Theme.duskRim, 0.34))
+      }
+      tool(968, 58, 6, 54, "#4a2e45")
+      tool(963, 56, 16, 8, "#4a2e45")
+      tool(963, 104, 16, 8, "#4a2e45")
+      tool(1000, 58, 7, 40, "#40283c")
+      tool(994, 56, 19, 9, "#573a52")
+      tool(1036, 58, 5, 30, "#40283c")
+      tool(1030, 86, 17, 7, "#4a2e45")
+      tool(1074, 58, 5, 44, "#3a2236")
+      tool(1068, 58, 17, 6, "#4a2e45")
+      tool(1110, 58, 5, 36, "#3a2236")
+      tool(1104, 58, 17, 6, "#4a2e45")
       rect(946, 146, 214, 3, "#12060f")
 
       // ------------------------------------------------------- tire walls
+      // Tyres, not slabs: an ellipse for the sidewall, a darker one for the
+      // hole, a warm crescent on the door side and a purple pool underneath.
+      // A stack of tyres: each one a carcass with a tread band and a wheel
+      // face, drawn bottom to top so the one above sits into the one below.
+      // The door is to the right of this corner, so the sun lands on the
+      // right shoulder of every carcass and the pool under the stack runs
+      // away from it, toward the camera and left.
+      // A stack of tyres. Each one is a short CYLINDER -- a sidewall band with
+      // an elliptical top face on it -- and they are drawn bottom to top so
+      // each covers the one below. Round seven's first pass drew them as flat
+      // ellipses only, which under this camera read as a stack of plates: a
+      // tyre is legible because you can see its side, not its face.
       function tyreStack(x, yBase, count, w) {
+        var cx2 = x + w / 2, r2 = w / 2, band = 13, ry2 = 9
+        poly([[x + 4, yBase + 13], [x - 28, yBase + 38],
+              [x + w - 12, yBase + 38], [x + w - 2, yBase + 13]],
+             Qt.rgba(0.12, 0.03, 0.10, 0.6))
         for (var t = 0; t < count; t++) {
-          var ty = yBase - t * 26
-          rect(x, ty, w, 24, "#1e1019")
-          rect(x + 3, ty + 3, w - 6, 18, "#130a10")
-          rect(x, ty, w, 4, "#2e1a2a")
+          var cy2 = yBase - t * band
+          // The sidewall: a band closed at the bottom by half an ellipse, so
+          // the carcass has a round bottom rather than a cut edge.
+          ellipse(cx2, cy2 + band, r2, ry2, "#150a13")
+          rect(x, cy2, w, band, "#150a13")
+          // The sun on its door-side shoulder, and the room's purple opposite.
+          rect(x + w - 9, cy2, 9, band, "#33192e")
+          rect(x + w - 4, cy2, 4, band, rgbaOf(Theme.duskRim, 0.34))
+          rect(x, cy2, 7, band, "#0b0409")
+          // Tread blocks across the band.
+          for (var tb = 0; tb < 9; tb++)
+            rect(x + 5 + tb * (w - 14) / 9, cy2 + 2, (w - 14) / 20, band - 4,
+                 Qt.rgba(0, 0, 0, 0.22))
+          // The top face, and the wheel sunk into it.
+          ellipse(cx2, cy2, r2, ry2, "#261423")
+          ellipse(cx2 + 4, cy2 - 1, r2 - 7, ry2 - 2.5, "#341d31")
+          ellipse(cx2 + 1, cy2 + 0.5, r2 * 0.42, ry2 * 0.42, "#452a41")
+          ellipse(cx2 + 1, cy2 + 0.5, r2 * 0.22, ry2 * 0.24, "#0c0409")
         }
       }
       // Only the left stack is drawn: the two on the right were under the
       // opaque COLOR panel on every screen at every size.
-      tyreStack(24, 316, 4, 84)
+      tyreStack(14, 322, 4, 92)
 
       // ------------------------------------------- the door's light, wall
       // Magenta bounce on the wall, centred on the opening and dying with
@@ -363,20 +594,20 @@ Item {
       slat.addColorStop(0, "#3a1a34")
       slat.addColorStop(1, "#22101f")
       ctx.fillStyle = slat
-      ctx.fillRect(stall.vx(462), stall.vy(56), stall.vs(366), stall.vs(stall.doorTop - 56))
-      for (var sy = 62; sy < stall.doorTop - 2; sy += 11) {
-        line(464, sy, 826, sy, 1.6, "#150812")
-        line(464, sy + 3, 826, sy + 3, 1, "#5a2a50")
+      ctx.fillRect(stall.vx(444), stall.vy(44), stall.vs(402), stall.vs(stall.doorTop - 44))
+      for (var sy = 50; sy < stall.doorTop - 2; sy += 11) {
+        line(446, sy, 844, sy, 1.6, "#150812")
+        line(446, sy + 3, 844, sy + 3, 1, "#5a2a50")
       }
-      rect(462, stall.doorTop - 3, 366, 7, "#4a2444")
-      rect(462, stall.doorTop + 2, 366, 2, rgbaOf(Theme.duskHorizon, 0.55))
+      rect(444, stall.doorTop - 3, 402, 7, "#4a2444")
+      rect(444, stall.doorTop + 2, 402, 2, rgbaOf(Theme.duskHorizon, 0.55))
       // Door frame uprights: the design's teal, kept here and nowhere else in
       // the room, with a bright teal edge on the side that faces the sky.
-      rect(456, 50, 8, 296, Theme.tealDeep)
-      rect(824, 50, 8, 296, Theme.tealDeep)
-      rect(462, 50, 2, 296, rgbaOf(Theme.teal, 0.75))
-      rect(824, 50, 2, 296, rgbaOf(Theme.teal, 0.75))
-      rect(456, 46, 376, 6, Theme.tealDeep)
+      rect(438, 38, 8, 308, Theme.tealDeep)
+      rect(838, 38, 8, 308, Theme.tealDeep)
+      rect(444, 38, 2, 308, rgbaOf(Theme.teal, 0.75))
+      rect(838, 38, 2, 308, rgbaOf(Theme.teal, 0.75))
+      rect(438, 34, 408, 6, Theme.tealDeep)
 
       // ------------------------------------------------------------ floor
       var floor = ctx.createLinearGradient(0, stall.vy(340), 0, stall.vy(560))
@@ -617,44 +848,56 @@ Item {
       ctx.fillRect(stall.vx(stall.daisX - 260), stall.vy(330), stall.vs(520), stall.vs(230))
 
       // ----------------------------------------------------------- signage
-      // The pit terminal, left wall.
-      rect(38, 92, 174, 104, "#160a14")
-      rect(42, 96, 166, 96, "#241422")
-      rect(48, 102, 154, 84, "#06120e")
-      rect(48, 102, 154, 3, "#0d2a1e")
-      for (var scan = 106; scan < 186; scan += 4)
-        rect(48, scan, 154, 1, "#0a1f16")
-      rect(38, 92, 174, 4, "#3a1e36")
+      // The pit terminal, left wall. A cased screen: the case is a box with
+      // its door-side flank lit, and it throws a shadow left across the wall.
+      wallShadow(stall.termX, stall.termY, 152, 94, 22, 0.42)
+      boxProp(stall.termX, stall.termY, 152, 94, 0.07, "#160a14", "#4a2440", "#2a1526")
+      rect(stall.termX + 4, stall.termY + 4, 144, 86, "#241422")
+      rect(stall.termX + 10, stall.termY + 10, 132, 74, "#06120e")
+      rect(stall.termX + 10, stall.termY + 10, 132, 3, "#0d2a1e")
+      for (var scan = stall.termY + 14; scan < stall.termY + 84; scan += 4)
+        rect(stall.termX + 10, scan, 132, 1, "#0a1f16")
+      rect(stall.termX, stall.termY, 152, 4, "#3a1e36")
+      rect(stall.termX + 150, stall.termY, 2, 94, rgbaOf(Theme.duskRim, 0.5))
 
       // The practice poster, between the terminal and the roller door. Its
-      // backdrop is the same sunset as the door: the poster is the bar's
-      // own composition in miniature.
-      rect(246, 86, 164, 146, "#3a1e36")
-      rect(252, 92, 152, 134, "#160a14")
-      var posterSky = ctx.createLinearGradient(0, stall.vy(92), 0, stall.vy(170))
+      // backdrop is the same sunset as the door: the poster is the bar's own
+      // composition in miniature. It hangs off the wall, so it too has a
+      // frame with a lit door-side edge and a shadow behind it.
+      var poX = stall.posterX, poY = stall.posterY, poW = 148, poH = 150
+      wallShadow(poX, poY, poW, poH, 20, 0.40)
+      boxProp(poX, poY, poW, poH, 0.045, "#3a1e36", "#6e3a5c", "#4a2644")
+      rect(poX + 6, poY + 6, poW - 12, poH - 12, "#160a14")
+      var posterSky = ctx.createLinearGradient(0, stall.vy(poY + 6), 0, stall.vy(poY + 84))
       posterSky.addColorStop(0, Theme.duskSkyTop)
       posterSky.addColorStop(0.7, Theme.duskSkyHot)
       posterSky.addColorStop(1, Theme.duskHorizon)
       ctx.fillStyle = posterSky
-      ctx.fillRect(stall.vx(252), stall.vy(92), stall.vs(152), stall.vs(78))
+      ctx.fillRect(stall.vx(poX + 6), stall.vy(poY + 6), stall.vs(poW - 12), stall.vs(78))
       ctx.fillStyle = Theme.duskSun
       ctx.beginPath()
-      ctx.arc(stall.vx(352), stall.vy(160), stall.vs(22), Math.PI, Math.PI * 2, false)
+      ctx.arc(stall.vx(poX + poW / 2), stall.vy(poY + 74), stall.vs(22), Math.PI, Math.PI * 2, false)
       ctx.fill()
-      rect(252, 160, 152, 10, Theme.duskHillNear)
-      rect(252, 168, 152, 2, "#4a1838")
+      rect(poX + 6, poY + 74, poW - 12, 10, Theme.duskHillNear)
+      rect(poX + 6, poY + 82, poW - 12, 2, "#4a1838")
+      rect(poX + poW - 2, poY, 2, poH, rgbaOf(Theme.duskRim, 0.5))
 
       // Hanging checkered flag, on the wall right of the door. The light
       // square is kept below the kart's value; the hem ties the columns.
-      rect(852, 60, 72, 5, "#3a1e36")
-      rect(854, 64, 68, 6, "#180a16")
+      // ROUND-7: the light square was #9a8a94, a neutral grey, and the only
+      // neutral left in the room. Nothing under this sun is grey. It is now
+      // the cream the design already gives to plates and road paint, dropped
+      // to a value below the kart's, and the fold shadow beside it is purple.
+      rect(858, 60, 72, 5, "#3a1e36")
+      rect(860, 64, 68, 6, "#180a16")
       for (var fc = 0; fc < 6; fc++) {
         var drape = Math.round(Math.abs(Math.sin((fc + 0.4) * 0.7)) * 3)
+        var lit = fc < 3 ? "#a48678" : "#b9937f"
         for (var fr = 0; fr < 7; fr++) {
-          rect(856 + fc * 11, 68 + drape + fr * 11, 11, 11,
-               (fr + fc) % 2 === 0 ? "#9a8a94" : "#180a16")
+          rect(862 + fc * 11, 68 + drape + fr * 11, 11, 11,
+               (fr + fc) % 2 === 0 ? lit : "#1c0a18")
         }
-        rect(856 + fc * 11, 68 + drape + 77, 11, 3, "#5e4258")
+        rect(862 + fc * 11, 68 + drape + 77, 11, 3, "#4a2a46")
       }
 
       // Traffic cone, on open floor left of the dais. Its shadow now runs
@@ -675,11 +918,19 @@ Item {
       rect(coneX, coneBase - 10, 56, 2, "#94491c")
       for (var cn = 0; cn < 6; cn++)
         rect(coneX + 6 + cn * 3, coneBase - 8 - cn * 11 - 11, 44 - cn * 6, 11,
-             cn === 2 || cn === 3 ? "#d8d9dd" : "#c25a1c")
-      // The sun's rim on the cone's right edge.
-      for (var cr = 0; cr < 6; cr++)
-        rect(coneX + 6 + cr * 3 + (44 - cr * 6) - 3, coneBase - 8 - cr * 11 - 11, 3, 11,
-             rgbaOf(Theme.duskRim, 0.7))
+             cn === 2 || cn === 3 ? "#e4cbb4" : "#c25a1c")
+      // The sun on the cone's right edge and the room's purple on its left.
+      // The lit tone follows the band it lands on: painting the rim colour
+      // over a cream band made the cream band's lit side DARKER than its
+      // body, which the round's light audit caught on both cream bands.
+      for (var cr = 0; cr < 6; cr++) {
+        var cbx = coneX + 6 + cr * 3, cbw = 44 - cr * 6
+        var cby = coneBase - 8 - cr * 11 - 11
+        rect(cbx + cbw - 4, cby, 4, 11,
+             cr === 2 || cr === 3 ? "#fbeada" : rgbaOf(Theme.duskRim, 0.75))
+        rect(cbx, cby, 4, 11,
+             cr === 2 || cr === 3 ? "#9d8092" : Qt.rgba(0.42, 0.20, 0.09, 1))
+      }
 
       // ---------------------------------------------------------- vignette
       // Purple, not black: the corners fall toward the bar's ground colour.
@@ -695,8 +946,8 @@ Item {
   // The terminal's green CRT copy, and the poster's, as real text so they
   // stay crisp and stay plain text.
   Column {
-    x: stall.vx(56)
-    y: stall.vy(112)
+    x: stall.vx(stall.termX + 18)
+    y: stall.vy(stall.termY + 18)
     spacing: stall.vs(6)
     Text {
       text: "WELCOME TO"
@@ -732,8 +983,8 @@ Item {
   // bake's contact point.
   CarSprite {
     readonly property var fit: CarMeta.fit(stall.vs(96))
-    x: Math.round(stall.vx(256 + 76) - drawnWidth / 2 + anchorDx)
-    y: Math.round(stall.vy(94) + anchorDy)
+    x: Math.round(stall.vx(stall.posterX + 74) - drawnWidth / 2 + anchorDx)
+    y: Math.round(stall.vy(stall.posterY + 8) + anchorDy)
     body: 2
     paint: 0
     camera: "stall"
@@ -744,9 +995,9 @@ Item {
   }
 
   Column {
-    x: stall.vx(252)
-    y: stall.vy(176)
-    width: stall.vs(152)
+    x: stall.vx(stall.posterX + 6)
+    y: stall.vy(stall.posterY + 90)
+    width: stall.vs(136)
     spacing: stall.vs(4)
     Text {
       width: parent.width

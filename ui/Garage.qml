@@ -177,9 +177,18 @@ FocusScope {
     }
   }
 
+  // ROUND-7, THE PALETTE. The page was `Theme.ground` -- the child's theme
+  // background driven to 34%, which on stock Omarchy is the cold neutral
+  // #090911. The design's Visual style names the ground "near-black purple
+  // #3c1228", and a 1920x1080 frame of this screen beside
+  // docs/golden-hour-reference.png was a dark desktop panel with a small lit
+  // window cut in it. Every surface on this screen now comes from the dusk
+  // stack Theme adds for v3; the chrome ON them -- the accent, the focus
+  // ring, the four text roles, the hairlines, the type -- is the theme's and
+  // is untouched.
   Rectangle {
     anchors.fill: parent
-    color: Theme.ground
+    color: Theme.duskPage
   }
 
   // The page: one card with everything on it, exactly as the mock frames it.
@@ -187,7 +196,7 @@ FocusScope {
     id: page
     anchors.fill: parent
     anchors.margins: garage.px(16)
-    color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.55)
+    color: Qt.rgba(Theme.duskSurface.r, Theme.duskSurface.g, Theme.duskSurface.b, 0.55)
     border.color: Theme.lineStrong
 
     readonly property int pad: garage.px(22)
@@ -272,7 +281,7 @@ FocusScope {
       width: page.contentW
       height: garage.px(56)
       radius: Theme.cornerRadius
-      color: Theme.panelSunken
+      color: Theme.duskSurfaceSunken
       border.width: 1
       border.color: Theme.line
 
@@ -386,7 +395,7 @@ FocusScope {
       y: page.mainY
       width: page.stallW
       height: page.mainH
-      color: Theme.ground
+      color: Theme.duskPage
       clip: true
 
       GarageStall {
@@ -437,7 +446,7 @@ FocusScope {
         width: garage.px(304)
         height: bodyColumn.height + garage.px(34)
         radius: Theme.cornerRadius
-        color: Theme.panel
+        color: Theme.duskSurface
         border.width: 1
         border.color: Theme.lineStrong
 
@@ -465,6 +474,7 @@ FocusScope {
             arrowWidth: garage.px(52)
             valueSize: garage.fs(23)
             valueSpacing: garage.px(2)
+            faceColor: Theme.duskSurfaceSunken
             value: Theme.bodyName(garage.bodyIndex)
             name: "Kart body"
             hint: "Six bodies. Left and right change it."
@@ -529,7 +539,7 @@ FocusScope {
           anchors.fill: parent
           renderStrategy: Canvas.Immediate
           renderTarget: Canvas.Image
-          readonly property color tint: Theme.panel
+          readonly property color tint: Theme.duskSurface
           readonly property int radius: Theme.cornerRadius
           onTintChanged: requestPaint()
           onWidthChanged: requestPaint()
@@ -659,6 +669,7 @@ FocusScope {
             arrowWidth: garage.px(52)
             valueSize: garage.fs(27)
             valueSpacing: garage.px(3)
+            faceColor: Theme.duskSurfaceSunken
             value: String(garage.kartNumber)
             name: "Kart number"
             hint: "One to ninety-nine. Left and right change it."
@@ -698,6 +709,8 @@ FocusScope {
         height: roster.slotH
         y: 0
         scaleUnit: garage.s
+        surface: Theme.duskSurfaceRaised
+        sunkenSurface: Theme.duskSurfaceSunken
         name: "YOU"
         number: garage.kartNumber
         paintIndex: garage.paintIndex
@@ -715,13 +728,16 @@ FocusScope {
           height: roster.slotH
           y: (index + 1) * (roster.slotH + roster.slotGap)
           scaleUnit: garage.s
+          surface: Theme.duskSurfaceRaised
+          sunkenSurface: Theme.duskSurfaceSunken
           name: Theme.rivalNames[index]
           number: Theme.rivalNumbers[index]
           paintIndex: Theme.rivalPaints[index]
           bodyIndex: index + 1
           level: garage.rivalLevel
           ready: true
-          opacity: garage.rivalsRace ? 1.0 : 0.45
+          // ROUND-7: the row's chrome dims, the kart keeps its paint.
+          inRace: garage.rivalsRace
         }
       }
 
@@ -735,6 +751,7 @@ FocusScope {
         art: Glyphs.lock
         tone: "off"
         variant: "sign"
+        surface: Theme.duskSurfaceSunken
         focusable: false
         label: "RACE A FRIEND"
         sublabel: "Ask a parent to install Kids Play"
@@ -757,6 +774,7 @@ FocusScope {
       y: page.bottomY
       width: page.settingsW
       height: page.bottomH
+      color: Theme.duskSurface
 
       // Five rows, written out rather than repeated over a model: the values
       // change as the child cycles them, and a model that changes rebuilds
@@ -851,6 +869,7 @@ FocusScope {
       y: page.bottomY
       width: page.signalsW
       height: page.bottomH
+      color: Theme.duskSurface
       pad: garage.px(22)
       title: "PRESET SIGNALS"
       titleColor: Theme.amber
@@ -873,6 +892,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.thumbUp
           caption: "NICE RUN"
+          surface: Theme.duskSurfaceSunken
           tone: Theme.lime
           captionSize: garage.fs(15)
         }
@@ -882,6 +902,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.flag
           caption: "READY"
+          surface: Theme.duskSurfaceSunken
           tone: Theme.amber
           captionSize: garage.fs(15)
         }
@@ -891,6 +912,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.rematch
           caption: "REMATCH?"
+          surface: Theme.duskSurfaceSunken
           tone: "#ee8b3a"
           captionSize: garage.fs(15)
         }
@@ -900,6 +922,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.hand
           caption: "GOOD GAME"
+          surface: Theme.duskSurfaceSunken
           tone: Theme.accent
           captionSize: garage.fs(15)
         }

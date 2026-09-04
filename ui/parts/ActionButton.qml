@@ -33,6 +33,9 @@ Item {
   property int labelSize: 34
   property int sublabelSize: 15
   property int iconSize: 40
+  // The "sign" variant's fill. Defaults to what it has always been; the
+  // garage sets it to the v3 dusk surface so the sign belongs to its column.
+  property color surface: Theme.panelSunken
 
   signal activated()
 
@@ -67,7 +70,7 @@ Item {
     anchors.fill: parent
     radius: Theme.cornerRadius
     color: button.sign
-           ? Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.85)
+           ? Qt.rgba(button.surface.r, button.surface.g, button.surface.b, 0.85)
            : button.primary
              ? (button.activeFocus ? Qt.lighter(button.toneColor, 1.16) : button.toneColor)
              : Qt.rgba(button.toneColor.r * 0.20, button.toneColor.g * 0.20,

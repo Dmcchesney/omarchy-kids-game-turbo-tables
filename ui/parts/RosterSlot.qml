@@ -21,6 +21,31 @@ Item {
   property bool ready: false
   property string statusText: ""
   property real scaleUnit: 1.0
+  // The row's own fill and the ready lamp's sunken face. Defaults are what
+  // they have always been; the garage sets them to the v3 dusk surfaces.
+  property color surface: Theme.panelRaised
+  property color sunkenSurface: Theme.panelSunken
+  // Is this racer in the race that is set up? A Practice or Time trial run
+  // has no rivals in it, and the three rival rows say so.
+  //
+  // ROUND-7. This used to be an `opacity: 0.45` that the garage put on the
+  // WHOLE slot, and paint fidelity is on this screen's rubric: dimming the
+  // row dims the car, so the one thing the roster exists to show -- what
+  // colour that racer's kart is -- was being composited away to say something
+  // about the race mode.
+  //
+  // There is no dim at all now. A first pass moved it off the kart and onto
+  // the row's chrome, and the round's own contrast table caught THAT: the
+  // dimmed SITTING OUT label measured 3.16:1, under the design's 4.5:1 floor,
+  // because 0.80 alpha through 0.72 opacity is 0.58. So the state is carried
+  // where the design says a state is carried -- by shape and text. The lamp
+  // is unlit and reads SITTING OUT, which is what a ready lamp is for.
+  property bool inRace: true
+  // Whether the ready lamp is lit: a rival that is not in this race is not
+  // ready for it. The word beside the lamp says so as well, because the
+  // design requires every state to carry shape or text and not colour alone
+  // -- and a dimmed row does not carry either.
+  readonly property bool lit: ready && inRace
 
   readonly property color paintColor: Theme.paint(paintIndex)
   // The paint, lifted for type. Purple measures 4.01:1 against this row at
@@ -32,18 +57,42 @@ Item {
 
   function u(v) { return Math.round(v * scaleUnit) }
 
+  // A row is read out as one thing: who, what colour, what number, and what
+  // the lamp says. It is a display, not a control, so it is not focusable and
+  // takes no Tab stop.
+  activeFocusOnTab: false
+  Accessible.role: Accessible.StaticText
+  Accessible.name: slot.name + ", number " + slot.number + ", "
+                   + Theme.paintName(slot.paintIndex).toLowerCase() + " "
+                   + Theme.bodyName(slot.bodyIndex).toLowerCase() + ", "
+                   + (slot.isChild ? "in the stall"
+                                   : (slot.inRace ? "ready" : "sitting this race out"))
+
   implicitHeight: u(100)
 
   Rectangle {
     anchors.fill: parent
     radius: Theme.cornerRadius
     color: slot.isChild
-           ? Qt.rgba(Theme.accent.r * 0.16, Theme.accent.g * 0.16, Theme.accent.b * 0.2, 0.6)
-           : Theme.panelRaised
+           ? Qt.rgba(Theme.accent.r * 0.16 + slot.surface.r * 0.5,
+                     Theme.accent.g * 0.16 + slot.surface.g * 0.5,
+                     Theme.accent.b * 0.2 + slot.surface.b * 0.5, 0.82)
+           : slot.surface
     border.width: 1
     border.color: slot.isChild
                   ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                   : Theme.line
+  }
+
+  // The sun through the bay door reaches the roster column too: a warm
+  // hairline along the top edge of every row, so the chrome is lit from the
+  // same direction as the room and the cards stop reading as flat slabs.
+  Rectangle {
+    x: Theme.cornerRadius
+    width: parent.width - Theme.cornerRadius * 2
+    y: 1
+    height: 1
+    color: Theme.duskEdgeWarm
   }
 
   // ---------------------------------------------------------- number badge
@@ -140,8 +189,12 @@ Item {
     // are all visible, which is what tells two cars apart at 96 px.
     yaw: 6
     sheetScale: 0.5
-    pixelScale: slot.scaleUnit >= 1.5 ? 2 : 1
-    opacity: slot.ready ? 1.0 : 0.86
+    // ROUND-7: 1.30, not 1.50. At 2560x1440 the screen's scale factor is
+    // 1.333, so the old threshold left the roster car at one sheet pixel per
+    // screen pixel on the biggest display the game runs on -- a 96 x 64 cell
+    // in a 133 px row. Two pixels per sheet pixel is 192 x 128, which still
+    // fits the row, and paint fidelity in the roster is on this screen's bar.
+    pixelScale: slot.scaleUnit >= 1.30 ? 2 : 1
   }
 
   // ------------------------------------------------------------- ready lamp
@@ -153,7 +206,7 @@ Item {
     width: slot.u(102)
     height: slot.u(74)
     radius: Theme.cornerRadiusSmall
-    color: Theme.panelSunken
+    color: slot.sunkenSurface
     border.width: 1
     border.color: Theme.line
 
@@ -162,8 +215,11 @@ Item {
       textFormat: Text.PlainText
       anchors.horizontalCenter: parent.horizontalCenter
       y: slot.u(11)
-      text: slot.ready ? "READY" : "IN STALL"
-      color: slot.ready ? Theme.lime : Theme.textLabel
+      text: slot.isChild ? "IN STALL" : (slot.inRace ? "READY" : "SITTING OUT")
+      // Full strength, not `textLabel`. This word IS the row's state, and at
+      // 0.80 alpha over the lamp's lit-side bevel it measured 4.23:1 on the
+      // shipped Practice frame -- under the design's floor.
+      color: slot.lit ? Theme.lime : Theme.text
       font.family: Theme.mono
       font.bold: true
       font.pixelSize: slot.u(15)
@@ -176,14 +232,14 @@ Item {
       width: slot.u(26)
       height: width
       radius: width / 2
-      color: slot.ready ? Theme.lime : "#141821"
+      color: slot.lit ? Theme.lime : "#1c0a18"
       border.width: Math.max(1, slot.u(2))
-      border.color: slot.ready
+      border.color: slot.lit
                     ? Qt.lighter(Theme.lime, 1.3)
                     : Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.3)
 
       Rectangle {
-        visible: slot.ready
+        visible: slot.lit
         anchors.centerIn: parent
         width: parent.width * 0.42
         height: width

@@ -32,6 +32,13 @@ import "../ui/parts"
 //   --print-focus       print every focus stop's screen-reader name and quit.
 //   --settings k=v,k=v  seed the in-memory save file before the screen loads,
 //                       e.g. --settings kartBody=3,kartPaint=5,kartNumber=42
+//   --transient k=v,k=v set a value the save file never holds, after the
+//                       screen loads: `raceMode` and `mathSet` are
+//                       Store.sessionOnlyKeys, so --settings cannot reach
+//                       them and the garage could not be shot in Practice.
+//                       Named --transient and not --session because Qt's own
+//                       `qml` tool eats a `--session` argument before any of
+//                       this sees it, silently.
 //   --measure <ms>      run the screen for that long and print the frame rate.
 //   --sheets <url>      car sheets from another directory (see the rig below).
 //   --kart ...          show one car-sheet cell instead of a screen (below).
@@ -42,6 +49,21 @@ import "../ui/parts"
 //   --field <d,d,...>   for a screen with setKarts() (TrackView): the child's
 //                       car from the seeded settings, plus one rival per
 //                       delta, that many questions up the road (up to three).
+//   --dump-text         print every visible Text in the loaded screen as one
+//                       line -- window rect, declared colour with its alpha,
+//                       pixel size, and the string -- then quit. It is what
+//                       makes a contrast table cover EVERY text element
+//                       rather than the ones a builder remembered.
+//   --dump-rects        the same walk, but printing every item that carries
+//                       an objectName, so a measurement script can find the
+//                       car on the dais without guessing at geometry.
+//   --hide-text         render with every Text painted transparent (NOT
+//                       hidden: hiding one reflows its Row). Paired with
+//                       --dump-text it gives the exact background behind each
+//                       string: the same frame, same size, same seed, with
+//                       the glyphs taken out, so a contrast figure is read
+//                       off the shipped picture instead of off an assumption
+//                       about which surface a string happens to sit on.
 Window {
   id: harness
 
@@ -75,6 +97,114 @@ Window {
   readonly property string settingsArg: argument("settings", "")
   readonly property string travelArg: argument("travel", "")
   readonly property string fieldArg: argument("field", "")
+  // Settings the save file never holds. `raceMode` and `mathSet` are
+  // `Store.sessionOnlyKeys` -- the design's Data row does not persist them --
+  // so `--settings` cannot reach them and a shot of the garage in Practice
+  // was impossible to take. This applies them AFTER the screen has loaded,
+  // through Store.setSetting, which is the same call the arrow key makes.
+  readonly property string transientArg: argument("transient", "")
+  readonly property bool dumpText: flag("dump-text")
+  readonly property bool dumpRects: flag("dump-rects")
+  readonly property bool hideText: flag("hide-text")
+
+  // ------------------------------------------------------ the item walk
+  // One depth-first walk of the loaded screen, used by --dump-text,
+  // --dump-rects and --hide-text so all three see exactly the same tree in
+  // exactly the same order. `visit` is called with every Item under `node`.
+  function walk(node, visit) {
+    if (!node)
+      return
+    visit(node)
+    var kids = node.children
+    if (!kids)
+      return
+    for (var i = 0; i < kids.length; i++)
+      harness.walk(kids[i], visit)
+  }
+
+  // Is this a Text? Duck-typed on the three properties only a text item has
+  // together, because QML has no instanceof for a built-in type here.
+  function isText(item) {
+    return item !== null && typeof item.text === "string"
+           && item.font !== undefined && item.textFormat !== undefined
+           && item.horizontalAlignment !== undefined
+  }
+
+  function hex2(n) {
+    var s = Math.round(Math.max(0, Math.min(255, n * 255))).toString(16)
+    return s.length < 2 ? "0" + s : s
+  }
+
+  function colourText(c) {
+    return "#" + hex2(c.r) + hex2(c.g) + hex2(c.b) + " a=" + c.a.toFixed(3)
+  }
+
+  // Is the item drawn at all? An invisible ancestor hides a visible child, so
+  // opacity and visibility are both walked up to the screen root.
+  function effectiveOpacity(item) {
+    var node = item
+    var opacity = 1
+    while (node && node !== harness.contentItem) {
+      if (!node.visible)
+        return 0
+      opacity *= node.opacity
+      node = node.parent
+    }
+    return opacity
+  }
+
+  function runDump() {
+    var screen = screenLoader.item
+    var count = 0
+    harness.walk(screen, function (item) {
+      if (harness.dumpRects && String(item.objectName).length > 0) {
+        var r = item.mapToItem(harness.contentItem, 0, 0)
+        console.log("rect\t" + item.objectName + "\t" + Math.round(r.x) + "\t"
+                    + Math.round(r.y) + "\t" + Math.round(item.width) + "\t"
+                    + Math.round(item.height))
+      }
+      if (harness.dumpText && harness.isText(item) && item.text.length > 0
+          && harness.effectiveOpacity(item) > 0.02) {
+        var p = item.mapToItem(harness.contentItem, 0, 0)
+        count += 1
+        console.log("text\t" + Math.round(p.x) + "\t" + Math.round(p.y) + "\t"
+                    + Math.round(item.width) + "\t" + Math.round(item.height)
+                    + "\t" + harness.colourText(item.color) + "\to="
+                    + harness.effectiveOpacity(item).toFixed(3) + "\t"
+                    + item.font.pixelSize + "\t"
+                    + item.text.replace(/\n/g, " "))
+      }
+    })
+    if (harness.dumpText)
+      console.log("text count: " + count)
+  }
+
+  // Hide the glyphs WITHOUT changing the layout. Setting `visible` false on a
+  // Text inside a Row or a Column makes the layout reflow and every item after
+  // it move, so the background frame no longer matches the real one -- which
+  // is exactly how a first pass at this measurement reported a signal tile's
+  // caption as 1.00:1 against its own icon. Painting the text transparent
+  // leaves every item where it is.
+  function applySession() {
+    if (harness.transientArg.length === 0)
+      return
+    var pairs = harness.transientArg.split(",")
+    for (var i = 0; i < pairs.length; i++) {
+      var parts = pairs[i].split("=")
+      if (parts.length !== 2)
+        continue
+      var raw = parts[1].trim()
+      Store.setSetting(parts[0].trim(),
+                       isFinite(Number(raw)) ? Number(raw) : raw)
+    }
+  }
+
+  function applyHideText() {
+    harness.walk(screenLoader.item, function (item) {
+      if (harness.isText(item))
+        item.color = "transparent"
+    })
+  }
 
   // A fixed field for a bare TrackView: the child's car from the seeded
   // settings at seat 0, then one rival per delta at seats 1..3, each a
@@ -358,6 +488,17 @@ Window {
         focusPark.forceActiveFocus(Qt.OtherFocusReason)
       else if (harness.focusStops > 0)
         harness.tabForward(harness.focusStops)
+
+      harness.applySession()
+      if (harness.hideText)
+        harness.applyHideText()
+      if (harness.dumpText || harness.dumpRects) {
+        harness.runDump()
+        if (harness.shotPath.length === 0) {
+          Qt.exit(0)
+          return
+        }
+      }
 
       if (harness.printFocus && screen && screen.stops !== undefined) {
         for (var j = 0; j < screen.stops.length; j++)

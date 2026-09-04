@@ -81,6 +81,29 @@ QtObject {
   readonly property color duskNeon: "#ff4fa3"
   readonly property color duskInk: "#280e27"
 
+  // ADDED IN PIECE 3, ROUND 7, and added rather than substituted: `ground`,
+  // `panel`, `panelRaised` and `panelSunken` below are untouched, so every
+  // screen that has not been re-run under v3 renders exactly as it did.
+  //
+  // The design's Visual style names the ground "near-black purple #3c1228".
+  // The derived `ground` below is the theme's own background driven to 34% --
+  // on stock Omarchy that is #090911, a cold neutral near-black, and it is
+  // what made a 1920x1080 garage frame read as a dark desktop panel with a
+  // small lit window cut in it rather than as a room at golden hour. These
+  // five are the same surface stack in the bar's family, with #3c1228 itself
+  // as the raised card. They are fixed rather than derived for the reason the
+  // block above them is fixed: the design settles the game's palette and it
+  // deliberately does not move with the child's theme. The chrome ON these
+  // surfaces -- the accent, the focus ring, the text roles, the hairlines --
+  // is still the theme's and is unchanged.
+  readonly property color duskPage: "#1e0816"
+  readonly property color duskSurface: "#2e0f21"
+  readonly property color duskSurfaceRaised: "#3c1228"
+  readonly property color duskSurfaceSunken: "#170510"
+  // A hairline and a rule that belong to the room rather than to the desktop:
+  // warm, low-alpha, and used only where an edge is catching the sun.
+  readonly property color duskEdgeWarm: Qt.rgba(duskRim.r, duskRim.g, duskRim.b, 0.22)
+
   // Eight paints, in the order the swatch grid reads them: two rows of four.
   readonly property var paints: ["#e0483a", "#ee8b3a", "#f2c93c", "#6dc94a",
                                  "#3f7fe0", "#9a55d6", "#e05fb0", "#d8dbe0"]

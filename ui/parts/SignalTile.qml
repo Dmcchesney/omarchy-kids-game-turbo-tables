@@ -22,6 +22,10 @@ Item {
   property string caption: ""
   property color tone: Theme.lime
   property int captionSize: 14
+  // The tile's own fill. Defaults to what it has always been, so a screen
+  // that does not set it is unchanged; the garage sets it to the v3 dusk
+  // surface so the legend belongs to the room it sits in.
+  property color surface: Theme.panelSunken
 
   activeFocusOnTab: false
 
@@ -32,7 +36,7 @@ Item {
   Rectangle {
     anchors.fill: parent
     radius: Theme.cornerRadiusSmall
-    color: Theme.panelSunken
+    color: tile.surface
     border.width: 1
     border.color: Theme.line
   }

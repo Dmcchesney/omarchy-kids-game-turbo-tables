@@ -286,6 +286,78 @@ Item {
     }
 
     // ------------------------------------------------------------------
+    // ROUND-7. Tab must move exactly one stop, every time, and the proof has
+    // to be the index BEFORE and AFTER each real press rather than the name
+    // at the end. test_02 above compares the name reached at stop i with the
+    // name the garage publishes for i, which is a strong check -- but if two
+    // stops ever shared a name it would pass while Tab skipped one. This
+    // records the index, presses the real key, records it again, and requires
+    // the difference to be exactly one, forwards and backwards, right round
+    // the loop and past the wrap.
+    function test_17_every_real_tab_moves_exactly_one_stop() {
+        garage.focusStop(0)
+        var count = garage.stops.length
+        for (var i = 0; i < count + 2; i++) {
+            var before = garage.stopIndex()
+            verify(before >= 0, "focus left the garage at press " + i)
+            keyClick(Qt.Key_Tab)
+            var after = garage.stopIndex()
+            compare(after, (before + 1) % count,
+                    "Tab press " + (i + 1) + " went from " + before + " to " + after)
+        }
+        for (var b = 0; b < count + 2; b++) {
+            var was = garage.stopIndex()
+            keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+            compare(garage.stopIndex(), (was - 1 + count) % count,
+                    "Shift+Tab press " + (b + 1) + " did not step back one")
+        }
+    }
+
+    // ROUND-7. Paint fidelity in the roster is on this screen's bar, and the
+    // child's own row was the one row drawing its kart at 86% opacity -- so
+    // the one car whose colour the child had just chosen was the only car on
+    // the screen not shown in that colour. It is full strength now, in every
+    // race mode, and the rival rows keep their kart at full strength too when
+    // the mode has no rivals in it: the dim that says "not in this race"
+    // falls on the row's chrome, not on the paint.
+    function test_18_no_roster_row_dims_its_kart() {
+        var slots = ["rosterYou"]
+        for (var mode = 0; mode < 4; mode++) {
+            garage.focusStop(3)
+            while (garage.raceMode !== mode)
+                keyClick(Qt.Key_Right)
+            var cars = findCars(garage)
+            compare(cars.length, 4, "the roster does not have four karts in mode " + mode)
+            for (var i = 0; i < cars.length; i++)
+                compare(effectiveOpacity(cars[i]), 1.0,
+                        "kart " + i + " is dimmed in race mode " + mode)
+        }
+    }
+
+    function findCars(node) {
+        var found = []
+        if (!node)
+            return found
+        if (node.objectName === "carPreview")
+            found.push(node)
+        var kids = node.children
+        for (var i = 0; kids && i < kids.length; i++)
+            found = found.concat(findCars(kids[i]))
+        return found
+    }
+
+    function effectiveOpacity(item) {
+        var node = item
+        var o = 1
+        while (node && node !== garage) {
+            if (!node.visible)
+                return 0
+            o *= node.opacity
+            node = node.parent
+        }
+        return o
+    }
+
     // The walkthrough. Tab from the first stop to the last, recording the
     // screen-reader name reached at every stop.
     function test_13_keyboard_walkthrough() {

@@ -20,6 +20,9 @@ Item {
   property color valueColor: Theme.cream
   property int arrowWidth: 34
   property bool wide: false
+  // The face behind the value. Defaults to Readout's own default, so a screen
+  // that does not set it is unchanged.
+  property color faceColor: Theme.panelSunken
 
   signal stepped(int delta)
 
@@ -69,6 +72,7 @@ Item {
       width: parent.width - stepper.arrowWidth * 2 - Math.round(stepper.arrowWidth * 0.48)
       height: parent.height
       value: stepper.value
+      faceColor: stepper.faceColor
       valueSize: stepper.valueSize
       valueSpacing: stepper.valueSpacing
       valueColor: stepper.valueColor
