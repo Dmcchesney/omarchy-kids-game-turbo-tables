@@ -54,6 +54,34 @@ Item {
   readonly property color rim: "#f0b07a"
   readonly property color cream: "#f2e6c4"
 
+  // ------------------------------------------------------ the gantry board
+  //
+  // ROUND 5. The sponsor board over the road carries the only words in this
+  // painting, and for three rounds the countdown's numeral was drawn straight
+  // through them: at 1920 x 1080 the `3` covered the middle of `TURBO TABLES`
+  // on every one of beats 3, 2 and 1, and the board only became legible on GO,
+  // when the numeral shrank and moved. The plan lists that as this piece's
+  // remaining defect.
+  //
+  // The screen above cannot keep its type off the board unless it knows where
+  // the board is, and a number copied into two files is a number that drifts.
+  // So the geometry the painter uses is declared here, once, in the layer's own
+  // pixels -- and `boardTopY` republishes it in this item's pixels, which are
+  // the frame's. `paint()` reads these properties rather than recomputing them,
+  // so the published edge and the painted edge cannot disagree.
+  readonly property real layerHorizonY: Math.round(scene.layerH * scene.horizon)
+  readonly property real layerDepth: scene.layerH - scene.layerHorizonY
+  readonly property real layerGantryFootY: scene.layerHorizonY + scene.layerDepth * 0.30
+  readonly property int gantryPostH: 40
+  readonly property int gantryBoardH: 12
+  readonly property real layerBeamY: Math.round(scene.layerGantryFootY - scene.gantryPostH)
+  readonly property real layerBoardTopY: scene.layerBeamY - scene.gantryBoardH
+
+  // The top edge of the board, in this item's own coordinates. Type above the
+  // scene keeps its ink above this line.
+  readonly property real boardTopY: scene.height * scene.layerBoardTopY
+                                    / Math.max(1, scene.layerH)
+
   Canvas {
     id: layer
     width: scene.layerW
@@ -264,12 +292,14 @@ Item {
       // ---------------------------------------------------------- gantry
       // A checkered start gantry over the road, between the kart and the sun,
       // silhouetted with one warm rim on its sun side.
-      var gy0 = yH + depth * 0.30
+      // The four numbers below are the scene's published ones, so the board a
+      // child sees is at the line `boardTopY` names.
+      var gy0 = scene.layerGantryFootY
       var postW = 4
-      var postH = 40
+      var postH = scene.gantryPostH
       var pL = Math.round(edgeL(gy0)) - 8
       var pR = Math.round(edgeR(gy0)) + 4
-      var beamY = Math.round(gy0 - postH)
+      var beamY = scene.layerBeamY
       ctx.fillStyle = scene.signage
       ctx.fillRect(pL, beamY, postW, postH)
       ctx.fillRect(pR, beamY, postW, postH)
@@ -287,7 +317,7 @@ Item {
         }
       }
       // the sponsor board above it, period type, near-black on magenta
-      var boardH = 12
+      var boardH = scene.gantryBoardH
       ctx.fillStyle = scene.signage
       ctx.fillRect(pL, beamY - boardH, pR + postW - pL, boardH)
       ctx.fillStyle = scene.rim

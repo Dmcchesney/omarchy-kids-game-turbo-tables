@@ -58,6 +58,16 @@ FocusScope {
   // allowed to be small; the instructions are not.
   function fsFloor(v, floor) { return Math.max(floor, Math.round(v * s)) }
 
+  // The key rail as it is actually RENDERED, read straight off the item that
+  // draws it. A round of this project shipped the claim that "the panel prints
+  // the way back" over a key that appeared in no string a child could see, so
+  // the spec that makes that claim now reads the drawn string rather than
+  // rebuilding the expression it came from -- a second copy of a string is not
+  // evidence that the first one is on screen.
+  readonly property string footerText: footerLine.text
+  // The same, for the one-beat line above it: "" whenever it is not showing.
+  readonly property string letGoLineText: letGoLine.visible ? letGoLine.text : ""
+
   // ------------------------------------------------------------- the panel
   // The dock's own geometry, so a host can line its charge bar up with the
   // panel instead of drawing on top of it.
@@ -154,6 +164,59 @@ FocusScope {
   property int chosen: -1
   property int targetIndex: 0
 
+  // ROUND 5 -- A CARD THAT STOPS BEING CHOSEN SAYS SO.
+  //
+  // Round three's defect #5: on `2 x 6` a child holding a hand presses `1` then
+  // `2` -- two card keys -- and the pair spells 12, which is the answer. The
+  // race screen submits it as a correct answer, which is the least-bad reading
+  // of two keys that are also the right answer, and drops the card choice on
+  // the way past. The critic's finding was not the arbitration but the silence:
+  // "the hand vanishing without explanation". The same silence follows every
+  // other route by which a choice is let go -- Enter on a deferred digit,
+  // Escape, a digit of the child's own typed over a provisional one.
+  //
+  // The panel is where a child looks for the state of their hand, so the panel
+  // is where it is said, and saying it here means every one of those routes is
+  // covered without the race screen having to remember to call anything: the
+  // callers already call `reset()`.
+  //
+  // The wording is the one thing that must not be sloppy. The hand is NOT
+  // spent by any of those routes -- all three cards are still held -- so a
+  // banner reading CARD GONE would be a lie in the direction that matters. It
+  // says the card went back, and the footer under it still names the keys.
+  //
+  // Short on purpose. Every route that lets a choice go is reached in the
+  // middle of an answer, and the panel has to be back to naming keys by the
+  // time the child's next keystroke lands. The commonest route by far is not
+  // the collision the critic found but the ordinary one beside it -- ANY answer
+  // whose first digit is 1, 2 or 3, typed while a hand is held, highlights that
+  // card tile on the first press and unhighlights it on the second, and this
+  // line is what says why the highlight went. See
+  // `test_28_an_ordinary_answer_that_starts_with_a_card_key_says_it_too`.
+  readonly property int letGoMs: 900
+  property bool letGoShowing: false
+  readonly property string letGoText: "CARD PUT BACK  ·  ALL THREE STILL YOURS"
+
+  Timer {
+    id: letGoTimer
+    interval: picker.letGoMs
+    onTriggered: picker.letGoShowing = false
+  }
+
+  // A choice cleared without being spent. `confirm()` does not come through
+  // here, because a card that was actually played is not a card put back.
+  function clearChoice() {
+    picker.chosen = -1
+    picker.targetIndex = 0
+  }
+
+  function sayLetGo() {
+    if (!picker.visible)
+      return
+    picker.letGoShowing = true
+    letGoTimer.restart()
+  }
+
   readonly property string chosenCard: (chosen >= 0 && chosen < hand.length)
                                        ? String(hand[chosen]) : ""
   // Does the chosen card need a rival at all? This is a property of the card
@@ -195,14 +258,48 @@ FocusScope {
   //    int with no invariant, so a stale index survived into a hand that no
   //    longer had that card.
   onRivalsChanged: if (picker.targetIndex >= picker.rivals.length) picker.targetIndex = 0
-  onHandChanged: if (picker.chosen >= picker.hand.length) picker.reset()
+  //    A hand replaced under a chosen index is not a card put back -- the hand
+  //    it belonged to is gone -- so this one clears the choice silently. And a
+  //    line about the hand that has just been replaced does not belong over the
+  //    one that replaced it, or over the first hand of the next race, so the
+  //    beat is dropped here rather than left to run out on its timer.
+  //
+  // AND `hand` CHANGES WHEN THE HAND DOES NOT. The host hands it down off the
+  // engine's racer, and the engine clones its state on every step, so the array
+  // is a new object several times a second while the three cards in it stand
+  // still. `onHandChanged` therefore has to ask whether the CARDS changed --
+  // measured: bound to the identity, the one-beat line below was cleared by the
+  // next keystroke and a critic would have read it as never drawn at all.
+  property var lastHand: []
+  function sameCards(a, b) {
+    if (!a || !b || a.length !== b.length)
+      return false
+    for (var i = 0; i < a.length; i++) {
+      if (String(a[i]) !== String(b[i]))
+        return false
+    }
+    return true
+  }
+  onHandChanged: {
+    if (picker.sameCards(picker.hand, picker.lastHand))
+      return
+    picker.lastHand = picker.hand
+    picker.letGoShowing = false
+    letGoTimer.stop()
+    if (picker.chosen >= picker.hand.length)
+      picker.clearChoice()
+  }
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Power-up hand"
   // The deferred sentence comes first, because while a digit is parked it is the
   // only rule on this panel that costs anything, and a screen-reader user got no
   // version of it at all before. It names all three keys and what each one does.
-  Accessible.description: picker.deferred
+  Accessible.description: (picker.letGoShowing
+                           ? "The card you had chosen has been put back. All three cards are"
+                             + " still yours. "
+                           : "")
+    + (picker.deferred
     ? ("The digit " + picker.pendingDigit + " is waiting in the answer box. "
        + "Backspace takes it back out and keeps the card chosen. "
        + "Enter answers " + picker.pendingDigit + " instead. "
@@ -216,7 +313,7 @@ FocusScope {
           : (picker.strandedTarget
              ? " There is no rival left to aim at, so this card cannot be used."
              : " Enter uses it."))
-       + " Escape puts the card back. Using a card costs the whole hand.")
+       + " Escape puts the card back. Using a card costs the whole hand."))
 
   function choose(index) {
     if (index < 0 || index >= picker.hand.length)
@@ -232,9 +329,14 @@ FocusScope {
     picker.targetIndex = ((picker.targetIndex + delta) % count + count) % count
   }
 
+  // The host's way of putting a chosen card back, from any of the routes above.
+  // It is called on states where nothing was chosen too -- a new race, a new
+  // hand -- and those say nothing, because nothing went anywhere.
   function reset() {
-    picker.chosen = -1
-    picker.targetIndex = 0
+    var had = picker.chosen >= 0
+    picker.clearChoice()
+    if (had)
+      picker.sayLetGo()
   }
 
   // True when the card was actually spent. The old version returned nothing and
@@ -249,7 +351,10 @@ FocusScope {
       return false
     var index = picker.chosen
     var target = picker.needsTarget ? picker.targetId : ""
-    picker.reset()
+    // No `letGoShowing = false` here, deliberately. Spending a card empties the
+    // hand, and `onHandChanged` below drops the line for that reason -- a
+    // second clear on this path would be a line no test could ever falsify.
+    picker.clearChoice()
     picker.cardUsed(index, target)
     return true
   }
@@ -425,6 +530,38 @@ FocusScope {
         }
       }
 
+      // ROUND 5 -- the one-beat line that says a chosen card went back.
+      //
+      // The row is ALWAYS here and always the same height, empty or not. A line
+      // that appeared and disappeared would grow and shrink the dock, and
+      // `ui/Race.qml` hangs the charge bar off `picker.dockHeight`, so a
+      // message about a card would have made the charge bar jump twice a race.
+      Item {
+        width: parent.width
+        height: letGoLine.implicitHeight
+
+        Text {
+          id: letGoLine
+          textFormat: Text.PlainText
+          width: parent.width
+          elide: Text.ElideRight
+          visible: picker.letGoShowing
+          text: picker.letGoText
+          color: Theme.amber
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: picker.fsFloor(13, 12)
+          font.letterSpacing: picker.px(1)
+
+          // Read out on its own, because a screen-reader user gets no colour
+          // and no beat: the pane's description below carries the same sentence
+          // while it stands.
+          Accessible.role: Accessible.StaticText
+          Accessible.name: picker.letGoText
+          Accessible.ignored: !picker.letGoShowing
+        }
+      }
+
       Rectangle {
         width: parent.width
         height: 1
@@ -444,6 +581,7 @@ FocusScope {
       // digit in it -- so the child can read the cost off the panel while the
       // fact is still on screen above them.
       Text {
+        id: footerLine
         textFormat: Text.PlainText
         width: parent.width
         wrapMode: Text.WordWrap

@@ -246,24 +246,140 @@ FocusScope {
   // the same near-black purple, thrown down and left, the way the kart's is.
   readonly property color inkShadow: Qt.rgba(0.235, 0.07, 0.157, 0.82)
 
+  // ============================================ TYPE THAT CLEARS THE BOARD
+  //
+  // ROUND 5. The one thing the prototype left on this screen: "the numeral
+  // covers the gantry's board on beats 3-1". It did, exactly: the `3` was
+  // placed by its LINE BOX at 10% of the frame height and sized at 58% of it,
+  // and a line box is mostly air -- a digit sits a quarter of the box down from
+  // its top and fills three quarters of it -- so the ink ran from 21% to 64% of
+  // the frame and the board sits at 51%. `TURBO TABLES` lost its middle on
+  // every counted beat and only came back on GO, when the numeral shrank.
+  //
+  // Three things are wrong with fixing that by nudging a fraction:
+  //
+  //  - the numeral would still be placed by a box whose relationship to the ink
+  //    depends on the face the child's shell hands down, which is not this
+  //    file's to choose;
+  //  - the board's position lives in `parts/CountdownScene.qml`, so the
+  //    fraction would be a copy of somebody else's number;
+  //  - the beat pulse grows the numeral by a tenth about its own centre, and a
+  //    frame that clears the board at rest can still cross it 100 ms later.
+  //
+  // So the type is placed by its INK, measured with `tightBoundingRect` in the
+  // face the shell actually handed down; the floor it may not cross is bound to
+  // `scene.boardTopY`, which is the line the painter draws the board at; and
+  // the fit subtracts the pulse's own overshoot before it chooses a size. The
+  // numeral is still enormous -- 43% of the frame height in ink at 1920 x 1080,
+  // against 43% before, so this costs the picture nothing.
+  FontMetrics {
+    id: typeProbe
+    font.family: Theme.mono
+    font.bold: true
+    font.pixelSize: 100
+  }
+
+  // Ink box of a word, as fractions of the font's pixel size: `top` is how far
+  // below the Text item's own top the ink starts, `height` is how tall the ink
+  // is. `box` is the line box, which is what the item's height actually is and
+  // what the pulse scales about.
+  function inkOf(word) {
+    var rect = typeProbe.tightBoundingRect(word)
+    var ascent = typeProbe.ascent
+    var descent = typeProbe.descent
+    return { "top": (ascent + rect.top) / 100,
+             "height": rect.height / 100,
+             "box": (ascent + descent) / 100 }
+  }
+  readonly property var beatInk: countdown.inkOf(countdown.beatWord)
+  readonly property var factInk: countdown.inkOf(countdown.factText)
+
+  // The pulse, named once so the animation and the fit cannot disagree about
+  // how much bigger the numeral gets.
+  readonly property real beatPulse: 1.10
+
+  // The floor. `scene.boardTopY` is the board's top edge in this frame's own
+  // pixels; the clear air above it is 3% of the frame height, which is 32 px at
+  // 1080 and 23 px at 768.
+  readonly property real typeFloorY: scene.boardTopY - countdown.height * 0.030
+  // Where the ink starts. GO keeps the ceiling the prototype's GO frame had --
+  // that frame was never the defect -- and the counted beats take the whole sky
+  // above the board.
+  readonly property real typeCeilingY: countdown.height * (countdown.go ? 0.100 : 0.045)
+
+  readonly property int beatShadowDrop: countdown.px(countdown.go ? 8 : 16)
+  readonly property int factShadowDrop: countdown.px(8)
+
+  // The counted beats fill the band; GO is the size the prototype had, because
+  // the fact has to fit under it.
+  //
+  // The pulse scales the Text item about its centre, so the ink's bottom swings
+  // down by (its distance from that centre) x (pulse - 1). Subtracting that
+  // here is what makes the clearance true of every frame of the animation and
+  // not only of the one a screenshot catches.
+  readonly property real beatSwing: Math.max(0, countdown.beatInk.top
+                                                + countdown.beatInk.height
+                                                - countdown.beatInk.box / 2)
+                                    * (countdown.beatPulse - 1)
+  readonly property int beatPixelSize: countdown.go
+      ? Math.round(countdown.height * 0.24)
+      : Math.max(8, Math.floor((countdown.typeFloorY - countdown.typeCeilingY
+                                - countdown.beatShadowDrop)
+                               / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)))
+  // Place by the ink: the item's top is as far above the ceiling as the ink is
+  // below the item's top.
+  readonly property int beatY: Math.round(countdown.typeCeilingY
+                                          - countdown.beatInk.top * countdown.beatPixelSize)
+
+  // The fact is drawn at the size the race draws it -- "never smaller than a
+  // tenth of the screen height", and this is nearly a fifth -- and hangs from
+  // the same floor the numeral respects, so on GO the fact sits above the board
+  // rather than across it.
+  readonly property int factPixelSize: Math.round(countdown.height * 0.19)
+  readonly property int factY: Math.round(countdown.typeFloorY - countdown.factShadowDrop
+                                          - (countdown.factInk.top + countdown.factInk.height)
+                                            * countdown.factPixelSize)
+
+  // What the spec reads back: the line the board is painted at, and where this
+  // screen's ink actually landed against it. `tests/qml/tst_countdown_board.qml`
+  // asserts the relation at three window sizes and on all four beats, and
+  // `evidence/piece5-r5` checks the same thing again in the shipped PNG, by
+  // counting cream pixels inside the board's own band.
+  readonly property real gantryBoardTopY: scene.boardTopY
+  readonly property real beatInkTopY: beatGlyph.inkTopY
+  readonly property real beatInkBottomY: beatGlyph.inkBottomY
+  readonly property real beatInkBottomAtPulse: beatGlyph.inkBottomAtPulse
+  readonly property real factInkTopY: factGlyph.inkTopY
+  readonly property real factInkBottomY: factGlyph.inkBottomY
+
   // The counted beats: 3, 2, 1, enormous, over the sky. On GO the word steps
   // up to the top third and shrinks to make room for the fact.
   Item {
     id: beatGlyph
     anchors.horizontalCenter: parent.horizontalCenter
-    y: countdown.go ? Math.round(countdown.height * 0.04)
-                    : Math.round(countdown.height * 0.10)
+    y: countdown.beatY
     width: beatFace.implicitWidth
     height: beatFace.implicitHeight
     z: 4
+
+    // What a critic can read back without measuring pixels: where this glyph's
+    // ink actually starts and ends in the frame, at rest and at the top of the
+    // pulse. `tests/qml/tst_countdown_board.qml` asserts the second one against
+    // `scene.boardTopY`.
+    readonly property real inkTopY: beatGlyph.y
+                                    + countdown.beatInk.top * countdown.beatPixelSize
+    readonly property real inkBottomY: beatGlyph.inkTopY
+                                       + countdown.beatInk.height * countdown.beatPixelSize
+    readonly property real inkBottomAtPulse: beatGlyph.inkBottomY
+                                             + countdown.beatSwing * countdown.beatPixelSize
 
     Text {
       textFormat: Text.PlainText
       text: countdown.beatWord
       color: countdown.inkShadow
       font: beatFace.font
-      x: -countdown.px(countdown.go ? 8 : 16)
-      y: countdown.px(countdown.go ? 8 : 16)
+      x: -countdown.beatShadowDrop
+      y: countdown.beatShadowDrop
     }
     Text {
       id: beatFace
@@ -272,8 +388,7 @@ FocusScope {
       color: Theme.cream
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: countdown.go ? Math.round(countdown.height * 0.24)
-                                   : Math.round(countdown.height * 0.58)
+      font.pixelSize: countdown.beatPixelSize
       font.letterSpacing: countdown.go ? countdown.px(20) : 0
     }
 
@@ -284,7 +399,10 @@ FocusScope {
     SequentialAnimation on scale {
       running: countdown.visible && !countdown.reducedMotion
       loops: Animation.Infinite
-      NumberAnimation { from: 1.10; to: 1.0; duration: 260; easing.type: Easing.OutCubic }
+      NumberAnimation {
+        from: countdown.beatPulse; to: 1.0
+        duration: 260; easing.type: Easing.OutCubic
+      }
       PauseAnimation { duration: Math.max(0, countdown.beatMs - 260) }
     }
   }
@@ -293,14 +411,21 @@ FocusScope {
   //
   // Drawn at the size the race draws it, over the sun, from the GO beat. The
   // design's type rule is that "the fact is never smaller than a tenth of the
-  // screen height"; this is nearly a fifth.
+  // screen height"; this is nearly a fifth. It hangs from the same floor the
+  // numeral respects -- see TYPE THAT CLEARS THE BOARD above -- so the words on
+  // the gantry stay readable behind GO too.
   Item {
-    id: factText
+    id: factGlyph
     anchors.horizontalCenter: parent.horizontalCenter
-    y: Math.round(countdown.height * 0.31)
+    y: countdown.factY
     width: factFace.implicitWidth
     height: factFace.implicitHeight
     z: 3
+
+    readonly property real inkTopY: factGlyph.y
+                                    + countdown.factInk.top * countdown.factPixelSize
+    readonly property real inkBottomY: factGlyph.inkTopY
+                                       + countdown.factInk.height * countdown.factPixelSize
     opacity: countdown.go ? 1.0 : 0.0
     Behavior on opacity {
       enabled: !countdown.reducedMotion
@@ -312,8 +437,8 @@ FocusScope {
       text: countdown.factText
       color: countdown.inkShadow
       font: factFace.font
-      x: -countdown.px(8)
-      y: countdown.px(8)
+      x: -countdown.factShadowDrop
+      y: countdown.factShadowDrop
     }
     Text {
       id: factFace
@@ -322,7 +447,7 @@ FocusScope {
       color: Theme.cream
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: Math.round(countdown.height * 0.19)
+      font.pixelSize: countdown.factPixelSize
       font.letterSpacing: countdown.px(8)
     }
   }

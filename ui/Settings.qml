@@ -258,8 +258,15 @@ FocusScope {
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Settings"
+  // ROUND 5. This sentence used to read "Tab moves, arrows change", which is the
+  // half-true map round three's defect #7 found on the garage: on this screen
+  // Up and Down MOVE (see `Keys.onPressed` below) and only Left and Right
+  // change a value, which is exactly what the key rail in the title bar prints.
+  // A screen-reader user was given a different key map from the one on screen,
+  // and the wrong half of it was the half that says how to get around.
   Accessible.description: "Sound, motion, scanlines and rivals, and the three resets. "
-                          + "Tab moves, arrows change, Enter chooses, Escape goes back."
+                          + "Tab and the up and down arrows move, left and right change, "
+                          + "Enter chooses, Escape goes back."
 
   Keys.onPressed: function (event) {
     if (settings.confirming)

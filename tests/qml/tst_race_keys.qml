@@ -175,6 +175,13 @@ Item {
       compare(race.human.streak, n, "the streak is where the case wants it")
     }
 
+    // Wait out any one-beat line the SET-UP left on the panel, so a case that
+    // asserts the line is drawn cannot pass on a leftover from `streakTo()`.
+    // The line is short-lived on purpose, and this is the price of that.
+    function quiet() {
+      tryCompare(race.handPanel, "letGoLineText", "", 2000)
+    }
+
     function isLen(n) { return function (a) { return a.length === n } }
     function isExactly(s) { return function (a) { return a === s } }
     function startsWithNot(n) {
@@ -272,8 +279,11 @@ Item {
       compare(after.entry, "1", "B: the child's keystroke is on screen, not deleted")
       compare(after.chosen, 0, "B: and the card is chosen, so both readings are visible")
       tc.costNothing(before, after, "B")
+      // ROUND 5: the message this line carried named `FINISH THE ANSWER FIRST`,
+      // which round four deleted. A test's name is a claim, and a claim about a
+      // string is checked against the string. See test_22.
       compare(race.handPanel.enterSpends, false,
-              "B: the panel says FINISH THE ANSWER FIRST while the digit stands")
+              "B: Enter would answer the parked digit, not spend the card")
     }
 
     // G -- the same shape, followed by the Enter a child is taught to press. It
@@ -672,6 +682,275 @@ Item {
       focusThief.forceActiveFocus()
       expectFail("", "pressKey() made a press the race screen could not receive")
       tc.pressKey(Qt.Key_1)
+    }
+
+    // =====================================================================
+    // ROUND 5 -- the four things round four changed, and the one round five
+    // added. Round four landed in `ui/Picker.qml` and `ui/Race.qml` with no
+    // case in this file behind any of it: four behaviours a critic had found by
+    // driving, fixed, and then guarded by nothing. These are those guards.
+    // =====================================================================
+
+    // ROUND 4, defect 1 -- THE KEY THAT WAS PRINTED NOWHERE.
+    //
+    // This case reads the string the panel DRAWS, off the Text item that draws
+    // it, because the claim it checks is the one this project got wrong by
+    // reading an expression instead of a frame: round three's commit said "the
+    // panel prints the way back" while the footer read FINISH THE ANSWER FIRST
+    // and Backspace appeared in no visible or spoken string in the game.
+    function test_22_the_deferred_footer_prints_all_three_keys() {
+      tc.fresh(130)
+      tc.dealHand()
+      tc.streakTo(2)
+      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
+      tc.press("1")
+      compare(race.pending, "1", "the digit is parked, which is the state under test")
+
+      var footer = race.handPanel.footerText
+      var spoken = String(race.handPanel.Accessible.description)
+      console.log("DEFERRED FOOTER AS RENDERED: " + JSON.stringify(footer))
+      console.log("DEFERRED DESCRIPTION AS SPOKEN: " + JSON.stringify(spoken))
+
+      verify(footer.indexOf("⌫") >= 0,
+             "the Backspace key is printed on the panel: " + JSON.stringify(footer))
+      verify(footer.indexOf("BACK TO THE CARD") >= 0,
+             "and it is printed with what it does: " + JSON.stringify(footer))
+      verify(footer.indexOf("⏎  ANSWER 1") >= 0,
+             "Enter is printed with what it would send: " + JSON.stringify(footer))
+      verify(footer.indexOf("ESC") >= 0, "and Escape is still printed")
+      verify(footer.indexOf("FINISH THE ANSWER FIRST") < 0,
+             "the sentence that cost a child their streak is gone")
+      verify(spoken.indexOf("Backspace takes it back out") >= 0,
+             "a screen-reader user is told the free key too: " + JSON.stringify(spoken))
+    }
+
+    // ROUND 4, defect 2 -- THE REVEAL WINDOW.
+    //
+    // A fact missed twice is covered by `7 x 8 = 56` for 1500 ms while the deck
+    // has already moved on. A card key pressed into that window was read
+    // against the engine's new fact, which the child could not see, and was
+    // credited as a CORRECT ANSWER to a question never shown. Round four queues
+    // those keys instead. Every press here is real; the only wait is the
+    // reveal's own.
+    function test_23_a_card_key_during_a_reveal_is_held_not_scored() {
+      tc.fresh(131)
+      tc.dealHand()
+      tc.streakTo(2)
+      // A two-digit fact, so `7` `9` submits itself. 79 is prime, so it is not
+      // the answer to anything in the 1-12 deck: a guaranteed wrong answer that
+      // uses no card key.
+      tc.hintUntil(tc.isLen(2))
+      var factUnderTest = Engine.factLabel(race.human.currentFact)
+      tc.press("79")
+      tc.press("79")
+      verify(race.holdsForReveal(),
+             "the second wrong answer put the reveal over the field")
+      var covered = tc.snap()
+      verify(Engine.factLabel(race.human.currentFact) !== factUnderTest,
+             "and the engine's fact has already moved on behind it, which is the trap")
+
+      tc.press("1")
+      var held = tc.snap()
+      compare(race.revealQueue.length, 1, "the card key is waiting, not spent and not scored")
+      compare(held.streak, covered.streak, "nothing was credited to a fact off screen")
+      compare(held.attempts, covered.attempts, "no attempt was recorded against it")
+      compare(held.hand, 3, "the hand is intact")
+      compare(held.cards - covered.cards, 0, "no card was played")
+      compare(held.chosen, -1, "and nothing was chosen while the field was covered")
+
+      tc.wait(1700)
+      compare(race.revealQueue.length, 0, "the queue was replayed when the field came back")
+      verify(!race.holdsForReveal(), "and the window is closed")
+      var after = tc.snap()
+      tc.row("R", "two wrong answers, then a card key inside the reveal",
+             "7 9 7 9 1", covered, after)
+      compare(after.cards - covered.cards, 0, "R: no card was played by the replay either")
+    }
+
+    // ROUND 4, defects 3 and 4 -- THE STALL.
+    //
+    // WHAT IS SET UP AND WHAT IS PLAYED. A stall is the world's, not the
+    // child's: it arrives when a rival's Wrench lands, and there is no key a
+    // child can press to be hit. The rivals are frozen in this file on purpose
+    // (see the header), so `stall()` writes the field the engine's own
+    // `applyCard` writes -- `stalledUntilMs` on the human, which is what
+    // `Engine.isStalled` reads and what `race.stalled` is bound to -- through a
+    // real `Engine.step`. Every keystroke in the two cases below is still real.
+    function stall(ms) {
+      var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
+      var next = stepped.state
+      for (var i = 0; i < next.racers.length; i++) {
+        if (next.racers[i].id === next.humanId)
+          next.racers[i].stalledUntilMs = next.nowMs + ms
+      }
+      race.state = next
+      verify(race.stalled, "the field is locked, the way a Wrench locks it")
+    }
+
+    function unstall() {
+      var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
+      var next = stepped.state
+      for (var i = 0; i < next.racers.length; i++) {
+        if (next.racers[i].id === next.humanId)
+          next.racers[i].stalledUntilMs = 0
+      }
+      race.state = next
+      verify(!race.stalled, "the stall is over")
+    }
+
+    // N -- a stall landing between a card key and Enter. Round three cleared
+    // the parked digit before the send, the engine refused it because the field
+    // was locked, and the child lost the keystroke AND the card together.
+    function test_24_a_stall_between_a_card_key_and_enter_destroys_neither() {
+      tc.fresh(132)
+      tc.dealHand()
+      tc.streakTo(2)
+      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
+      var before = tc.snap()
+      tc.press("1")
+      compare(race.pending, "1", "N: the digit is parked and the card is chosen")
+      compare(race.handPanel.chosen, 0, "N: the card is chosen")
+
+      tc.stall(3000)
+      tc.press("E")
+      var locked = tc.snap()
+      compare(race.pending, "1", "N: the parked digit survived the locked Enter")
+      compare(locked.chosen, 0, "N: and so did the card choice")
+      verify(race.handPanel.footerText.indexOf("⌫") >= 0,
+             "N: the panel still prints both keys: "
+             + JSON.stringify(race.handPanel.footerText))
+      tc.costNothing(before, locked, "N")
+
+      tc.unstall()
+      tc.press("B")
+      compare(race.pending, "", "N: Backspace takes the digit back once the field returns")
+      compare(race.handPanel.chosen, 0, "N: with the card still chosen")
+      tc.press("E")
+      var after = tc.snap()
+      tc.row("N", "card key, stall, Enter, unstall, Backspace, Enter",
+             "1 [stall] E [end] B E", before, after)
+      compare(after.cards - before.cards, 1, "N: and the card the child chose was played")
+      compare(after.streak, before.streak, "N: with the streak untouched")
+    }
+
+    // M -- a card key equal to a one-digit answer, pressed while the field is
+    // locked. Round three did NOTHING with it: no card, no digit, no refusal
+    // said out loud, for the two or three seconds of the hit.
+    function test_25_a_card_key_that_is_the_answer_still_chooses_during_a_stall() {
+      tc.fresh(133)
+      tc.dealHand()
+      tc.streakTo(2)
+      tc.hintUntil(function (a) { return a.length === 1 && Number(a) >= 1 && Number(a) <= 3 })
+      var key = Number(tc.answerString())
+      var before = tc.snap()
+      tc.stall(3000)
+      tc.press(String(key))
+      var after = tc.snap()
+      tc.row("M", "1-digit answer = card key, pressed during a stall", String(key),
+             before, after)
+      compare(after.chosen, key - 1, "M: the press chose the card it names")
+      compare(after.entry, "", "M: and nothing was typed into a locked field")
+      compare(race.handPanel.enterSpends, true, "M: Enter would spend it")
+      // `⏎  USE IT` for a self card, `⏎  USE` after the rival picker for a
+      // targeted one -- which of the three the round-robin dealt is not this
+      // case's business. What is: Enter is printed as the key that spends it.
+      verify(race.handPanel.footerText.indexOf("⏎  USE") >= 0,
+             "M: and the panel says so: " + JSON.stringify(race.handPanel.footerText))
+      tc.costNothing(before, after, "M")
+      tc.unstall()
+    }
+
+    // ROUND 5 -- defect 5 of round three, the silence.
+    //
+    // Two card keys that happen to spell the answer are submitted as that
+    // answer, which is the least-bad reading, and the card choice goes with
+    // them. The critic's finding was the hand "vanishing without explanation".
+    // The panel now says what happened, and says the true thing: the CHOICE
+    // went back, the hand did not.
+    function test_26_a_card_put_back_by_a_pair_of_card_keys_is_announced() {
+      tc.fresh(134)
+      tc.dealHand()
+      tc.streakTo(2)
+      tc.hintUntil(function (a) {
+        return a.length === 2 && Number(a.charAt(0)) <= 3
+               && Number(a.charAt(1)) >= 1 && Number(a.charAt(1)) <= 3
+      })
+      tc.quiet()
+      var before = tc.snap()
+      tc.press(before.answer.charAt(0))
+      compare(race.handPanel.chosen, Number(before.answer.charAt(0)) - 1,
+             "the first key chose a card, provisionally")
+      tc.press(before.answer.charAt(1))
+      var after = tc.snap()
+      tc.row("P", "2-digit answer, both digits card keys, the choice let go",
+             before.answer, before, after)
+      compare(after.chosen, -1, "the choice went when the pair became the answer")
+      compare(after.hand, 3, "but the hand did not")
+      compare(after.streak, before.streak + 1, "and the pair was accepted as the answer")
+
+      var line = race.handPanel.letGoLineText
+      console.log("LET-GO LINE AS RENDERED: " + JSON.stringify(line))
+      verify(line.indexOf("CARD PUT BACK") >= 0,
+             "the panel says the card went back: " + JSON.stringify(line))
+      verify(line.indexOf("ALL THREE STILL YOURS") >= 0,
+             "and that the hand is still held: " + JSON.stringify(line))
+      var spoken = String(race.handPanel.Accessible.description)
+      verify(spoken.indexOf("put back") >= 0,
+             "and a screen-reader user is told the same: " + JSON.stringify(spoken))
+      verify(spoken.indexOf("All three cards are still yours") >= 0,
+             "including the half that matters: " + JSON.stringify(spoken))
+    }
+
+    // The same line must NOT appear when a card was actually spent -- "put
+    // back" over a hand that is gone would be the one lie this panel must never
+    // tell -- and must not appear when nothing was chosen at all.
+    function test_27_the_let_go_line_stays_off_when_a_card_was_spent() {
+      tc.fresh(135)
+      tc.dealHand()
+      compare(race.handPanel.letGoLineText, "",
+              "a hand just dealt says nothing: nothing has been chosen or let go")
+      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
+      compare(race.handPanel.letGoLineText, "",
+              "and the pit crew walking the deck on says nothing either")
+      tc.press("1B")
+      compare(race.handPanel.chosen, 0, "the card is chosen with an empty field")
+      compare(race.handPanel.letGoLineText, "",
+              "choosing a card is not letting one go")
+      tc.press("E")
+      compare(root.cardsPlayed, 1, "the card was played")
+      compare(race.hand.length, 0, "using one spends all three")
+      compare(race.handPanel.letGoLineText, "",
+              "a card that was SPENT is never announced as put back")
+    }
+
+    // The commonest route to the same line, recorded rather than discovered: an
+    // ordinary two-digit answer whose FIRST digit is 1, 2 or 3, typed while a
+    // hand is held. The first press highlights that card tile -- `ui/Race.qml`
+    // chooses it provisionally, because it cannot yet know -- and the second
+    // press takes the highlight away again. The line is what says why, and it
+    // says the true thing: nothing was spent.
+    function test_28_an_ordinary_answer_that_starts_with_a_card_key_says_it_too() {
+      tc.fresh(136)
+      tc.dealHand()
+      tc.streakTo(2)
+      tc.hintUntil(function (a) {
+        return a.length === 2 && Number(a.charAt(0)) <= 3 && Number(a.charAt(1)) > 3
+      })
+      tc.quiet()
+      var before = tc.snap()
+      tc.press(before.answer.charAt(0))
+      compare(race.handPanel.chosen, Number(before.answer.charAt(0)) - 1,
+              "the first digit lights the card tile it names")
+      compare(race.handPanel.letGoLineText, "", "and says nothing yet")
+      tc.press(before.answer.charAt(1))
+      var after = tc.snap()
+      tc.row("P2", "2-digit answer starting with a card key", before.answer, before, after)
+      compare(after.streak, before.streak + 1, "P2: the answer was accepted")
+      compare(after.hand, 3, "P2: the hand is intact")
+      compare(after.cards - before.cards, 0, "P2: no card was played")
+      verify(race.handPanel.letGoLineText.indexOf("ALL THREE STILL YOURS") >= 0,
+             "P2: and the panel says the highlight going does not mean the hand went: "
+             + JSON.stringify(race.handPanel.letGoLineText))
     }
 
     function cleanup() {
