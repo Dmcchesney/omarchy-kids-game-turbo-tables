@@ -441,8 +441,11 @@ Item {
       compare(String(thumb.sheetSource), String(hero.sheetSource), "the same sheet file")
       compare(thumb.camera, "stall")
       compare(hero.camera, "stall")
-      compare(hero.yaw, 0)
-      compare(thumb.yaw, 0)
+      // Column 6, not column 0. Column 0 is the car's back to the lens, and on
+      // the dais and in the roster that showed the deck and the tail and
+      // almost none of the car. What this test is for is that the two agree.
+      compare(hero.yaw, 6)
+      compare(thumb.yaw, hero.yaw, "the roster row is the same column as the dais")
       compare(hero.pixelScale, 3)
       compare(hero.sheetScale, 1.0)
       compare(thumb.sheetScale, 0.5)
