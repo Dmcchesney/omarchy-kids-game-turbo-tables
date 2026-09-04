@@ -6,7 +6,12 @@ JS library is the same data as a JavaScript literal; tests/carmeta.test.ts
 asserts the two agree, so a rebake that changes meta.json fails `npm test`
 until this is re-run.
 
-  python3 mirror_meta.py KARTS_DIR REPO/ui/parts/CarMeta.js
+  python3 mirror-car-meta.py KARTS_DIR REPO/ui/parts/CarMeta.js
+
+Only the `var META = ...` block is generated. Everything above it -- the
+layout constants and the functions (fit, columnForHeading, rowOf) -- is kept
+from the file as it stands, so a rebake never undoes an edit to a function;
+HEAD below is used only when the file does not exist yet.
 """
 import json, os, sys
 
@@ -89,7 +94,13 @@ def main(karts, out):
         path = os.path.join(karts, body, "meta.json")
         with open(path) as f:
             meta[body] = json.load(f)
-    text = HEAD + "var META = " + json.dumps(meta, indent=1, sort_keys=True) + "\n"
+    head = HEAD
+    if os.path.exists(out):
+        current = open(out).read()
+        i = current.find("\nvar META = ")
+        if i >= 0:
+            head = current[:i + 1]
+    text = head + "var META = " + json.dumps(meta, indent=1, sort_keys=True) + "\n"
     with open(out, "w") as f:
         f.write(text)
     print("wrote", out, "from", karts)

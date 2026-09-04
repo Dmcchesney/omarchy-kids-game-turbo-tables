@@ -34,10 +34,15 @@ import "CarMeta.js" as CarMeta
 // THE NUMBER IS NOT BAKED. The door roundel and the rear plate are cream and
 // blank on the sheet, and meta.json (mirrored in CarMeta.js -- layer 2 may not
 // read a file) gives, per camera and yaw, the rect in cell pixels where the
-// child's number goes and the tilt to draw it at. It is overlaid here as
-// plain text in the theme's mono face, unsmoothed, and is simply not drawn
-// where the roundel is hidden at that yaw, or where the rect would be too
-// small to read.
+// child's number goes and the tilt to draw it at. It is drawn here as
+// PIXELS, not text: CarMeta.digitSquares rasterises a three-by-five pixel
+// font into the rect on the cell's own grid, tilt included, and a Canvas
+// fills those squares once in one ink colour. Round one overlaid a Text and
+// rotated it, which resampled the glyphs into a hundred-odd colours against
+// the sheet's fifteen. The number is not drawn where the meta says the panel
+// faces away at that yaw (`visible` must be true, not merely unset), nor
+// where the rect is under four pixels wide or under the height floor at the
+// current scale.
 Item {
   id: car
 
@@ -94,13 +99,20 @@ Item {
   readonly property int numberY: numberRect ? scaled(numberRect.y) : 0
   readonly property int numberW: numberRect ? scaled(numberRect.w) : 0
   readonly property int numberH: numberRect ? scaled(numberRect.h) : 0
+  // The panel's tilt from the meta. Informational: the tilt is rasterised
+  // into `digitSquares`, and no item is ever rotated by it.
   readonly property real numberAngle: numberRect && numberRect.angle ? numberRect.angle : 0
   // Below this many pixels of plate the digits are noise, not a number: the
   // roster's own badge already carries the number at that size.
   readonly property int numberMinPx: 9
-  readonly property bool numberVisible: showNumber && numberRect !== null
-                                        && numberRect.visible !== false
-                                        && numberH >= numberMinPx
+  readonly property bool numberVisible: showNumber
+                                        && CarMeta.numberDrawable(numberRect, rowScale, ps, numberMinPx)
+  // The ink: the sheet's own outline colour, so the number adds no colour to
+  // the cell. One square per sheet pixel of ink, in item pixels from the
+  // rect's top-left; empty where no whole-pixel pitch fits the rect.
+  readonly property color numberInk: "#280e27"
+  readonly property var digitSquares: numberVisible
+                                      ? CarMeta.digitSquares(number, numberRect, rowScale, ps) : []
   readonly property var lamps: (meta && meta.lamps && meta.lamps[camera]
                                 && meta.lamps[camera].length > column
                                 && meta.lamps[camera][column].tail)
@@ -172,35 +184,49 @@ Item {
     }
   }
 
-  // The number, over the blank roundel or plate. Plain text in the mono
-  // face, fitted to the rect, tilted as the meta says, never smoothed.
+  // The number, over the blank roundel or plate: the squares CarMeta
+  // rasterised, filled once in one ink on a canvas the size of the rect. The
+  // canvas repaints only when the squares change -- a new number, a new yaw,
+  // a new row or upscale -- never per frame, and it is never rotated or
+  // scaled: at rest it is one more textured quad.
   Item {
     id: plate
     objectName: "plate"
-    visible: car.numberVisible
+    visible: car.numberVisible && car.digitSquares.length > 0
     x: cell.x + car.numberX
     y: cell.y + car.numberY
     width: car.numberW
     height: car.numberH
-    rotation: car.numberAngle
     smooth: false
 
-    Text {
+    // The canvas is the rect plus the slack CarMeta allows the block above
+    // and below it (one sheet pixel each way; the panel runs on past the
+    // rect by more), so a square at y = -1 lands on the plate, not off it.
+    Canvas {
       id: digits
       objectName: "digits"
-      anchors.fill: parent
-      text: String(car.number)
-      textFormat: Text.PlainText
-      color: "#1a0b18"
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: Math.max(4, parent.height)
-      fontSizeMode: Text.Fit
-      minimumPixelSize: 4
-      horizontalAlignment: Text.AlignHCenter
-      verticalAlignment: Text.AlignVCenter
+      readonly property int slack: CarMeta.NUMBER_SLACK * car.ps
+      x: 0
+      y: -slack
+      width: parent.width
+      height: parent.height + 2 * slack
       smooth: false
       antialiasing: false
+      renderStrategy: Canvas.Immediate
+
+      readonly property var squares: car.digitSquares
+      readonly property color ink: car.numberInk
+      readonly property int square: car.ps
+      onSquaresChanged: requestPaint()
+      onInkChanged: requestPaint()
+
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.clearRect(0, 0, width, height)
+        ctx.fillStyle = ink
+        for (var i = 0; i < squares.length; i++)
+          ctx.fillRect(squares[i][0], squares[i][1] + slack, square, square)
+      }
     }
   }
 }

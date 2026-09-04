@@ -35,6 +35,13 @@ import "../ui/parts"
 //   --measure <ms>      run the screen for that long and print the frame rate.
 //   --sheets <url>      car sheets from another directory (see the rig below).
 //   --kart ...          show one car-sheet cell instead of a screen (below).
+//   --travel <n>        for a screen with a `travel` property (TrackView on
+//                       its own): put the camera there and hold it. 288 is
+//                       the apex of sector 8's right-hander, 108 sector 3's
+//                       left; nothing advances without Race.qml driving it.
+//   --field <d,d,...>   for a screen with setKarts() (TrackView): the child's
+//                       car from the seeded settings, plus one rival per
+//                       delta, that many questions up the road (up to three).
 Window {
   id: harness
 
@@ -66,6 +73,33 @@ Window {
   readonly property bool quitAfter: flag("exit")
   readonly property bool printFocus: flag("print-focus")
   readonly property string settingsArg: argument("settings", "")
+  readonly property string travelArg: argument("travel", "")
+  readonly property string fieldArg: argument("field", "")
+
+  // A fixed field for a bare TrackView: the child's car from the seeded
+  // settings at seat 0, then one rival per delta at seats 1..3, each a
+  // different body and paint. Progress is in questions; the view turns a
+  // delta into a depth on the road, so `--field 2,4,8` is three cars at
+  // increasing distance and `--travel` decides what corner they are in.
+  function seedField(view) {
+    var deltas = harness.fieldArg.split(",")
+    var list = [{
+      "id": "you", "name": "YOU", "number": Store.setting("kartNumber"),
+      "body": Store.setting("kartBody"), "seat": 0,
+      "paint": Theme.paints[Store.setting("kartPaint")],
+      "progress": 0, "isHuman": true, "ghost": false
+    }]
+    for (var i = 0; i < deltas.length && i < 3; i++) {
+      list.push({
+        "id": "rival" + i, "name": "RIVAL " + (i + 1), "number": 10 + i * 11,
+        "body": (2 + i * 2) % 6, "seat": i + 1,
+        "paint": Theme.paints[(4 + i * 3) % 8],
+        "progress": parseFloat(deltas[i]), "isHuman": false, "ghost": false
+      })
+    }
+    view.setKarts(list)
+    view.humanProgress = 0
+  }
 
   width: wantWidth
   height: wantHeight
@@ -207,6 +241,10 @@ Window {
     onLoaded: {
       if (item.hasOwnProperty("seed"))
         item.seed = harness.seed
+      if (harness.travelArg.length > 0 && item.hasOwnProperty("travel"))
+        item.travel = parseFloat(harness.travelArg)
+      if (harness.fieldArg.length > 0 && typeof item.setKarts === "function")
+        harness.seedField(item)
       item.forceActiveFocus()
       if (item.focusTarget)
         item.focusTarget.forceActiveFocus(Qt.TabFocusReason)

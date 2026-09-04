@@ -129,6 +129,11 @@ test("fit never returns a fractional scale", async () => {
     assert.ok(allowed.has(f.width), `fit(${px}) gave ${f.width}`);
   }
   assert.deepEqual(carMeta.fit(461), { sheetScale: 1.0, pixelScale: 2, width: 384 });
-  assert.equal(carMeta.columnForHeading(-45), 7);
+  // A heading to the viewer's right counts the columns backwards from 8: the
+  // bake turned the car counter-clockwise, so column 7 is the nose-right
+  // cell. Which way the sheet faces is measured on its pixels in
+  // tests/qml/tst_carsprite.qml; this only pins the arithmetic.
+  assert.equal(carMeta.columnForHeading(45), 7);
+  assert.equal(carMeta.columnForHeading(-45), 1);
   assert.equal(carMeta.columnForHeading(180), 4);
 });

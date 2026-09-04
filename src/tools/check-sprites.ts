@@ -7,8 +7,9 @@
 //
 //   * a listed file is missing, or its bytes differ from the recorded hash
 //     -- an edited sheet, or a stale manifest after a rebake;
-//   * a file exists under a body directory that the manifest does not list
-//     -- a sheet that was never baked by the script;
+//   * a file exists anywhere under assets/karts/ that the manifest does not
+//     list -- a sheet that was never baked by the script, or a stray file at
+//     the top level or in a new directory;
 //   * the manifest's paints are not ui/Theme.qml's eight swatches, in order
 //     -- the theme changed a paint and the sheets were not rebaked;
 //   * a body is missing a paint or its meta.json, a sheet is not a
@@ -84,7 +85,7 @@ if (manifest) {
     }
   }
 
-  // 3. Every file on disk under a body directory: listed.
+  // 3. Every file on disk under assets/karts/, at any depth: listed.
   const onDisk = await sheetFiles(root);
   for (const rel of onDisk) if (!(rel in manifest.files)) fail(`${KARTS_DIR}/${rel}: on disk but not in the manifest; it was not produced by npm run sprites`);
 

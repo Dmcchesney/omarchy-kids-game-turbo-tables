@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 export const BODIES = ["coupe", "hatch", "wedge", "saloon", "buggy", "pickup"] as const;
 export const PAINT_NAMES = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "white"] as const;
@@ -61,14 +61,31 @@ export function sha256(bytes: Uint8Array): string {
 }
 
 /** Every file the manifest covers: <body>/<paint>.png and <body>/meta.json. */
-export async function sheetFiles(repositoryRoot: string): Promise<string[]> {
+export function contractFiles(): string[] {
   const found: string[] = [];
-  for (const body of BODIES) {
-    const dir = join(repositoryRoot, KARTS_DIR, body);
-    if (!existsSync(dir)) continue;
-    for (const name of (await readdir(dir)).sort()) found.push(`${body}/${name}`);
-  }
+  for (const body of BODIES) for (const name of [...PAINT_NAMES.map((p) => `${p}.png`), "meta.json"]) found.push(`${body}/${name}`);
   return found;
+}
+
+/**
+ * Every file actually on disk under assets/karts/, at any depth, relative to
+ * it -- all but the manifest itself and the directory's git placeholder. The
+ * check compares this against the manifest, so a stray file anywhere under
+ * assets/karts/ (a body directory, the top level, a new subdirectory) is a
+ * failure, not a blind spot.
+ */
+const UNLISTED = new Set(["manifest.json", ".gitkeep"]);
+export async function sheetFiles(repositoryRoot: string): Promise<string[]> {
+  const base = join(repositoryRoot, KARTS_DIR);
+  if (!existsSync(base)) return [];
+  const found: string[] = [];
+  for (const entry of await readdir(base, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const rel = relative(base, join(entry.parentPath, entry.name)).split(sep).join("/");
+    if (UNLISTED.has(rel)) continue;
+    found.push(rel);
+  }
+  return found.sort();
 }
 
 export type Manifest = {
@@ -82,7 +99,9 @@ export type Manifest = {
 export async function buildManifest(repositoryRoot: string): Promise<Manifest> {
   const hexes = await themePaints(repositoryRoot);
   const files: Record<string, string> = {};
-  for (const rel of await sheetFiles(repositoryRoot)) {
+  // The contract's files only, and every one must exist: a stray file on disk
+  // never enters the manifest, and a bake that produced nothing cannot pass.
+  for (const rel of contractFiles()) {
     files[rel] = sha256(await readFile(join(repositoryRoot, KARTS_DIR, rel)));
   }
   return {

@@ -28,6 +28,20 @@ Item {
 
   MemoryStore { id: memory }
 
+  // A pixel reader for the sheet: a canvas the size of a 1.0-row cell that
+  // draws one cell of the sheet file and hands its pixels back. QtTest's
+  // grabImage cannot be used for this -- under the offscreen platform it
+  // returns the window's blank background -- and the canvas reads the PNG
+  // the sprite reads, through Qt's own decoder.
+  Canvas {
+    id: reader
+    width: 192
+    height: 128
+    renderStrategy: Canvas.Immediate
+    renderTarget: Canvas.Image
+    smooth: false
+  }
+
   Component {
     id: garageFactory
     Garage {
@@ -211,10 +225,26 @@ Item {
         compare(plate.y, img.y + Math.round(rect.y) * 2, cam + ": number y")
         compare(plate.width, Math.round(rect.w) * 2, cam + ": number width")
         compare(plate.height, Math.round(rect.h) * 2, cam + ": number height")
-        compare(plate.rotation, rect.angle || 0, cam + ": number tilt")
-        compare(digits.text, "7")
+        // The tilt is the meta's, and it is rasterised into the squares: no
+        // item is rotated, because rotating a pixel grid resamples it.
+        compare(car.numberAngle, rect.angle || 0, cam + ": number tilt")
+        compare(plate.rotation, 0, cam + ": the plate item is never rotated")
+        var seven = JSON.stringify(car.digitSquares)
+        verify(car.digitSquares.length > 0, cam + ": a 7 has ink")
         car.number = 42
-        compare(digits.text, "42")
+        verify(car.digitSquares.length > 0, cam + ": a 42 has ink")
+        verify(JSON.stringify(car.digitSquares) !== seven, cam + ": 42 is not drawn as 7")
+        // Every square is a whole sheet pixel: on the upscale's grid, inside
+        // the rect sideways, and within one sheet pixel of it above and
+        // below (the slack CarMeta allows, which the panel covers).
+        var slack = CarMeta.NUMBER_SLACK * 2
+        for (var s = 0; s < car.digitSquares.length; s++) {
+          var sq = car.digitSquares[s]
+          compare(sq[0] % 2, 0, cam + ": square x on the 2x grid")
+          compare(sq[1] % 2, 0, cam + ": square y on the 2x grid")
+          verify(sq[0] >= 0 && sq[0] + 2 <= plate.width, cam + ": square inside the rect (x)")
+          verify(sq[1] >= -slack && sq[1] + 2 <= plate.height + slack, cam + ": square within the slack (y)")
+        }
 
         // At the 0.5 row the rect halves and rounds; at 1x that is a whole
         // number of pixels.
@@ -312,16 +342,21 @@ Item {
       }
     }
 
+    // The arithmetic only: a heading to the right counts the columns backwards
+    // from 8, because the bake turned the car counter-clockwise. WHICH way the
+    // sheet actually faces is not assumed here; test_12 reads it off the
+    // sheet's pixels.
     function test_07_column_for_heading() {
       compare(CarMeta.columnForHeading(0), 0)
       compare(CarMeta.columnForHeading(22), 0)
-      compare(CarMeta.columnForHeading(23), 1)
-      compare(CarMeta.columnForHeading(45), 1)
-      compare(CarMeta.columnForHeading(-45), 7)
-      compare(CarMeta.columnForHeading(-30), 7)
+      compare(CarMeta.columnForHeading(23), 7)
+      compare(CarMeta.columnForHeading(45), 7)
+      compare(CarMeta.columnForHeading(-45), 1)
+      compare(CarMeta.columnForHeading(-30), 1)
       compare(CarMeta.columnForHeading(180), 4)
       compare(CarMeta.columnForHeading(-180), 4)
-      compare(CarMeta.columnForHeading(400), 1)
+      compare(CarMeta.columnForHeading(400), 7)
+      compare(CarMeta.columnForHeading(-400), 1)
     }
 
     // ------------------------------------------------------------------
@@ -419,6 +454,294 @@ Item {
         compare(Math.round(hero.y), Math.round(stall.vy(stall.daisY)))
       }
       garage.destroy()
+    }
+
+    // ------------------------------------------------------------------
+    // WHICH WAY A COLUMN FACES, READ OFF THE SHEET'S OWN PIXELS.
+    //
+    // On a BLUE car the only saturated red on the sheet is the tail-lamp bar
+    // and the only warm pale is the headlights, so where those pixels sit in
+    // a cell says where the tail and the nose are, with no sign convention
+    // assumed anywhere in the test. A car heading to the viewer's right
+    // (+45: the far cars on a right-hand bend) must be drawn from the column
+    // whose tail is LEFT of the cell's centre, and at +135 from the column
+    // whose headlights are RIGHT of it; the mirror for a left bend. Round one
+    // had the sign of `columnForHeading` backwards and every far car turned
+    // away from the bend it was in; this case fails on that sign.
+    // The pixels of the cell the sprite is showing right now -- the sheet
+    // file it names, at the clip rect test_01 pins to the column -- and, of
+    // those, the centroid of the ones `keep` accepts, relative to the cell's
+    // centre.
+    function tintCentroid(img, keep) {
+      var url = car.sheetSource
+      if (!reader.isImageLoaded(url)) {
+        reader.loadImage(url)
+        tryVerify(function () { return reader.isImageLoaded(url) }, 5000)
+      }
+      verify(reader.isImageLoaded(url), "the reader loaded " + url)
+      var w = car.cellW
+      var h = car.cellH
+      var ctx = reader.getContext("2d")
+      ctx.clearRect(0, 0, reader.width, reader.height)
+      ctx.drawImage(url, -img.sourceClipRect.x, -img.sourceClipRect.y)
+      var px = ctx.getImageData(0, 0, w, h).data
+      var n = 0
+      var sx = 0
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          var o = (y * w + x) * 4
+          if (px[o + 3] === 255 && keep(px[o], px[o + 1], px[o + 2])) {
+            n++
+            sx += x + 0.5
+          }
+        }
+      }
+      return { count: n, dx: n > 0 ? sx / n - w / 2 : 0 }
+    }
+    function tailLampRed(r, g, b) { return r >= 200 && g <= 80 && b <= 80 }
+    function headlightPale(r, g, b) { return r >= 240 && g >= 190 && g <= 230 && b >= 110 && b <= 165 }
+
+    function test_12_far_cars_turn_into_the_bend_by_the_sheets_own_pixels() {
+      car.body = 0
+      car.paint = 4
+      compare(car.paintName, "blue")
+      car.camera = "road"
+      car.sheetScale = 1.0
+      car.pixelScale = 1
+      var img = cellImage()
+      tryVerify(function () { return img.status === Image.Ready }, 5000)
+      verify(img.status === Image.Ready, "assets/karts/coupe/blue.png loads")
+
+      // Column 0: the rear square on, tail centred, no headlights at all.
+      car.yaw = 0
+      var square = tintCentroid(img, tailLampRed)
+      verify(square.count > 50, "column 0 shows the tail-lamp bar (" + square.count + " px)")
+      verify(Math.abs(square.dx) < 6, "column 0's tail is centred (" + square.dx.toFixed(1) + ")")
+      compare(tintCentroid(img, headlightPale).count, 0, "column 0 shows no headlight")
+
+      var right = CarMeta.columnForHeading(45)
+      var left = CarMeta.columnForHeading(-45)
+      verify(right !== left && right !== 0 && left !== 0)
+      car.yaw = right
+      var tailR = tintCentroid(img, tailLampRed)
+      verify(tailR.count > 50, "heading +45 -> column " + right + " shows the tail-lamp bar")
+      verify(tailR.dx < -10, "heading +45 -> column " + right + ": tail " + tailR.dx.toFixed(1)
+             + " px from centre must be LEFT, so the nose points right, into a right-hand bend")
+      car.yaw = left
+      var tailL = tintCentroid(img, tailLampRed)
+      verify(tailL.count > 50, "heading -45 -> column " + left + " shows the tail-lamp bar")
+      verify(tailL.dx > 10, "heading -45 -> column " + left + ": tail " + tailL.dx.toFixed(1)
+             + " px from centre must be RIGHT, so the nose points left, into a left-hand bend")
+
+      // Three-quarters on, the headlights show, and they are on the side the
+      // nose points to.
+      car.yaw = CarMeta.columnForHeading(135)
+      var headR = tintCentroid(img, headlightPale)
+      verify(headR.count > 30, "heading +135 -> column " + car.yaw + " shows headlights")
+      verify(headR.dx > 10, "heading +135 -> column " + car.yaw + ": headlights " + headR.dx.toFixed(1) + " px from centre must be RIGHT")
+      car.yaw = CarMeta.columnForHeading(-135)
+      var headL = tintCentroid(img, headlightPale)
+      verify(headL.count > 30, "heading -135 -> column " + car.yaw + " shows headlights")
+      verify(headL.dx < -10, "heading -135 -> column " + car.yaw + ": headlights " + headL.dx.toFixed(1) + " px from centre must be LEFT")
+    }
+
+    // ------------------------------------------------------------------
+    // The number is pixels, not a gradient: every drawn pixel of the digits
+    // canvas is the one ink colour at full alpha, on the upscale's grid, and
+    // there are exactly as many as the squares CarMeta asked for. The stall
+    // plate is the hard case, because it is tilted.
+    function test_13_the_number_is_pixels_not_a_gradient() {
+      car.camera = "stall"
+      car.yaw = 0
+      car.sheetScale = 1.0
+      car.pixelScale = 3
+      car.number = 42
+      var plate = plateItem()
+      var digits = digitsText()
+      verify(plate.visible, "the stall plate carries the number")
+      verify(car.numberAngle !== 0, "the stall plate is tilted: the hard case")
+      var squares = car.digitSquares
+      verify(squares.length > 0)
+      waitForRendering(digits)
+      // The canvas's own pixels, read back through its context: what the
+      // scene graph uploads as the number's texture.
+      var w = digits.width
+      var h = digits.height
+      var slack = CarMeta.NUMBER_SLACK * 3
+      compare(w, plate.width)
+      compare(h, plate.height + 2 * slack, "the canvas is the rect plus the slack above and below")
+      compare(digits.y, -slack)
+      var px = digits.getContext("2d").getImageData(0, 0, w, h).data
+      var ink = car.numberInk
+      var r0 = Math.round(ink.r * 255), g0 = Math.round(ink.g * 255), b0 = Math.round(ink.b * 255)
+      var inked = 0
+      var other = 0
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          var o = (y * w + x) * 4
+          var a = px[o + 3]
+          if (a === 0)
+            continue
+          if (a === 255 && px[o] === r0 && px[o + 1] === g0 && px[o + 2] === b0)
+            inked++
+          else
+            other++
+        }
+      }
+      compare(other, 0, "no pixel of the number is anything but the ink at full alpha")
+      compare(inked, squares.length * 9, "every square is 3x3 of ink and nothing else is drawn")
+      for (var s = 0; s < squares.length; s++) {
+        compare(squares[s][0] % 3, 0, "square on the 3x grid (x)")
+        compare(squares[s][1] % 3, 0, "square on the 3x grid (y)")
+        for (var dy = 0; dy < 3; dy++)
+          for (var dx = 0; dx < 3; dx++)
+            compare(px[((squares[s][1] + slack + dy) * w + squares[s][0] + dx) * 4 + 3], 255, "square " + s + " is filled")
+      }
+      // And the two digits are two: the ink spans more than one glyph width
+      // at the pitch used, so 42 is not drawn as one smear.
+      var minX = 1e9, maxX = -1e9
+      for (var q = 0; q < squares.length; q++) {
+        minX = Math.min(minX, squares[q][0])
+        maxX = Math.max(maxX, squares[q][0])
+      }
+      verify(maxX - minX >= 5 * 3, "two digits span at least two glyphs")
+    }
+
+    // ------------------------------------------------------------------
+    // The number is hidden unless the meta says the panel faces the camera,
+    // and even then not on a rect under four item pixels wide or under the
+    // height floor at the current scale.
+    function test_14_number_hidden_unless_visible_and_wide_enough() {
+      var shown = { x: 10, y: 10, w: 12.4, h: 16.2, angle: 14, visible: true }
+      verify(CarMeta.numberDrawable(shown, 1.0, 1, 9))
+      verify(!CarMeta.numberDrawable({ x: 10, y: 10, w: 12.4, h: 16.2, visible: false }, 1.0, 3, 9),
+             "visible: false hides the number at any scale")
+      verify(!CarMeta.numberDrawable({ x: 10, y: 10, w: 12.4, h: 16.2 }, 1.0, 3, 9),
+             "an unset flag is not visible: strict")
+      verify(!CarMeta.numberDrawable({ x: 10, y: 10, w: 3.4, h: 16.2, visible: true }, 1.0, 1, 9),
+             "a rect 3 px wide at 1x is not drawn though the meta says visible")
+      verify(CarMeta.numberDrawable({ x: 10, y: 10, w: 3.4, h: 16.2, visible: true }, 1.0, 2, 9),
+             "the same rect at 2x is 6 px wide: the width rule passes it on")
+      verify(!CarMeta.numberDrawable({ x: 10, y: 10, w: 12.4, h: 16.2, visible: true }, 0.25, 1, 9),
+             "the quarter row at 1x is 4 px tall: under the floor")
+      verify(!CarMeta.numberDrawable(null, 1.0, 3, 9))
+      // No rect the bake left unflagged or flagged hidden is drawn on any
+      // body, either camera, at the largest scale.
+      for (var b = 0; b < Theme.bodySheetNames.length; b++) {
+        var meta = CarMeta.forBody(Theme.bodySheetNames[b])
+        verify(meta !== null)
+        var cams = ["stall", "road"]
+        for (var c = 0; c < cams.length; c++)
+          for (var yaw = 0; yaw < 8; yaw++) {
+            var rect = meta.number[cams[c]][yaw]
+            if (rect.visible !== true)
+              verify(!CarMeta.numberDrawable(rect, 1.0, 3, 9),
+                     Theme.bodySheetNames[b] + " " + cams[c] + " yaw " + yaw + " is not drawn")
+          }
+      }
+      // The sprite follows the rule: the coupe's road yaw 4 is flagged hidden.
+      var plate = plateItem()
+      car.camera = "road"
+      car.yaw = 4
+      car.sheetScale = 1.0
+      car.pixelScale = 3
+      compare(CarMeta.forBody("coupe").number.road[4].visible, false)
+      verify(!plate.visible, "road yaw 4: the meta hides the number and so does the sprite")
+      // And where the meta says visible but the panel is a sliver at the
+      // current scale -- the door roundel on the quarter row at 1x is 3 px
+      // wide -- it is not drawn either.
+      car.yaw = 1
+      car.sheetScale = 0.25
+      car.pixelScale = 1
+      compare(CarMeta.forBody("coupe").number.road[1].visible, true)
+      verify(car.numberW < 4, "the quarter-row roundel is under 4 px wide (" + car.numberW + ")")
+      verify(!plate.visible, "no number on a panel under four pixels wide")
+    }
+
+    // The squares themselves: a whole-pixel pitch that fits the rect, two
+    // digits with a gap, one digit centred, and an empty answer where no
+    // pitch fits.
+    function test_15_digit_squares_fit_the_rect_as_whole_pixels() {
+      var plate = { x: 80.4, y: 84.9, w: 31.2, h: 10.4, angle: 0, visible: true }
+      var sq = CarMeta.digitSquares(42, plate, 1.0, 1)
+      verify(sq.length > 0)
+      // Pitch 2 fits a 31x10 rect (block 7x5 font pixels): 14x10 sheet px.
+      var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9
+      for (var i = 0; i < sq.length; i++) {
+        minX = Math.min(minX, sq[i][0]); maxX = Math.max(maxX, sq[i][0])
+        minY = Math.min(minY, sq[i][1]); maxY = Math.max(maxY, sq[i][1])
+        verify(sq[i][0] >= 0 && sq[i][0] < 31 && sq[i][1] >= 0 && sq[i][1] < 10, "inside the rect")
+      }
+      compare(maxX - minX + 1, 14, "42 at pitch 2 is 14 px wide")
+      compare(maxY - minY + 1, 10, "and 10 px tall")
+      // The gap column between the digits carries no ink.
+      var gapX = minX + 6
+      for (var g = 0; g < sq.length; g++)
+        verify(sq[g][0] !== gapX && sq[g][0] !== gapX + 1, "the gap between 4 and 2 is empty")
+      // At 3x the same squares, three times as far apart.
+      var sq3 = CarMeta.digitSquares(42, plate, 1.0, 3)
+      compare(sq3.length, sq.length)
+      for (var k = 0; k < sq.length; k++) {
+        compare(sq3[k][0], sq[k][0] * 3)
+        compare(sq3[k][1], sq[k][1] * 3)
+      }
+      // One digit: fewer squares, still centred inside the rect.
+      var one = CarMeta.digitSquares(7, plate, 1.0, 1)
+      verify(one.length > 0 && one.length < sq.length)
+      // A 7 is 5 lit font pixels at pitch 2 = 5 x 4 squares... exactly the
+      // glyph's ink count times pitch squared.
+      compare(one.length, 7 * 4, "a 7 has seven font pixels, four sheet pixels each at pitch 2")
+      // Too narrow for even pitch 1 with two digits: nothing.
+      compare(CarMeta.digitSquares(42, { w: 6, h: 10, angle: 0 }, 1.0, 1).length, 0)
+      // The rear plate as the bake reports it, nine sheet pixels tall: the
+      // ten-pixel block at pitch 2 is drawn, one row of slack above and
+      // below the rect (the plate itself is taller than its rect), rather
+      // than a five-pixel one.
+      var nine = CarMeta.digitSquares(42, { x: 80.4, y: 84.9, w: 31.1, h: 9.1, angle: 0, visible: true }, 1.0, 1)
+      compare(nine.length, (9 + 11) * 4, "pitch 2 on a nine-pixel plate")
+      var nMinY = 1e9, nMaxY = -1e9
+      for (var q9 = 0; q9 < nine.length; q9++) {
+        nMinY = Math.min(nMinY, nine[q9][1])
+        nMaxY = Math.max(nMaxY, nine[q9][1])
+      }
+      compare(nMinY, -CarMeta.NUMBER_SLACK, "one row into the slack above")
+      compare(nMaxY, 8, "and down to the rect's last row")
+      // But never sideways: a block that would need more width than the
+      // rect has drops a pitch instead.
+      var narrow = CarMeta.digitSquares(42, { w: 13, h: 30, angle: 0, visible: true }, 1.0, 1)
+      compare(narrow.length, 9 + 11, "13 px wide holds pitch 1 only, however tall")
+      // A tilt is a whole-pixel shear: every glyph column keeps all its
+      // pixels and is stepped down along the plate's edge -- from pitch 2.
+      // The road door roundel is 12 px wide, so it holds pitch 1 only, and
+      // at pitch 1 the block is drawn upright: twenty pixels of 42, every
+      // column on the same row.
+      var door = { x: 70.2, y: 68.8, w: 12.4, h: 17.3, angle: 14.2, visible: true }
+      var d = CarMeta.digitSquares(42, door, 1.0, 1)
+      compare(d.length, 9 + 11, "42 at pitch 1: the 4 has nine font pixels, the 2 eleven")
+      function colTop(list, x) {
+        var top = 1e9
+        for (var t = 0; t < list.length; t++)
+          if (list[t][0] === x) top = Math.min(top, list[t][1])
+        return top
+      }
+      var firstX = 1e9
+      for (var f = 0; f < d.length; f++) firstX = Math.min(firstX, d[f][0])
+      compare(colTop(d, firstX + 6) - colTop(d, firstX), 0, "at pitch 1 the tilt is not applied: upright")
+      // The stall plate, tilted 23.3 degrees at pitch 2: the block is 14
+      // wide, 10 tall plus a 5-px drop across, and every font pixel is a
+      // whole 2x2 square -- eighty squares, not a resampled smear.
+      var stallPlate = { x: 38.6, y: 76.8, w: 19.1, h: 15.5, angle: 23.3, visible: true }
+      var s2 = CarMeta.digitSquares(42, stallPlate, 1.0, 1)
+      compare(s2.length, (9 + 11) * 4, "42 at pitch 2 on the tilted plate: every font pixel is four sheet pixels")
+      var sMinX = 1e9, sMaxX = -1e9, sMinY = 1e9, sMaxY = -1e9
+      for (var u = 0; u < s2.length; u++) {
+        sMinX = Math.min(sMinX, s2[u][0]); sMaxX = Math.max(sMaxX, s2[u][0])
+        sMinY = Math.min(sMinY, s2[u][1]); sMaxY = Math.max(sMaxY, s2[u][1])
+        verify(s2[u][0] >= 0 && s2[u][0] < 19 && s2[u][1] >= 0 && s2[u][1] < 16, "inside the plate")
+      }
+      compare(sMaxX - sMinX + 1, 14, "14 px wide")
+      compare(sMaxY - sMinY + 1, 15, "10 px of glyph plus a 5 px drop along the tilt")
+      compare(colTop(s2, sMinX + 12) - colTop(s2, sMinX), 5, "the right-hand column is five rows lower: the plate's edge")
     }
   }
 }
