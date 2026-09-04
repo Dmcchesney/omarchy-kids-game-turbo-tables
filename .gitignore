@@ -12,3 +12,7 @@ evidence/
 *~
 *.swp
 .qmlls.ini
+
+# Python bytecode from the sprite tools; never part of the plugin.
+__pycache__/
+*.pyc
