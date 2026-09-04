@@ -1,10 +1,14 @@
-Implementation plan · v2 · 2026-09-03 · Golden Hour direction, rally cars, one sprite pipeline, gauntlet restart
+Implementation plan · v3 · 2026-09-04 · feel and circuit after the first play session, the prop kit frozen, pieces F and T
 
-# Turbo Tables Solo — Implementation Plan v2
+# Turbo Tables Solo — Implementation Plan v3
 
 The build plan for the plugin alone, from where the first gauntlet run left it to a verified listing under Kids on plugins.omarchy.org. It supersedes plan v1 (2026-09-02). The engine, rivals, save file, package gates and shell integration from v1 stand; the visual direction, the cars, and the art pipeline do not, and this document replaces them.
 
 **Repository:** `omarchy-kids-game-turbo-tables` · **Plugin id:** `io.github.dmcchesney.turbo-tables-solo` · **Language:** TypeScript for all game logic, QML for screens, GLSL for the road · **License:** MIT, assets original or CC0 · **Branches:** `gauntlet/turbo-tables-build` (the loop's branch, 27 commits past `main`), `proto/golden-hour` (the prototype this plan adopts)
+
+## What changed from plan v2, and why
+
+The maintainer played the build on 2026-09-04 in the VM and said it is fun and the cars are much better. Two changes first, ahead of everything else: the power-ups must feel impactful on the screen, and the course must look like a retro artist's passion project. `docs/design.md` is now v4 with two new sections, **Power-up feel** and **The circuit**, that answer both without changing a rule. And the roadside is no longer code-drawn: a **prop kit** of twenty-five baked sprites is committed under `assets/props/`, made with the maintainer looking at every round, frozen behind `check:props`, and documented in `docs/prop-kit.md`. Two new pieces carry the work, **F Feel** and **T Track**; piece 4 as written in v2 is superseded by T. `docs/open-questions.md` section 3 records the feedback verbatim.
 
 ## What changed from plan v1, and why
 
@@ -149,6 +153,12 @@ Why Blender and not the v1 Canvas rasteriser: chamfers that catch a rim, real ca
 
 **Gate:** an 8-angle turnaround of body 1 beside the crop; the six bodies as one contact sheet, each judged individually; the four cars from behind on the road; the car on the turntable; one car in all eight paints. A blind critic picks ours against the crop on the three criteria above, confirms paint fidelity (each paint measured against its swatch), confirms the same car appears on all three screens, and confirms the bake reproduces.
 
+## The prop kit: assets/props
+
+Twenty-five sprites, one indexed PNG each, baked by `src/tools/bake-props.py` (the model, bpy, no `.blend`) through `src/tools/px-props.py` (the same pixel pass as the cars) and driven by `npm run props`; `npm run check:props` holds the tree to `assets/props/manifest.json` in CI, `npm run props -- --verify` proves the bake reproduces the bytes, and `ui/parts/PropMeta.js` mirrors the meta into layer 2 (`tests/propmeta.test.ts` holds it there). The kit is baked at four times the karts' pixels per world unit, by the maintainer's decision that props should be a step finer than the cars. `docs/prop-kit.md` lists every prop, its views and frames, its anchor, and where on the circuit it lives.
+
+**The kit is frozen art.** A builder places, scales, animates, tints and crops it; it never redraws a prop, edits a PNG, adds a file under `assets/props/`, or draws a roadside object in code that the kit already provides. The Canvas-drawn `ui/parts/PropSprite.qml` is retired by piece T. Smoke, sparks, speed lines, the tow line, the Roll Cage outline and dust are drawn in QML on purpose; a hard-edged bake of a soft thing reads as gravel.
+
 ## Screens and views (layer 2)
 
 As v1, with these changes: `SunsetSky.qml` is a shared part used by `TrackView`, `Garage` (through the door) and `Countdown`; `TrackView` keeps the 480×270 layer on in both shader and canvas modes (measured: 48 fps with it off, 61–63 with it on, software renderer); `CanvasRoad` draws the same picture as `road.frag` and a CPU-rasterised reference of the shader is part of piece 4's evidence; `Countdown` is a scene, not a box; the race HUD band left empty by the ladder's deletion stays empty — a running last-place label breaks the Fairness rule and does not come back.
@@ -185,6 +195,14 @@ M0, M1, M2 and M5 are met. The remaining milestones:
 Piece C in full: `CarSprite`, six bodies, livery, lamps, outward normals, the bake and its parity check, the three old sprites deleted, every screen on the sheets.
 
 **Gate:** the piece C critic picks ours against the crop; `check:sprites` green; the same car on all three screens.
+
+### MF — Feel (layer 2, one week)
+
+Piece F. The per-card spec in design v4, the hand deal and slam, being hit, and sound. Gate: every card's frame strip shows its three beats; the harness can inject each event by argument; reduced motion has a substitute for every shake and spin; the fact is never covered; `assets/sfx` has a sound for every event and the README documents Qt Multimedia as optional.
+
+### MT — Track (layer 2, two weeks)
+
+Piece T. The shader world, the kit placed across the twelve sectors, time passing, life, grounded karts, the minimap as a projection, the sky owned. Gate: frames at every sector and at laps 1, 6 and 12 beside the bar; `PropSprite.qml` gone; every prop on screen is a kit cell; 60 fps on the Mac's software path at the internal resolution.
 
 ### M3′ — Garage and countdown under v3 (layer 2, one week)
 
@@ -230,7 +248,7 @@ Same skill, same shape as v1: pieces judged on their own, a builder and a fresh 
 
 ### Prerequisites
 
-1. **The design amendments above are applied** to `docs/design.md`. Without them every critic judges against the night garage and the loop cannot win.
+1. **`docs/design.md` is v4** (it is: Power-up feel and The circuit are in it) and **the prop kit is committed** (it is: `npm run check:props` and `npm run props -- --verify` are green at the commit that carries this plan).
 2. `proto/golden-hour` is merged into `gauntlet/turbo-tables-build` (or the loop starts on it). Its commit `11555f9` carries all three prototype screens with gates green.
 3. The Omarchy VM is running and `ssh omarchy-turbo-tables` answers. If it does not, the loop runs C, 3, 4, 5 and 6, and stops at 7 with a handoff that says so.
 4. `docs/golden-hour-reference.png` and `docs/golden-hour-car.png` are committed (they are).
@@ -243,7 +261,9 @@ Same skill, same shape as v1: pieces judged on their own, a builder and a fresh 
 | --- | --- | --- | --- | --- |
 | **C Cars** | `ui/parts/CarSprite.qml`, six model tables, `src/tools/bake-sprites.ts`, `assets/karts/*.png`, the three old sprites deleted | `docs/golden-hour-car.png` | an 8-angle turnaround and the six-body sheet beside the crop, blind: silhouette at 40 and 400 px, identity (livery, roundel, lit lamps, tail bar), grounding (shadow, rim on the sun side, chamfers catching it); each paint measured against its swatch; the same car on garage, countdown and track; `check:sprites` green | MC |
 | **3 Garage** | `Garage.qml`, `GarageStall.qml`, `Theme.qml`, roster on the sheets | `docs/golden-hour-reference.png` | a 1920×1080 frame beside the reference, blind: composition, palette, light rule, the door, the bay, the car on the turntable; paint fidelity in the roster; the chrome unchanged; keyboard run and Tab intact; contrast floor | M3′ |
-| **4 Race view** | `TrackView.qml`, `road.frag`, `CanvasRoad.qml`, `SunsetSky.qml`, props, `Race.qml` HUD colours and vignette | `docs/golden-hour-reference.png`; omarchy-racer for structure only | frames and a 10-second motion sheet beside the reference: sky, sun, hills, grid, rim-lit cars, banners; shader vs canvas identical; 60 fps software at 1080p; arches clear of the answer field; reduced motion still | M4′ |
+| **4 Race view** (superseded by T in v3; its round-5 state is the starting point) | `TrackView.qml`, `road.frag`, `CanvasRoad.qml`, `SunsetSky.qml`, props, `Race.qml` HUD colours and vignette | `docs/golden-hour-reference.png`; omarchy-racer for structure only | frames and a 10-second motion sheet beside the reference: sky, sun, hills, grid, rim-lit cars, banners; shader vs canvas identical; 60 fps software at 1080p; arches clear of the answer field; reduced motion still | M4′ |
+| **F Feel** | `Race.qml` event handling, `TrackView.qml` effect layer, `Picker.qml` deal and slam, a QML `Puff`/`Sparks`/`Line` trio, `assets/sfx` wired to every event, the effect sprites from the kit (`wrench`, `pileUp`, `oilSlick`, `pothole`, `towHook`, `hubcap`) | design v4 **Power-up feel**: the per-card table is the spec; `docs/golden-hour-reference.png` for the light of an impact; a CC0 sound set | frame strips from the harness at 60 ms steps after an injected event, one strip per card and one for being hit, ours against a builder variant, blind, on the three beats: a telegraph the eye can catch, a hit-stop and a world reaction at impact, an aftermath visible on the target for the effect's life; the hand deal and slam; reduced-motion strips with no shake or spin; the fact never covered; every strip's sound listened to | MF |
+| **T Track** | `road.frag` and the shader plane (terrain by sector, haze, road crown and tyre lines, corner-only kerbs, the lake and its reflected sun, golden hour passing), `TrackView.qml` placement of the kit (twelve landmarks, furniture rhythm, R/L verges, crowd wave, flag and lamp frames, grounded karts with contact shadows and dust), `Minimap.qml` as a projection of the sector table, `SunsetSky.qml` owned at last, `PropSprite.qml` deleted | `docs/golden-hour-reference.png`; design v4 **The circuit**; `docs/prop-kit.md` for what goes where; omarchy-racer for structure only | 1920×1080 frames at every sector and at laps 1, 6 and 12, ours against the bar, blind: the far road fades, each sector reads as a place, the frame has a foreground, a middle and a distance, something moves in a ten-second recording, the karts sit on the ground, no prop is drawn in code; shader and canvas fallback identical; 60 fps on the Mac's software path at the internal resolution and the VM number quoted with its llvmpipe caveat | MT |
 | **5 Countdown** | `Countdown.qml`, `CountdownScene.qml` on `SunsetSky` and the sheets | `docs/golden-hour-reference.png`; Lode Runner for the flow, which holds | the GO frame beside the reference; numeral clear of the gantry; fact readable behind GO; four beats unchanged; the flow's key count still 1 | M3′ |
 | **6 Package** | NOTICE attribution, README image sentences, `preview.png`, sound | the Lode Runner repository as listed | as v1, plus: the two reference images described identically in README and NOTICE; the wallpaper's licence recorded; scanner `passed` with the new PNGs | M6′ |
 | **7 Shell** | nothing new; re-verify | `omarchy.emojis` in the VM | as v1: keys cold and warm, the save path's `chmod 000` case, hot reload, theme retint, 30 fps at the internal resolution | — |
@@ -262,10 +282,12 @@ Learned in the first run, and now rules:
 - **A test's name is a claim.** A test that passes under mutation of the rule it names is a defect, and a report's "what is not covered" section must list those.
 - **One renderer for the car.** No screen draws its own.
 - **The chrome stays native.** Results, Settings, the picker and HUD panels keep the theme's colours and the shell's font; only the game layer takes the light.
+- **The prop kit is frozen.** Place it, scale it, animate its frames, tint it by distance, crop to its bounds. Never redraw a prop, edit a sheet, add a file under `assets/props/`, or draw in code a roadside object the kit provides. `check:props` and `check:sprites` are in `npm run check`.
+- **F and T never run in parallel.** Both edit `TrackView.qml` and `Race.qml`; two builders in one file is the merge hazard this tree has already paid for.
 
 ### Order and parallelism
 
-**C first, alone**, because the garage, countdown and race all show its output and a critic cannot judge them fairly around a dark lump. Then **3, 4 and 5 in parallel**, each from `proto/golden-hour` with the sheets. Then **6**. Then **7**, which needs the VM.
+v3 order: **F first**, because it is the smaller change and it touches the moment the child cares about most; then **T**; the two share files and never overlap. Then the unfinished v2 pieces: **3 and 5** (their last rounds are built and unjudged; judge them under v4), then **6**, then **7** in the VM. C is done.
 
 ### Stop condition and handoff
 
@@ -275,4 +297,4 @@ The run ends when every open piece's critic has picked ours and CI is green, or 
 
 Paste into a fresh Claude Code session on `gauntlet/turbo-tables-build` after the prerequisites are done.
 
-> Continue the Turbo Tables Solo build under `docs/plan.md` v2 and the design as amended for Visual Direction v3. Pieces 1, 2 and 6 are frozen won; do not re-run them. Start from the prototype on `proto/golden-hour`. The bars are `docs/golden-hour-reference.png` for every game screen and `docs/golden-hour-car.png` for the cars, with omarchy-racer for race-view structure, Lode Runner for flow and packaging, and the emojis overlay in the VM for the shell. Run piece C — one low-poly rally car per body, one renderer, baked sprite sheets, outward normals, paint that keeps its hue — first and alone, then pieces 3, 4 and 5 in parallel from the prototype, then 6, then 7. For each piece fan out a builder and a fresh critic; the critic compares ours against the bar blind, labels stripped, on that piece's rubric, and is harsh — a win on content or interface alone does not count, the picture has to win. Every Qt process is headless; never open a window on this Mac. Never revert with git in this tree. Never break the rules under "Rules the builder may not break." `/loop` on each piece until the critic picks ours. When every open piece is won and CI is green, or when the VM is unreachable at piece 7, write `HANDOFF.md` as the plan describes and stop.
+> Continue the Turbo Tables Solo build under `docs/plan.md` v3 and `docs/design.md` v4. Pieces 1, 2, 6 and C are frozen won; do not re-run them. Read `docs/prop-kit.md`: the twenty-five sprites under `assets/props/` are frozen art you place and never redraw, and `ui/parts/PropMeta.js` tells you their cells, views, anchors and bounds. Run piece F first: the per-card spec in the design's Power-up feel section, the hand deal and slam, being hit, and sound, judged by 60 ms frame strips from the headless harness on the three beats. Then piece T: the shader world and the kit placed across the twelve sectors as the design's circuit section describes, judged against `docs/golden-hour-reference.png` at every sector and at laps 1, 6 and 12. F and T share files and never run in parallel. Then judge pieces 3 and 5 under v4, then 6, then 7 in the VM. For each piece fan out a builder and a fresh critic; the critic compares ours blind, labels stripped, on that piece's rubric, and is harsh; praise is not useful. Every Qt process is headless. Never revert with git in this tree. Never break the rules under "Rules the builder may not break." `/loop` on each piece until the critic picks ours. When every open piece is won and CI is green, or when the VM is unreachable at piece 7, write `HANDOFF.md` as the plan describes and stop.

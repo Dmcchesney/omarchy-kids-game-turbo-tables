@@ -1,12 +1,12 @@
 Design v2 · decisions settled 2026-09-02 · bellringer mechanics rebranded · AI rivals · behind-the-kart view · plugin shape last
 
-# Turbo Tables Solo — Design v2
+# Turbo Tables Solo — Design v4
 
 A times-table kart race for children roughly 7 to 11, shipped as an Omarchy shell plugin. You race three AI karts down a night-lit garage circuit by answering multiplication facts. Twelve laps, one per table, from the ones to the twelves. Streaks charge powerups; powerups skip your own questions or pile questions onto a rival; rivals do the same to you and to each other. It should feel like a kart racer, and it should leave the child knowing the tables.
 
 This is the second draft. It replaces the sprint-only first draft with the competitive mechanics of the Zipline bellringer race, rebranded, plus AI racers, a pseudo-3D behind-the-kart view, and a minimap. The last section is unchanged in intent: the shape the plugin must take to be listed under Kids on plugins.omarchy.org.
 
-**Status:** decisions settled 2026-09-02, ready for the implementation plan · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
+**Status:** v4, 2026-09-04: power-up feel and the circuit added after the first play session; the prop kit is baked and frozen · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
 
 ## What changed from draft one, and why
 
@@ -224,6 +224,167 @@ The constraint is a stock Omarchy install with no extra packages, and an accepta
 **Fallback and floor.** If the shader fails to compile on a machine, the view falls back to a `Canvas` port of the classic segment-based road renderer at the same internal size, which is pure CPU work plus one texture upload per frame and has its own precedent in an Omarchy racing plugin. If even that is too slow, the reduced-motion setting also switches the road to a static perspective plane with sprites, which is the cheapest picture that still reads as looking down the track.
 
 **Target:** 60 fps on any machine with a GPU; 30 fps in the software-rendered VM at the internal resolution. The implementation plan includes a frame-rate counter and a measured budget before any art is finished.
+
+
+## Power-up feel (v4)
+
+Added 2026-09-04 after the first play session. Every card is strong in the rules and was invisible on the screen; this section is what the screen does. It changes no rule: every effect below is a view of an event the engine already emits (`cardUsed`, `hit`, `blocked`, `swap`, `handDealt`).
+
+### The grammar every power-up follows
+
+Five tools, all cheap in QML on the existing renderer, used in every card in different mixes.
+
+| Tool | What it is | Cost |
+|---|---|---|
+| **Hit-stop** | the world freezes for 60 to 120 ms at the moment of impact, then resumes. The most underused trick in games and the cheapest. The FrameAnimation delta is held at zero; input is not. | one property |
+| **Projectile** | a sprite that travels from the attacker's kart to the target's kart along the road in z, scaling with the projection, over 400 to 600 ms. This is the beat that says "I did that." | one Image and the projection function that already exists |
+| **Target state** | the victim kart changes: a smoke sprite pinned to its hood, a wobble in yaw (cycle sprite columns ±1), a bounce in y, a spin (cycle all eight columns), for as long as the effect lasts | sprite columns exist already |
+| **World flash and shake** | one frame of colour over the road layer, a 200 ms shake with decay, speed lines on boosts | uniforms and a transform |
+| **HUD echo** | the charge bar drains into the card, the card flies out of the hand, the victim's name tag shows `+8` and ticks down, the minimap dot pulses | plain QML |
+
+Two rules that keep it a kids' game: nothing ever covers the fact, and reduced motion replaces hit-stop, shake, and spins with flashes and tag changes, as the design already says.
+
+### Per-card spec
+
+Timings in milliseconds. "Aftermath" lasts until the effect ends, which the rules define as the end of the victim's current lap.
+
+#### Nitro (skip 4)
+
+- **Telegraph 120:** the kart squats one pixel, exhaust flares blue-white.
+- **Impact:** hit-stop 60, then the road throws forward as now but with speed lines from the corners, the sun blooms for 300, the four next lap lamps light in a chase left to right with a tick each.
+- **Aftermath 700:** an afterimage trail behind the kart fading out.
+- **Sound:** short whoosh, four rising ticks.
+
+#### Turbo (skip 10)
+
+The self boost that should feel like a launch.
+
+- **Telegraph 250:** the engine revs (sound climbs), the kart squats two pixels, the screen edges darken slightly.
+- **Impact:** hit-stop 90, one white frame, then the road stretches (focal length bumps for 400), heavy speed lines, the horizon dips, and rivals ahead stream past both sides of the frame as they fall behind. Ten lap lamps chase in 500.
+- **Aftermath 1200:** afterimages and a heat shimmer at the exhaust.
+- **Sound:** spool up, bang, sustained rush.
+
+#### Oil Slick (everyone else +3)
+
+- **Telegraph 200:** a black slick sprite drops from the back of your kart and spreads across the road width behind you (a decal that grows for 400 and stays on the road as a prop until it scrolls out of view).
+- **Impact:** each rival kart fishtails: yaw wobbles ±1 column for 800 with a squeal, and a small slick sprite appears under each of them so the child sees three hits.
+- **Aftermath:** each rival's tag shows `+3` ticking down.
+- **Sound:** splat, then three squeals staggered by 120.
+
+#### Wrench (one rival +5)
+
+The bread-and-butter attack, so it must be the clearest cause and effect in the game.
+
+- **Telegraph 500:** a wrench sprite leaves your kart spinning, arcs along the road toward the target with the projection scaling it, trailing two sparks.
+- **Impact:** hit-stop 80, a spark burst on the target kart, the kart jolts sideways one column and back, a `+5` tag pops over it.
+- **Aftermath:** smoke from the target's hood until the effect ends; the tag counts down as they answer.
+- **Sound:** whirr in flight, clang on impact.
+- **Blocked:** the wrench shatters against the target's Roll Cage with a white flash and a ring, the cage outline cracks and vanishes, and the callout reads `ROLL CAGE HELD` on their side.
+
+#### Pothole (one rival +8)
+
+- **Telegraph 350:** a pothole decal materialises on the road just ahead of the target, dark with a lighter rim, cracks spreading outward.
+- **Impact:** hit-stop 100 as the kart drops into it: a two-pixel dip, a dust burst, the kart bounces twice, a hubcap sprite flies off and rolls to the verge.
+- **Aftermath:** the kart rides one pixel low with a rattle animation on the wheels until the effect ends; `+8` tag.
+- **Sound:** thud, rattle, hubcap ring.
+
+#### Pile-Up (one rival +15, legendary)
+
+The one the whole room should notice.
+
+- **Telegraph 600:** the sky flashes amber twice, a shadow grows on the road ahead of the target, and a stack of tyres, barrels, and crates tumbles in from the top of the frame.
+- **Impact:** hit-stop 120, then 300 at half speed: the target kart spins a full turn through all eight columns, stops sideways, and a smoke column rises. Every other racer's tag flashes once so the field reads the event. The minimap pulses on the victim.
+- **Aftermath:** the pile stays on the road as props until it scrolls out; the victim smokes heavily; a `+15` tag; the callout is in the large type reserved for this card.
+- **Sound:** siren blip, crash with debris, a long hiss.
+
+#### Roll Cage (block next)
+
+- **Impact:** a cage frame draws itself around your kart line by line over 300, then settles to a soft amber pulse that stays as long as it is active. Stacked cages add a pip each to the HUD.
+- **When it blocks:** see Wrench above; the block is the payoff and must be loud.
+- **Sound:** four metallic clicks, then the clang when it earns its keep.
+
+#### Tow Hook (swap with one rival)
+
+The most dramatic rule in the game is currently a line of text.
+
+- **Telegraph 400:** a hook and line fire from your kart to the target along the road, latch with a hit-stop of 80.
+- **Impact 700:** the line goes taut and the two karts zip past each other, yours forward and theirs back, with motion blur on both; the camera whips to follow; the minimap dots trade places with a swap arc.
+- **Aftermath:** the rival's tag reads `TOWED` for 1.6 s.
+- **Sound:** winch, whip-crack, the rival's engine dopplering past.
+
+#### Being hit, from the child's seat
+
+- Hit-stop 80, a red-amber frame at the edges, a 200 ms shake with decay, then the horizon pull-back as now but with the attacker's kart sweeping past in the lane beside you.
+- The answer field locks with a mechanical overlay of bolts that spin off over the stall duration (2 s, 3 s for a Wrench) so the lock reads as a thing happening, not a bug.
+- Your own hood smokes until the effect ends; the extra lap lamps you now owe appear as dark lamps added to the row with a rattle, and light as you clear them.
+
+#### The hand and the charge
+
+- Reaching twelve: the charge bar flashes, the twelve segments burst into three cards that slide up from the bottom right with a deal sound, and `POWER-UP READY` reads once. An unused hand breathes gently so the child remembers it.
+- Choosing: the chosen card enlarges for 150, then slams down and dissolves into the telegraph. The other two flip face down and fly off; the charge bar shows empty.
+
+
+## The circuit (v4)
+
+Added 2026-09-04. The track is the screen a child looks at for the whole game, and it was a grid with a cone. This section is the art plan for it; the renderer does not change. The roadside is built from the prop kit under `assets/props/` (see `docs/prop-kit.md`), which is baked art the build may place, scale, animate and tint but never redraw.
+
+### The circuit plan
+
+#### One shader change that does most of the work
+
+The ground plane becomes terrain, not grid. In the fragment shader, per pixel and already at 480 by 270:
+
+- **Ground palette by sector:** dirt and scrub for the rally sectors, the diagnostic grid kept only at the pit (sectors 1 and 12) where it belongs, a salt flat, a lake shore. A sector uniform picks the palette; the sector blend already exists for the curve.
+- **Noise:** two octaves of value noise for scrub bands, ruts parallel to the road, and patches on the tarmac. Tens of instructions, no textures.
+- **Atmospheric perspective:** every ground and road colour lerps toward the sky colour at the horizon by distance. Sprites get the same treatment with an opacity or a tint overlay by z. This is the single biggest step toward the bar.
+- **Road craft:** a crown (lighter centre, darker edges), two darker tyre lines per lane, kerbs only inside corners (driven by the curve value), a start and finish grid at the pit, skid marks at corner exits.
+- **Water:** in the lake sector the plane beside the road is water, and the sun reflects in it as a stretched, rippling column. It is the bar's own image, and it is ten lines of shader.
+
+#### Twelve landmarks, one per table
+
+Each sector gets one authored set piece: a few sprites plus its ground palette. Written so a child learns the circuit and knows where they are in the race by sight.
+
+| Lap | Sector | Landmark |
+|---|---|---|
+| 1 | the pit | gantry, tyre walls, pit boards, the grid floor, a silhouetted crowd with flags |
+| 2 | out of town | sponsor-style banners with the game's own marks, hay bales |
+| 3 | the scrub | scrub silhouettes, distance boards, a lone water tower |
+| 4 | the quarry | rock walls close on both sides, dust hanging in the light |
+| 5 | the lake | water beside the road, the sun reflected, a jetty, birds crossing once |
+| 6 | the pines | a hillside of silhouetted pines, a wooden bridge |
+| 7 | the roller door | the long garage from the design, roller door open, lamps flickering |
+| 8 | the dunes | sand, wind lines, the road half buried at the edges |
+| 9 | the overpass | a bridge over the road, its shadow crossing the tarmac |
+| 10 | the scrapyard | old karts stacked, one of the six bodies hidden in the pile |
+| 11 | the billboards | a row of boards that show the last three facts the child got right, painted on |
+| 12 | the finish | the grid again, the crowd, the finish gantry lit |
+
+The fact billboards in sector 11 are the passion-project idea I would fight for: the environment shows the child their own answers on the way to the finish. It is decoration that teaches.
+
+#### Time passes
+
+Golden hour should actually pass. The sun sits on the horizon at lap 1 and is half set by lap 12. Sky and haze shift with it, headlamps light around lap 8, tail lamps get brighter, the first stars appear by lap 11. Four uniforms driven by lap number, and the race gains a clock the child can feel without reading.
+
+#### Life
+
+- Cloud streaks in two parallax layers drifting slowly.
+- Flags on the gantry and hay bales flapping on a two-frame loop.
+- Dust puffs from every kart's rear wheels on dirt sectors, a little from the rivals ahead.
+- Lamp flicker at the pit and the roller door.
+- Heat shimmer over the road near the sun, a small distortion in the shader.
+- A flock of birds crossing the lake once per race.
+
+#### Karts on the ground
+
+- Darker, sharper contact shadows; a longer shadow as the sun drops.
+- Brake lights brighten in corners; headlamp cones on the road after lap 8.
+- Name tags sit on the kart with a short leader line rather than floating in the sky.
+- Dust and a small bounce on landing after a hill crest.
+
+#### Secrets
+
+One hidden kart in the scrapyard. A billboard that changes each lap. The `WELCOME TO THE PIT` terminal that blinks something different on the last lap. A gull on the jetty that turns to watch you pass. None of this is announced anywhere.
+
 
 ## Garage Room
 

@@ -58,6 +58,8 @@ jobs:
       # sheet cannot land at all.
       - name: Committed car sheets match their manifest
         run: npm run check:sprites
+      - name: Prop kit manifest
+        run: npm run check:props
 
       # Asserts the four safety invariants -- no network code, no process or
       # shell execution, no free-text entry or name field, no stored dates --
