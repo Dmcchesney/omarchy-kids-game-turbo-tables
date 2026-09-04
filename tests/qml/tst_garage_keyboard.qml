@@ -76,7 +76,7 @@ Item {
 
     // ------------------------------------------------------------------
     function test_01_first_stop_is_the_kart_body() {
-      compare(garage.focusedName(), "Kart body, SPRINTER")
+      compare(garage.focusedName(), "Kart body, COUPE")
     }
 
     // Tab must walk the same order the garage publishes, or the arrow keys,
@@ -119,7 +119,7 @@ Item {
       compare(garage.bodyIndex, 0)
       keyClick(Qt.Key_Right)
       compare(garage.bodyIndex, 1)
-      compare(garage.focusedName(), "Kart body, WEDGE")
+      compare(garage.focusedName(), "Kart body, HATCH")
       for (var i = 0; i < 5; i++)
         keyClick(Qt.Key_Right)
       compare(garage.bodyIndex, 0, "six bodies wrap round to the first")
@@ -239,7 +239,7 @@ Item {
     // bottom, and it never doubles back across the screen. Round one ran
     // centre -> far right -> far left -> centre -> far right.
     function test_14_focus_order_follows_the_layout() {
-      var expected = ["Kart body, SPRINTER",
+      var expected = ["Kart body, COUPE",
                       "Kart colour, RED",
                       "Kart number, 7",
                       "Race mode, GRAND PRIX, change",

@@ -87,17 +87,20 @@ QtObject {
   readonly property var paintNames: ["RED", "ORANGE", "YELLOW", "GREEN",
                                      "BLUE", "PURPLE", "PINK", "SILVER"]
 
-  // Six kart bodies. The names are what the stall caption reads out.
-  readonly property var bodyNames: ["SPRINTER", "WEDGE", "STOCKCAR",
-                                    "BUGGY", "HAULER", "PROTOTYPE"]
+  // Six car bodies. The names are what the stall caption reads out, and they
+  // are the six archetypes design v3 names, in the sheet order below: piece C
+  // shipped with v1's names still here, so index 3 -- a saloon -- was captioned
+  // BUGGY on the dais. The caption has to name the shape the child is looking at.
+  readonly property var bodyNames: ["COUPE", "HATCH", "WEDGE",
+                                    "SALOON", "BUGGY", "PICKUP"]
 
   // ---------------------------------------------------- the car sheets
   // PIECE C. Every car on every screen is a cell of a baked sprite sheet,
   // `assets/karts/<body>/<paint>.png`, and these two lists are the piece C
   // contract's file names in the order of the two indices above: body 0 is
-  // `coupe`, paint 7 is `white`. The display names are untouched -- the
-  // stall caption still reads SPRINTER and the swatch grid still reads
-  // SILVER -- so nothing a child sees changes with a file name.
+  // `coupe`, paint 7 is `white`. bodyNames above is the same six in the same
+  // order, upper-cased for the caption; paintNames keeps SILVER where the file
+  // says white, because that is the word on the swatch a child already knows.
   readonly property var bodySheetNames: ["coupe", "hatch", "wedge",
                                          "saloon", "buggy", "pickup"]
   readonly property var paintSheetNames: ["red", "orange", "yellow", "green",
