@@ -176,6 +176,22 @@ QtObject {
   // assignment; the plugin never writes it.
   property url carSheetRoot: Qt.resolvedUrl("../assets/karts/")
 
+  // ---------------------------------------------------- the prop kit
+  // The twenty-five baked roadside and effect sprites of `docs/prop-kit.md`,
+  // one indexed PNG per prop at `assets/props/<name>.png`. `ui/parts/PropMeta.js`
+  // is the layer-2 mirror of their cells, views, anchors and bounds, and
+  // `ui/parts/EffectSprite.qml` is the one item that draws a cell. Writable for
+  // the same reason `carSheetRoot` is -- so the harness can point the whole kit
+  // somewhere else with one assignment -- and the plugin never writes it.
+  property url propSheetRoot: Qt.resolvedUrl("../assets/props/")
+
+  // ------------------------------------------------------- the sound cues
+  // PIECE F. One PCM WAV per cue under `assets/sfx/`, synthesised by
+  // `src/tools/bake-sfx.py`; `ui/parts/Sfx.qml` is the table that says which
+  // cue belongs to which event. Writable for the same reason the two sheet
+  // roots are, and the plugin never writes it.
+  property url sfxRoot: Qt.resolvedUrl("../assets/sfx/")
+
   function bodySheetName(index) {
     return bodySheetNames[((index % bodySheetNames.length) + bodySheetNames.length) % bodySheetNames.length]
   }

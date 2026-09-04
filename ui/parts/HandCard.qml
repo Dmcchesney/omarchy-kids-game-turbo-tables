@@ -26,6 +26,11 @@ Item {
   property int labelSize: 22
   property int detailSize: 15
   property real scaleUnit: 1.0
+  // PIECE F. Design v4: "An unused hand breathes gently so the child remembers
+  // it." 0..1, driven by ui/Picker.qml off the effect clock; it moves the
+  // card's border and nothing else, so it is a breath rather than a blink and
+  // nothing on the card ever changes what it says.
+  property real breathe: 0
 
   function px(v) { return Math.round(v * card.scaleUnit) }
 
@@ -81,7 +86,10 @@ Item {
     color: card.selected ? Theme.selectedFill
                          : Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.92)
     border.width: 1
-    border.color: card.selected ? Theme.focusRing : Theme.line
+    border.color: card.selected
+                  ? Theme.focusRing
+                  : Qt.rgba(Theme.amber.r, Theme.amber.g, Theme.amber.b,
+                            Theme.line.a + card.breathe * 0.42)
   }
 
   // The keycap. It is the whole interface of this card, so it is drawn as a

@@ -50,6 +50,29 @@ Item {
   property real padY: 12
   readonly property real innerWidth: Math.max(1, width - padX * 2)
 
+  // ------------------------------------------------------------- PIECE F
+  //
+  // Design v4, "The hand and the charge": "Reaching twelve: the charge bar
+  // flashes, the twelve segments burst into three cards that slide up from the
+  // bottom right." This is the flash and the burst; the cards are
+  // `ui/Picker.qml`.
+  //
+  // It is drawn as a GHOST of the full bar rising and fading, because by the
+  // time a hand has been dealt the engine has already taken the streak back to
+  // zero and the twelve segments are gone -- so what a child sees is the twelve
+  // they earned leaving the bar, which is exactly what happened.
+  //
+  // `fxNow` is `TrackView.fxClock`, handed down by ui/Race.qml. The bar has no
+  // clock of its own for the same reason nothing in the effect layer does: a
+  // frame strip has to be reproducible.
+  property real fxNow: 0
+  property real burstBorn: -1e9
+  readonly property real burstMs: 260
+  readonly property real burst: (reducedMotion || fxNow - burstBorn > burstMs)
+                                ? 0
+                                : 1 - Math.max(0, Math.min(1, (fxNow - burstBorn) / burstMs))
+  function burstNow() { bar.burstBorn = bar.fxNow }
+
   implicitWidth: 260
   implicitHeight: padY * 2 + caption.height + 6 + cellHeight + 6 + status.height
 
@@ -108,6 +131,42 @@ Item {
           enabled: !bar.reducedMotion
           ColorAnimation { duration: 140 }
         }
+      }
+    }
+  }
+
+  // The burst: the twelve segments the child just spent, rising out of the bar
+  // and fading, over the face's own flash.
+  Rectangle {
+    anchors.fill: face
+    radius: face.radius
+    color: Theme.amberGlow
+    opacity: bar.burst * 0.22
+    visible: bar.burst > 0.01
+  }
+
+  Row {
+    id: burstCells
+    x: bar.padX
+    y: cells.y - bar.cellHeight * 0.9 * (1 - bar.burst)
+    width: bar.innerWidth
+    height: bar.cellHeight
+    spacing: bar.cellGap
+    opacity: bar.burst
+    visible: bar.burst > 0.01
+
+    Repeater {
+      model: bar.segments
+
+      Rectangle {
+        width: (bar.innerWidth - bar.cellGap * (bar.segments - 1)) / bar.segments
+        height: bar.cellHeight
+        radius: 2
+        color: Theme.amberGlow
+        // The middle segments leave first, so the twelve read as a burst rather
+        // than as a bar sliding upward in one piece.
+        opacity: Math.max(0, 1 - (1 - bar.burst)
+                             * (1 + Math.abs(index - (bar.segments - 1) / 2) * 0.22))
       }
     }
   }

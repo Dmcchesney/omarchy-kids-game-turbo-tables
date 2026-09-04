@@ -310,6 +310,21 @@ Item {
   // The lap the child is on, 1-based. Its arc is drawn brighter.
   property int activeSector: 1
   property bool reducedMotion: false
+
+  // ------------------------------------------------------------- PIECE F
+  //
+  // Design v4, Pile-Up: "The minimap pulses on the victim." One ring, on one
+  // dot, for as long as the effect layer says. `pulseIndex` is a racer index
+  // into the list `setRacers` was given -- not a rank and not a dot id -- so
+  // the ring is on the kart that was actually hit however the field has moved.
+  // `pulse` runs 1 at the moment of the hit to 0 when it is over, and is driven
+  // by `TrackView`'s effect clock so the map and the road pulse together.
+  //
+  // The ring is a RING and not a colour change, for the same reason the child's
+  // own dot is found by its double ring: the map already carries eight paints
+  // and an accent, and any colour a pulse could be is some kart's own.
+  property int pulseIndex: -1
+  property real pulse: 0
   property real dotSize: 18
   // A FLOOR ON THE DOT, AND THE LOOP GIVES WAY TO IT.
   //
@@ -513,6 +528,21 @@ Item {
         color: "transparent"
         border.width: 2
         border.color: Qt.rgba(0, 0, 0, 0.85)
+      }
+
+      // The Pile-Up pulse. Outside the dot, growing and fading, so it never
+      // covers the number the dot carries.
+      Rectangle {
+        visible: minimap.pulse > 0.01 && index === minimap.pulseIndex
+        anchors.centerIn: parent
+        readonly property real grow: parent.width * (1.15 + (1 - minimap.pulse) * 1.5)
+        width: grow
+        height: grow
+        radius: width / 2
+        color: "transparent"
+        border.width: 2
+        border.color: Qt.rgba(0.847, 0.631, 0.165, minimap.pulse)
+        z: 4
       }
 
       Rectangle {

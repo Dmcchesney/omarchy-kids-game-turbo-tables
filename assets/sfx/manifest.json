@@ -1,0 +1,97 @@
+{
+  "channels": 1,
+  "depth": 16,
+  "files": {
+    "block.wav": {
+      "ms": 620,
+      "peak": 0.02,
+      "sha256": "1f5d06905d2426fb2e1142ed138e79c9e64336ba933e39d3c77ea2e21044cf78",
+      "shape": "Roll Cage: the clang when it earns its keep"
+    },
+    "deal.wav": {
+      "ms": 420,
+      "peak": 0.469,
+      "sha256": "d3575dcc0480c70832698ae43c7f98bf35e91d266fea3c795da8b0840b76c2a1",
+      "shape": "The hand: three cards dealt"
+    },
+    "hit.wav": {
+      "ms": 320,
+      "peak": 0.005,
+      "sha256": "0f396fc6946051e96da5ea7880bb3642d926b9ad91271bc400cb44e4b5d6a673",
+      "shape": "Being hit: the crunch under the engine-hit banner"
+    },
+    "hubcap.wav": {
+      "ms": 871,
+      "peak": 0.002,
+      "sha256": "f5749b39d8a706baf10599a42bbdd438f09c0d79cec4ab58640242a5de98ef70",
+      "shape": "Pothole: hubcap ring"
+    },
+    "nitro.wav": {
+      "ms": 355,
+      "peak": 0.176,
+      "sha256": "55fcf8fb1fd4235fdd3753ffada285d800f5b0bedd0dfd8dbf19894031bb66c3",
+      "shape": "Nitro: short whoosh, four rising ticks"
+    },
+    "oilslick.wav": {
+      "ms": 160,
+      "peak": 0.024,
+      "sha256": "b432aff0b3629134c37ed9a2cd7ddcee65f67a032e1016ede991592eae786812",
+      "shape": "Oil Slick: splat"
+    },
+    "pileup.wav": {
+      "ms": 1920,
+      "peak": 0.16,
+      "sha256": "ab3ac05769e42ca8d63a14ce15fe7f207bbf6ff73b9dad230a01bd8c244808ba",
+      "shape": "Pile-Up: siren blip, crash with debris, a long hiss"
+    },
+    "pothole.wav": {
+      "ms": 493,
+      "peak": 0.013,
+      "sha256": "b0de6124926087f4dd6e1f1807d1c5b3dd4d9ae614e98ec3597b6a7be7329a7b",
+      "shape": "Pothole: thud, rattle"
+    },
+    "rollcage.wav": {
+      "ms": 420,
+      "peak": 0.21,
+      "sha256": "33a63b701ed0b7b7418dfa144246e50293eeaf18a2e3bed411ec598000bac35e",
+      "shape": "Roll Cage: four metallic clicks"
+    },
+    "slam.wav": {
+      "ms": 110,
+      "peak": 0.021,
+      "sha256": "c048c440669a2c0bb3d798a927faf2aab712a4d9a002cec2e6e1a875221a37ba",
+      "shape": "The hand: the chosen card slams down"
+    },
+    "squeal.wav": {
+      "ms": 424,
+      "peak": 0.173,
+      "sha256": "f97bcaa8adf97d2d7fd8b9011d2a77785df257903092ba9aede7fb553a8c1538",
+      "shape": "Oil Slick: one of three squeals staggered by 120"
+    },
+    "towhook.wav": {
+      "ms": 1160,
+      "peak": 0.345,
+      "sha256": "f9f177b5794bf8bd736e49d1d4d95de187b2f841ff137e38e0445a8edc217714",
+      "shape": "Tow Hook: winch, whip-crack, the rival's engine dopplering past"
+    },
+    "turbo.wav": {
+      "ms": 1240,
+      "peak": 0.206,
+      "sha256": "65203a12251ae1cceda431fc185794a4d1f653ee5b4a52e3e493079ffcc3e8a7",
+      "shape": "Turbo: spool up, bang, sustained rush"
+    },
+    "wrench-clang.wav": {
+      "ms": 460,
+      "peak": 0.036,
+      "sha256": "698f89ee49e87c4a79e881f02b9874d1a78182c466d246cd604090a831577a17",
+      "shape": "Wrench: clang on impact"
+    },
+    "wrench-flight.wav": {
+      "ms": 500,
+      "peak": 0.139,
+      "sha256": "3c75f2ea36cab87d0991a157ad48ffa640048e9c1e4ab6999928b7a89adb802c",
+      "shape": "Wrench: whirr in flight"
+    }
+  },
+  "rate": 22050
+}

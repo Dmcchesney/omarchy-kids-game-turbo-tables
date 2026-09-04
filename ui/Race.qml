@@ -106,6 +106,19 @@ FocusScope {
   }
   readonly property int elapsedMs: state ? Math.max(0, nowMs - state.startedAtMs) : 0
   readonly property bool stalled: (state && human) ? Engine.isStalled(human, nowMs) : false
+  // PIECE F. How far through the stall the field is, 0 at the lock and 1 when
+  // it opens, for the bolts that spin off over it. The LENGTH is the engine's,
+  // taken off the `hit` event that caused the lock, and the deadline is the
+  // engine's `stalledUntilMs`; nothing here counts. With no length recorded --
+  // a screen opened straight into a stall, which a harness can do -- it falls
+  // back to the longest stall in the rules so the bolts still run out.
+  property real lastStallMs: 0
+  readonly property real stallProgress: {
+    if (!race.stalled || !race.human)
+      return 0
+    var span = race.lastStallMs > 0 ? race.lastStallMs : 3000
+    return Math.max(0, Math.min(1, 1 - (race.human.stalledUntilMs - race.nowMs) / span))
+  }
 
   // The hand the child is holding, and the rivals a targeted card may be aimed
   // at. Both are handed to `ui/Picker.qml`, and the rival list is the caller's
@@ -320,34 +333,78 @@ FocusScope {
         if (e.racerId === me)
           reveal.show(Engine.factLabel(e.fact) + " = " + e.answer, 1200, Theme.teal)
         break
+      // ------------------------------------------------------------ PIECE F
+      //
+      // The five events the design's "Power-up feel" section is written
+      // against. This screen is the only thing that translates them: it says
+      // WHICH card landed on WHICH kart and hands that to `ui/TrackView.qml`,
+      // which draws it. No rule is re-derived here and none is invented -- the
+      // card, the racers, the delta and the stall all come off the event.
+      //
+      // ROUND 1 -- THE WORLD REACTION MOVED TO THE IMPACT. What stood here
+      // called `track.throwForward` on the frame the card was played, so a
+      // Turbo's road-throw happened 250 ms BEFORE the telegraph the design
+      // asks for had finished, which is to say the game reacted before it
+      // wound up. The cue now owns the schedule; this line only starts it.
       case "cardUsed":
         if (e.racerId === me) {
           picker.reset()
           var label = Engine.CARDS[e.card].label.toUpperCase()
-          say(e.targetId === "" ? label : label + " ▸ " + nameOf(e.targetId), Theme.amber)
-          if (e.card === "turbo" || e.card === "nitro")
-            track.throwForward(e.card === "turbo" ? 1.0 : 0.55)
+          say(e.targetId === "" ? label : label + " ▸ " + nameOf(e.targetId),
+              Theme.amber, e.card === "pileUp")
+          track.fxCardUsed(e.card, e.racerId, e.targetId)
         }
         break
       case "handDealt":
-        if (e.racerId === me)
+        if (e.racerId === me) {
           picker.reset()
+          // "Reaching twelve: the charge bar flashes, the twelve segments burst
+          // into three cards that slide up from the bottom right ... and
+          // POWER-UP READY reads once."
+          picker.deal()
+          charge.burstNow()
+          Sfx.play("deal")
+          say("POWER-UP READY", Theme.amberGlow)
+        }
         break
       case "hit":
         if (e.racerId === me) {
           if (e.questionDelta > 0) {
-            track.pullBack(Math.min(1, 0.35 + e.questionDelta / 18))
             say(Engine.CARDS[e.card].label.toUpperCase() + " ◂ " + nameOf(e.fromId), Theme.urgent)
+            // The pull-back, the shake, the edge frame and the hood smoke are
+            // all inside this one call now, so being hit reads as one event
+            // rather than as a camera move with a caption.
+            race.lastStallMs = e.stallMs
+            track.fxHitMe(e.card, e.fromId, e.questionDelta, e.stallMs)
           }
+        } else if (e.fromId === me) {
+          // The child's own attack arriving on a rival. It is queued behind the
+          // telegraph by the cue; see `fxLandedOn`.
+          track.fxLandedOn(e.racerId, e.card, e.questionDelta)
         }
         break
       case "blocked":
-        if (e.racerId === me)
+        if (e.racerId === me) {
           say("ROLL CAGE HELD", Theme.teal)
+          track.fxBlockedMe(e.card, e.fromId)
+        } else if (e.fromId === me) {
+          // "the callout reads ROLL CAGE HELD on their side"
+          say("ROLL CAGE HELD  ·  " + nameOf(e.racerId), Theme.teal)
+          track.fxBlockedOn(e.racerId, e.card)
+        }
         break
       case "swap":
-        if (e.racerId === me || e.withId === me)
-          say("TOW HOOK ▸ " + nameOf(e.racerId === me ? e.withId : e.racerId), Theme.amber)
+        if (e.racerId === me || e.withId === me) {
+          // The child's OWN Tow Hook has already been announced by the
+          // `cardUsed` branch above -- both events arrive in the same step --
+          // and printing it twice put two identical callouts on the screen for
+          // the same event, which is the sort of duplication the deleted
+          // standings ladder was removed for. A swap the child did not cause
+          // still says so.
+          if (e.racerId !== me)
+            say("TOW HOOK ◂ " + nameOf(e.racerId), Theme.amber)
+          track.fxSwapped(e.racerId === me ? e.withId : e.racerId, "")
+        }
         break
       case "passed":
         if (e.racerId === me)
@@ -370,6 +427,170 @@ FocusScope {
     }
   }
 
+  // ------------------------------------------------------ PIECE F: INJECTION
+  //
+  // ONE ENTRY POINT, AND WHAT IT IS AND IS NOT.
+  //
+  // `dev/Harness.qml --inject <event>[:<card>]` calls this so a frame strip of
+  // one card can be reproduced in one command, by anybody, without playing a
+  // race until that card happens to be dealt and happens to land.
+  //
+  // WHAT IT IS: the event objects below are built to the shapes in
+  // `src/engine/events.ts` -- every field of `CardUsedEvent`, `HitEvent`,
+  // `BlockedEvent`, `SwapEvent` and `HandDealtEvent` is filled, and the deltas,
+  // the stalls and the schedule are read from `Engine.CARDS` and
+  // `Engine.dealHand` rather than typed. They then go through `handleEvents`,
+  // which is the same funnel every real event goes through, in the order the
+  // engine's own ordering guarantee puts them in (the card, then the effects it
+  // had, in racer order).
+  //
+  // WHAT IT IS NOT: it is not the engine running. `Engine.step` is not called,
+  // the state is not changed, no streak moves and nothing is banked -- so a
+  // strip taken this way is evidence about the VIEW's response to an
+  // engine-shaped event, and it is not evidence that the engine emits that
+  // event. The engine's own event stream is proved by 657 tests under
+  // `tests/engine/`, which is the right place for it.
+  //
+  // It is also why this is here and not in dev/: `handleEvents` is private to
+  // this screen, and a harness reaching into it would be a second copy of the
+  // switch above.
+  function injectEvent(kind, arg) {
+    if (!state)
+      return false
+    var me = state.humanId
+    var card = (arg && Engine.isCard(arg)) ? arg : "wrench"
+    var def = Engine.CARDS[card]
+    // The NEAREST rival still in the fight, not the first one in the list. The
+    // road compresses distance hard past four questions -- the leader of a
+    // Grand Prix is drawn at the vanishing point, twenty pixels wide -- so a
+    // strip aimed at whichever rival happened to be first in the racer array
+    // shows a spark burst on a speck. The picker's own default aim is index 0,
+    // which is a different question (what a child is offered first); this is
+    // the harness choosing a target a camera can see.
+    var victim = ""
+    var mine = race.human ? Engine.effectiveProgress(race.human, state.questionsPerLap) : 0
+    var best = Number.POSITIVE_INFINITY
+    for (var i = 0; i < state.racers.length; i++) {
+      var candidate = state.racers[i]
+      if (candidate.kind === "human" || candidate.finished)
+        continue
+      var away = Math.abs(Engine.effectiveProgress(candidate, state.questionsPerLap) - mine)
+      if (away < best) {
+        best = away
+        victim = candidate.id
+      }
+    }
+    var at = race.nowMs
+
+    if (kind === "cardUsed") {
+      var targeted = def.scope === "targeted"
+      var events = [{
+        "type": "cardUsed", "at": at, "racerId": me,
+        "card": card, "targetId": targeted ? victim : "", "discarded": []
+      }]
+      // The effects the card has, in the order the engine emits them. A self
+      // card has none; an every-rival card has one per rival.
+      if (def.questionDelta !== 0 || card === "towHook") {
+        for (var r = 0; r < state.racers.length; r++) {
+          var racer = state.racers[r]
+          if (racer.kind === "human" || racer.finished)
+            continue
+          if (targeted && racer.id !== victim)
+            continue
+          if (card === "towHook") {
+            events.push({ "type": "swap", "at": at, "racerId": me, "withId": racer.id })
+            break
+          }
+          events.push({
+            "type": "hit", "at": at, "racerId": racer.id, "fromId": me, "card": card,
+            "questionDelta": def.questionDelta,
+            "questionsNeededThisLap": racer.questionsNeededThisLap + def.questionDelta,
+            "stallMs": def.stallMs
+          })
+        }
+      }
+      handleEvents(events)
+      return true
+    }
+
+    if (kind === "hit") {
+      // THE ONE PLACE AN INJECTION TOUCHES THE STATE, AND WHY.
+      //
+      // Half of what the design says being hit looks like is not an animation
+      // at all: "the answer field locks with a mechanical overlay of bolts that
+      // spin off over the stall duration", and "the extra lap lamps you now owe
+      // appear as dark lamps added to the row with a rattle". The lock is
+      // `stalledUntilMs` and the lamps are `questionsNeededThisLap` -- both are
+      // ENGINE FIELDS, and a view-only injection leaves them alone, so a strip
+      // of being hit showed the shake and the edge frame and none of the beat
+      // the child actually looks at.
+      //
+      // So the two fields the engine's own `applyCard` writes on a victim are
+      // written here, on the state the engine just handed back through a real
+      // `Engine.step`. It is exactly what `tests/qml/tst_race_keys.qml`'s
+      // `stall()` helper does and for the same reason, and it is stated rather
+      // than hidden: a `hit` strip is a picture of the view AND of those two
+      // fields, and it is not a demonstration that the engine set them. The
+      // engine's own doing of it is proved by `tests/engine/cards.spec.ts`.
+      var stepped = Engine.step(race.state, { "kind": "tick" }, at)
+      var next = stepped.state
+      for (var v = 0; v < next.racers.length; v++) {
+        if (next.racers[v].id !== next.humanId)
+          continue
+        next.racers[v].stalledUntilMs = next.nowMs + def.stallMs
+        next.racers[v].questionsNeededThisLap += Math.max(1, def.questionDelta)
+      }
+      race.state = next
+      handleEvents([{
+        "type": "hit", "at": at, "racerId": me, "fromId": victim, "card": card,
+        "questionDelta": Math.max(1, def.questionDelta),
+        "questionsNeededThisLap": race.human ? race.human.questionsNeededThisLap : 12,
+        "stallMs": def.stallMs
+      }])
+      return true
+    }
+
+    if (kind === "blocked") {
+      // The child's Wrench shattering on a rival's Roll Cage, which is the
+      // payoff the design says must be loud.
+      handleEvents([
+        { "type": "cardUsed", "at": at, "racerId": me, "card": card,
+          "targetId": victim, "discarded": [] },
+        { "type": "blocked", "at": at, "racerId": victim, "fromId": me,
+          "card": card, "rollCagesLeft": 0 }
+      ])
+      return true
+    }
+
+    if (kind === "swap") {
+      handleEvents([{ "type": "swap", "at": at, "racerId": me, "withId": victim }])
+      return true
+    }
+
+    if (kind === "handDealt") {
+      handleEvents([{
+        "type": "handDealt", "at": at, "racerId": me,
+        "hand": Engine.dealHand(Engine.CARD_SCHEDULE, 0).hand, "cursorAfter": 3
+      }])
+      return true
+    }
+
+    // `chooseCard:<n>` is not an engine event and does not pretend to be one:
+    // it presses the keys. The hand's slam is a keyboard beat, so the only
+    // honest way to shoot it is through the same arbitration a child's press
+    // goes through -- `typeKey` then `submitKey`, exactly as ui/Race.qml's own
+    // handler calls them.
+    if (kind === "chooseCard") {
+      var slot = Math.max(1, Math.min(3, parseInt(arg || "1", 10)))
+      if (race.hand.length < slot)
+        return false
+      picker.choose(slot - 1)
+      race.submitKey()
+      return true
+    }
+    return false
+  }
+
   function signalText(signal) {
     if (signal === "niceRun")
       return "NICE RUN"
@@ -383,17 +604,25 @@ FocusScope {
   // ---------------------------------------------------------- the callouts
   // Design, The view: callouts for 1.6 s. Three slots, used round-robin, so
   // two events in the same step do not overwrite one another.
-  function say(message, tone) {
+  //
+  // PIECE F -- `big` is the third argument and it is used by exactly one card.
+  // Design v4, Pile-Up: "the callout is in the large type reserved for this
+  // card." Reserved means reserved: `say(..., true)` is called from the
+  // `cardUsed` branch for `pileUp` and from nowhere else in the file.
+  function say(message, tone, big) {
     for (var i = 0; i < calloutSlots.count; i++) {
       var slot = calloutSlots.itemAt(i)
       if (slot && !slot.showing) {
+        slot.big = big === true
         slot.say(message, tone)
         return
       }
     }
     var first = calloutSlots.itemAt(0)
-    if (first)
+    if (first) {
+      first.big = big === true
       first.say(message, tone)
+    }
   }
 
   // -------------------------------------------- passes, said when they show
@@ -469,9 +698,49 @@ FocusScope {
   property var smoothProgress: []
   property real smoothSpeed: 0.35
 
+  // PIECE F -- AN EXTERNAL CLOCK, AND WHY THE EVIDENCE NEEDS ONE.
+  //
+  // The frame strips this piece is judged on have to be REPRODUCIBLE: a strip
+  // that differs run to run is an anecdote, not evidence. Everything the effect
+  // layer draws is already a pure function of `TrackView.fxClock` rather than
+  // of a NumberAnimation, but that clock is stepped from a FrameAnimation,
+  // which samples the wall clock -- so two runs step it by different amounts
+  // and land between different beats.
+  //
+  // With `externalClock` set, this screen's two timebases stop and the caller
+  // steps them by hand through `stepClock(ms)`. `dev/Harness.qml --strip` does
+  // exactly that, a fixed number of milliseconds per frame, and grabs a frame
+  // after each step. Nothing else in the game ever sets it, and the property is
+  // never persisted: it is a development seam, in the same spirit as `warmup`.
+  //
+  // It also stops the two things on this screen that animate on wall time and
+  // would otherwise smear a strip: the caret's blink and the callouts' fade.
+  // Both are switched to their reduced-motion behaviour, which is a cut.
+  property bool externalClock: false
+
+  // A step is delivered in SLICES OF AT MOST TWENTY MILLISECONDS, and that is
+  // a correctness rule rather than a smoothing one. `TrackView.advance` clamps
+  // its own delta at 80 ms -- a real frame is never longer than that and a
+  // dropped one must not teleport the road -- so a single `stepClock(160)` used
+  // to advance the world by 80 and the caller had no way to know. A strip at
+  // 90 ms steps was therefore drawing a world 10 ms behind its own label. The
+  // slices are 20 ms, which is about a frame, so the world integrates exactly
+  // as it does in play and the label on a strip frame is the truth.
+  function stepClock(dtMs) {
+    if (!race.externalClock || !state)
+      return
+    var left = Math.max(0, dtMs)
+    while (left > 0) {
+      var slice = Math.min(20, left)
+      race.clockBase += slice
+      race.frame(slice)
+      left -= slice
+    }
+  }
+
   FrameAnimation {
     id: frames
-    running: race.visible
+    running: race.visible && !race.externalClock
     onTriggered: race.frame(frameTime * 1000)
   }
 
@@ -479,6 +748,26 @@ FocusScope {
     if (!state)
       return
     race.nowMs = clockNow()
+
+    // PIECE F -- THE ENGINE, NOT A DURATION, SAYS WHEN AN EFFECT ENDS.
+    //
+    // Design v4: "Aftermath lasts until the effect ends, which the rules define
+    // as the end of the victim's current lap." The engine already publishes
+    // that, per racer, as `questionsNeededThisLap` against the clean lap, so
+    // the smoke on a hood is leased from it every frame rather than counted
+    // down here. A racer who clears the extra questions stops smoking on the
+    // frame they clear them; nothing in the view has to be told.
+    var clean = race.state.questionsPerLap
+    for (var a = 0; a < race.state.racers.length; a++) {
+      var racer = race.state.racers[a]
+      var afflicted = !racer.finished && racer.questionsNeededThisLap > clean
+      track.fxAfflicted(a, afflicted)
+      if (!afflicted)
+        track.fxClearLow(a)
+    }
+    // ... and the same for the Roll Cage outline around the child's own car:
+    // it is up exactly while the engine says a cage is held.
+    track.fxSetCages(race.human ? race.human.rollCages : 0)
 
     var lerp = race.reducedMotion ? 1 : Math.min(1, dtMs / 190)
     var values = []
@@ -522,7 +811,10 @@ FocusScope {
     id: pulse
     interval: 100
     repeat: true
-    running: race.visible && race.state !== null
+    // PIECE F. Under an external clock the caller owns both timebases; a strip
+    // is a picture of the effect layer, and an engine tick landing between two
+    // grabs would move the karts on a schedule the caller did not ask for.
+    running: race.visible && race.state !== null && !race.externalClock
     onTriggered: {
       race.nowMs = race.clockNow()
       apply(Engine.step(race.state, { "kind": "tick" }, race.nowMs))
@@ -1208,11 +1500,26 @@ FocusScope {
         }
 
         LapLamps {
+          id: lamps
           lit: race.human ? race.human.correctInLap : 0
           total: race.human ? Math.max(1, race.human.questionsNeededThisLap) : 12
           cleanTotal: race.state ? race.state.questionsPerLap : 12
           cell: race.px(13)
           gap: race.px(4)
+          // PIECE F. The boost's HUD echo: "the four next lap lamps light in a
+          // chase left to right" (Nitro), "Ten lap lamps chase in 500" (Turbo).
+          // Both numbers and both durations are the effect layer's, off the
+          // same beat table the road is using, so the lamps and the road are
+          // one event.
+          chase: track.lampChase
+          chaseCount: track.lampChaseCount
+          // "the extra lap lamps you now owe appear as dark lamps added to the
+          // row with a rattle, and light as you clear them". The lamps are
+          // already added by `total` -- that is the engine's own
+          // `questionsNeededThisLap` -- so what is added here is the rattle,
+          // driven off the same hit the road's shake is.
+          rattle: track.lampRattle
+          reducedMotion: race.reducedMotion
         }
       }
     }
@@ -1319,10 +1626,15 @@ FocusScope {
         anchors.fill: parent
         anchors.topMargin: race.px(24)
         anchors.margins: race.px(8)
-        reducedMotion: race.reducedMotion
+        reducedMotion: race.reducedMotion || race.externalClock
         sectors: race.totalLaps
         activeSector: race.lapsDone + 1
         dotSize: race.px(20)
+        // PIECE F. Design v4, Pile-Up: "The minimap pulses on the victim." The
+        // index is a racer index, which is what `setRacers` was given, so the
+        // dot that pulses is the dot of the kart that was hit.
+        pulseIndex: track.minimapPulseKart
+        pulse: track.minimapPulse
       }
     }
 
@@ -1458,6 +1770,19 @@ FocusScope {
   // a lap, and it is at zero the rest of the time. `race.factInkRect` is the
   // ink as it is on the screen now, so the ground is the shape of the fact
   // that is actually there.
+  // PIECE F. The fact's INK box as an item, so a rect dump can print it. It
+  // paints nothing at all -- it is `factInkRect` given a geometry a walk of the
+  // tree can read, and `factInkRect` is what the effect layer's guard band and
+  // the arches' yield are both measured against. A number in a report is not
+  // evidence that a box is where the report says; this is the box.
+  Item {
+    objectName: "factInk"
+    x: race.factInkRect.x
+    y: race.factInkRect.y
+    width: race.factInkRect.width
+    height: race.factInkRect.height
+  }
+
   Rectangle {
     id: factGround
     visible: opacity > 0.004
@@ -1476,6 +1801,11 @@ FocusScope {
   // so it is never over a kart.
   Column {
     id: question
+    // Named for the rect dump: the fact and the field are the two boxes the
+    // effect layer's guard band is measured against, and this is the block
+    // that holds them. Its position in `race.children` is also what proves the
+    // fact is painted AFTER the track and therefore over every effect in it.
+    objectName: "factColumn"
     anchors.horizontalCenter: parent.horizontalCenter
     y: race.px(118)
     spacing: race.px(14)
@@ -1509,6 +1839,12 @@ FocusScope {
     // there is no text-entry control anywhere in this game.
     Item {
       id: fieldBox
+      // PIECE F. The two boxes the effect layer's guard band is measured
+      // against, named so `dev/Harness.qml --dump-rects` prints them beside
+      // every effect item's box and the two can be shown not to intersect.
+      // The fact's own box is the INK, not this item, and it is `factInkProbe`
+      // below.
+      objectName: "answerField"
       anchors.horizontalCenter: parent.horizontalCenter
       width: race.px(214)
       height: race.px(98)
@@ -1594,6 +1930,63 @@ FocusScope {
         font.letterSpacing: race.px(2)
       }
 
+      // ------------------------------------------------------------ PIECE F
+      //
+      // "The answer field locks with a mechanical overlay of bolts that spin
+      // off over the stall duration (2 s, 3 s for a Wrench) so the lock reads
+      // as a thing happening, not a bug."
+      //
+      // Four bolts, one per corner of the field, spinning and then flying off
+      // as the stall runs out. The stall's length is the ENGINE's -- it comes
+      // off the `hit` event that caused it, and `stalledUntilMs` is the engine's
+      // own deadline -- so the last bolt leaves on the frame the field comes
+      // back, whatever the card was and whatever the rules say next.
+      //
+      // They are at the CORNERS and outside the digits' box on purpose: the
+      // field is the child's, and a lock drawn over the number they typed would
+      // be the third thing this screen has done that hides what a child is
+      // looking at. Under reduced motion they do not spin or fly; they are four
+      // bolts that go out one at a time, which is the same countdown as a state
+      // change rather than as a movement.
+      Repeater {
+        model: 4
+
+        Item {
+          readonly property real u: race.stallProgress
+          // Each bolt leaves a quarter of the stall after the one before it.
+          readonly property real mine: Math.max(0, Math.min(1, (u - index * 0.22) / 0.34))
+          readonly property real cx: (index % 2 === 0 ? 1 : -1)
+          readonly property real cy: (index < 2 ? 1 : -1)
+          readonly property real d: race.px(13)
+
+          visible: race.stalled && mine < 1
+          width: d
+          height: d
+          x: (index % 2 === 0 ? race.px(7) : fieldBox.width - d - race.px(7))
+             + (race.reducedMotion ? 0 : cx * mine * mine * race.px(90))
+          y: (index < 2 ? race.px(7) : fieldBox.height - d - race.px(7))
+             + (race.reducedMotion ? 0 : -cy * mine * mine * race.px(70))
+          opacity: 1 - mine
+          rotation: race.reducedMotion ? 0 : (u * 900 + index * 40)
+
+          // A hex head: a square with its corners cut by a rotated square over
+          // it, which is as much of a bolt as thirteen pixels can be.
+          Rectangle {
+            anchors.fill: parent
+            radius: 2
+            color: Theme.hazard
+            border.width: 1
+            border.color: Qt.rgba(0, 0, 0, 0.55)
+          }
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 0.42
+            height: race.px(2)
+            color: Qt.rgba(0, 0, 0, 0.65)
+          }
+        }
+      }
+
       // Design, The answer loop 4: a 500 ms sputter, and nothing else. No
       // message, no red mark, no reveal -- the field shakes the way an engine
       // coughs and the streak is gone.
@@ -1618,7 +2011,10 @@ FocusScope {
   Timer {
     interval: 400
     repeat: true
-    running: race.visible
+    // Wall-time, so it stops under an external clock and the caret is drawn in
+    // the same state on every frame of a strip. 1.25 Hz in play, well under the
+    // design's 3 Hz cap.
+    running: race.visible && !race.externalClock
     onTriggered: caret.on = !caret.on
   }
 
@@ -1654,7 +2050,13 @@ FocusScope {
   // ------------------------------------------------------------- callouts
   Column {
     anchors.horizontalCenter: parent.horizontalCenter
+    // PIECE F. The engine-hit band lives on this exact line and is drawn over
+    // the callouts, so `ENGINE HIT · 3s` used to sit on top of `WRENCH ◂ BOLT`
+    // -- the two halves of one event, printed over each other, on the frame a
+    // child most needs to read them. The callouts step down while the band is
+    // up and step back when it goes.
     y: question.y + question.height + race.px(22)
+       + (race.stalled ? race.px(64) : 0)
     spacing: race.px(8)
 
     Repeater {
@@ -1663,10 +2065,14 @@ FocusScope {
 
       Callout {
         anchors.horizontalCenter: parent.horizontalCenter
-        height: race.px(46)
+        // PIECE F. The large type Pile-Up reserves needs a box to sit in; every
+        // other callout is the height it always was.
+        height: race.px(big ? 74 : 46)
         width: implicitWidth
         holdMs: Engine.CALLOUT_MS
-        reducedMotion: race.reducedMotion
+        // The fade is wall-time, so under an external clock it is a cut. See
+        // `externalClock` above.
+        reducedMotion: race.reducedMotion || race.externalClock
       }
     }
   }
@@ -1721,6 +2127,11 @@ FocusScope {
     hand: race.hand
     rivals: race.liveRivals
     entryLength: race.shownEntry.length
+    // PIECE F. The panel's three beats -- the deal, the breath and the slam --
+    // run on the effect clock, not on a timer of their own, so the hand and the
+    // road are the same event and a frame strip catches both.
+    fxNow: track.fxClock
+    reducedMotion: race.reducedMotion
     // The override the picker documents: the digits the card press itself put
     // in the field are not an answer the child is part-way through, so Enter
     // still spends. A DEFERRED digit is the exception, and it is why this reads
@@ -1736,7 +2147,13 @@ FocusScope {
     pendingDigit: race.pending
     dockWidth: race.px(500)
     dockMargin: race.px(30)
-    visible: race.hand.length > 0
+    // PIECE F. The hand outlives itself for the length of the slam: spending a
+    // card empties the hand on the frame the child presses Enter, so a panel
+    // bound to `hand.length > 0` alone took the cards off the screen before the
+    // beat that shows them going. `picker.slamming` is the panel's own answer
+    // to "am I still drawing the hand that just went", and this binding used to
+    // override it -- the Picker's default already had it right.
+    visible: race.hand.length > 0 || picker.slamming
     onCardUsed: function (index, targetId) {
       race.send({ "kind": "useCard", "index": index, "targetId": targetId })
     }
@@ -1755,8 +2172,12 @@ FocusScope {
     value: race.human ? Math.min(race.state.streakThreshold, race.human.streak) : 0
     segments: race.state ? race.state.streakThreshold : Engine.CHARGE_SEGMENTS
     glowFrom: Engine.CHARGE_GLOW_FROM
-    reducedMotion: race.reducedMotion
+    // The caption's 1.25 Hz breath is a wall-clock animation, so it is cut
+    // under an external clock for the same reason the caret's blink is.
+    reducedMotion: race.reducedMotion || race.externalClock
     holdingHand: race.hand.length > 0
+    // PIECE F: "the charge bar flashes, the twelve segments burst".
+    fxNow: track.fxClock
     cellHeight: race.px(24)
     cellGap: race.px(4)
     titleSize: race.fs(14)

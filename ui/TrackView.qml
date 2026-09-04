@@ -1,6 +1,7 @@
 import QtQuick
 import "parts"
 import "parts/CarMeta.js" as CarMeta
+import "parts/CardFx.js" as CardFx
 
 // Looking down the track.
 //
@@ -205,8 +206,15 @@ Item {
   // half of what the design means by "curves swing the horizon": the lateral
   // term moves the road, the gradient moves the skyline. Bounded to +-32 px at
   // 1080p so the far wall never reaches the fact.
-  readonly property real horizon: baseHorizon + pullback * 0.055 + hillAt(travel)
-  readonly property real focal: baseFocal + lurch * 0.16 - pullback * 0.13
+  // PIECE F. Two of the design's per-card beats are camera moves rather than
+  // sprites -- Turbo's "the road stretches (focal length bumps for 400)" and
+  // "the horizon dips" -- so they are terms of the same two expressions the
+  // lurch and the pull-back already are, and they decay with the cue rather
+  // than being assigned anywhere. `fxFocalBump` and `fxHorizonDip` are zero
+  // whenever no card is in its impact beat, and zero always under reduced
+  // motion.
+  readonly property real horizon: baseHorizon + pullback * 0.055 + hillAt(travel) + fxHorizonDip
+  readonly property real focal: baseFocal + lurch * 0.16 - pullback * 0.13 + fxFocalBump
   readonly property real aspect: height > 0 ? width / height : 16 / 9
 
   // ------------------------------------------------------- the projection
@@ -319,8 +327,22 @@ Item {
   // Called once, when the race is built.
   function setKarts(list) {
     kartModel.clear()
+    fxReset()
     for (var i = 0; i < list.length; i++) {
       var k = list[i]
+      if (k.isHuman === true) {
+        // PIECE F. The child's own car, remembered here rather than looked up
+        // every frame: the afterimage trail on a boost draws three more copies
+        // of it, and a Repeater cannot ask a ListModel a question reactively.
+        // Nothing about the hero's car changes during a race.
+        heroIndex = i
+        heroBody = k.body
+        heroNumber = k.number
+        heroPaint = 0
+        for (var q = 0; q < Theme.paints.length; q++)
+          if (Qt.colorEqual(Theme.paints[q], k.paint))
+            heroPaint = q
+      }
       kartModel.append({
         "kartId": k.id,
         "kartName": k.name,
@@ -331,7 +353,33 @@ Item {
         "kartProgress": k.progress,
         "kartGap": 0,
         "isHuman": k.isHuman === true,
-        "isGhost": k.ghost === true
+        "isGhost": k.ghost === true,
+        // PIECE F -- the target state, from design v4's grammar table: "the
+        // victim kart changes: a smoke sprite pinned to its hood, a wobble in
+        // yaw (cycle sprite columns +-1), a bounce in y, a spin (cycle all
+        // eight columns), for as long as the effect lasts".
+        //
+        // Every one of them is a millisecond reading of `fxClock`, not a flag:
+        // "" and 0 mean nothing is happening, and a delegate binding compares
+        // the clock against the number. A ListModel role is typed by the first
+        // value put in it, which is why they are all initialised here and why
+        // `fxKind` is a string rather than an enum.
+        //
+        //   fxKind   "" | "wobble" | "spin" | "bounce" | "jolt"
+        //   fxFrom   the fxClock reading the state began at
+        //   fxUntil  the reading it ends at
+        //   fxSmoke  the reading the hood stops smoking at. The ENGINE keeps
+        //            this alive: Race.qml renews it every frame for as long as
+        //            `questionsNeededThisLap` is above the clean lap, which is
+        //            the design's own definition of when an effect ends.
+        //   fxLow    how many pixels the kart rides low (Pothole's aftermath)
+        //   fxFlash  the reading a tag flash ends at (Pile-Up's field flash)
+        "fxKind": "",
+        "fxFrom": 0,
+        "fxUntil": 0,
+        "fxSmoke": 0,
+        "fxLow": 0,
+        "fxFlash": 0
       })
     }
   }
@@ -451,7 +499,29 @@ Item {
   function advance(dtMs) {
     if (paused)
       return
-    var dt = Math.max(0, Math.min(80, dtMs)) / 1000
+    var raw = Math.max(0, Math.min(80, dtMs))
+
+    // PIECE F -- THE EFFECT CLOCK RUNS EVEN WHEN THE WORLD DOES NOT.
+    //
+    // Two things below hold the world still and neither may hold the effects
+    // still with it:
+    //
+    //   * a hit-stop. Design v4: "the world freezes for 60 to 120 ms at the
+    //     moment of impact ... The FrameAnimation delta is held at zero; input
+    //     is not." A freeze that also froze the spark burst would be a dropped
+    //     frame, not a hit-stop -- the point of the trick is that the impact
+    //     plays while the road holds.
+    //   * reduced motion, under which nothing about the camera moves at all,
+    //     but a flash still has to fade and a `+8` tag still has to appear and
+    //     go. Those are exactly the substitutes the design names.
+    //
+    // So the effect clock is advanced first, unconditionally, and every effect
+    // in this file is a pure function of it. That is also what makes a frame
+    // strip reproducible: `dev/Harness.qml --strip` steps this clock by a fixed
+    // number of milliseconds per frame instead of letting a FrameAnimation
+    // sample the wall clock, and the same strip written twice is the same bytes.
+    fxClock += raw
+    fxAdvance()
 
     if (reducedMotion) {
       // The design's reduced-motion floor: a static perspective plane with
@@ -463,6 +533,19 @@ Item {
       shakeY = 0
       return
     }
+
+    // The hit-stop itself. The road, the karts, the camera and the shake all
+    // hold exactly where they were; `fxClock` above has already moved on, so
+    // the impact that caused the freeze is playing over a still world.
+    if (fxClock < freezeUntil)
+      return
+
+    var dt = raw / 1000
+    // Pile-Up's "then 300 at half speed". One multiplier on the world's own
+    // delta, so everything the camera does slows together and the effects do
+    // not.
+    if (fxClock < slowUntil)
+      dt *= slowScale
 
     var rate = speed * 26 + lurch * 90
     rate *= (1 - Math.min(0.95, pullback * 1.05))
@@ -1006,8 +1089,18 @@ Item {
                                   ? Math.sin(view.travel * 0.62) * (1.2 + view.speed * 2.6)
                                   : 0
 
-      x: view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX
-      y: view.vAt(zed) * view.height + view.shakeY + bob
+      // PIECE F. The target state, read off the model's fx roles. Each is zero
+      // whenever the kart is not in that state and zero always under reduced
+      // motion, so the delegate is exactly what it was when nothing has landed.
+      // `view.kartSheetPixels(zed)` is the scale everything is measured
+      // against, so a jolt on a far kart is a jolt at that kart's size.
+      readonly property real fxSpan: view.kartSheetPixels(zed)
+      readonly property real fxDx: view.fxKartDx(index, fxSpan)
+      readonly property real fxDy: view.fxKartDy(index, fxSpan)
+      readonly property int fxYaw: view.fxKartYaw(index)
+
+      x: view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX + fxDx
+      y: view.vAt(zed) * view.height + view.shakeY + bob + fxDy
       width: 0
       height: 0
       // Depth, with a tie-break, because at the start line all four karts are
@@ -1030,7 +1123,10 @@ Item {
         paint: slot.paintIdx
         number: kartNumber
         camera: "road"
-        yaw: isHuman ? 0 : CarMeta.columnForHeading(view.kartHeadingDeg(slot.zed))
+        // The base column is the road's own tangent (a kart follows the road);
+        // `fxYaw` is the wobble, the jolt's one column and the Pile-Up's full
+        // eight-column turn, added on and wrapped by CarSprite's own modulo.
+        yaw: (isHuman ? 0 : CarMeta.columnForHeading(view.kartHeadingDeg(slot.zed))) + slot.fxYaw
         sheetScale: slot.cellFit.sheetScale
         pixelScale: slot.cellFit.pixelScale
         lampGlow: isHuman ? Math.min(1, view.pullback * 1.4) : 0
@@ -1359,4 +1455,1599 @@ Item {
       }
     }
   }
+
+  // ==========================================================================
+  // PIECE F -- FEEL. The effect layer.
+  // ==========================================================================
+  //
+  // `docs/design.md` v4, "Power-up feel", is the specification for everything
+  // below it. The maintainer played the build, said it was fun, and said the
+  // power-ups had to feel impactful: every card was strong in the rules and
+  // invisible on the screen. This is the screen half of that, and it changes no
+  // rule at all -- every effect here is a VIEW of an event `src/engine/` already
+  // emits (`cardUsed`, `hit`, `blocked`, `swap`, `handDealt`). Nothing in this
+  // block reads a card's delta, decides whether an attack lands, or knows what
+  // a Roll Cage does; it is told, by `ui/Race.qml`, and it draws.
+  //
+  // FIVE TOOLS, from the design's own grammar table, in the mixes it lists per
+  // card: hit-stop, a projectile that travels in z along the road, target state
+  // on the victim's kart, a world flash and shake, and a HUD echo. Their
+  // timings are `ui/parts/CardFx.js`, transcribed from the design once so this
+  // file and `ui/Race.qml` cannot drift from it or from each other.
+  //
+  // NOTHING HERE ANIMATES ITSELF. There is no NumberAnimation, no
+  // SequentialAnimation and no Timer in the whole effect layer. Every drawn
+  // property is a pure function of `fxClock - born` against the beat table,
+  // and `fxClock` is stepped by `advance()`. Three things follow, and the third
+  // is why it is written this way:
+  //
+  //   * a hit-stop can hold the world while the impact plays, because the two
+  //     clocks are different clocks;
+  //   * reduced motion can take the movement out without taking the event out,
+  //     because every substitute is a different function of the same clock;
+  //   * a frame strip is REPRODUCIBLE. `dev/Harness.qml --strip` stops the
+  //     FrameAnimation, steps this clock by a fixed number of milliseconds and
+  //     grabs a frame each time, so the same strip written twice is the same
+  //     bytes -- which is the difference between evidence and an anecdote.
+  //
+  // TWO RULES THAT KEEP IT A KIDS' GAME, and both are enforced here rather than
+  // asserted in a report:
+  //
+  //   * NOTHING EVER COVERS THE FACT. `fxGuardTop` is the one place that is
+  //     decided: no effect item's box may enter the answer field's box or the
+  //     fact's ink box, and anything that would (a tag over a far kart, the
+  //     Pile-Up falling in from the top of the frame) is pushed below them.
+  //     Every effect item carries an `objectName`, so `--dump-rects` prints its
+  //     box beside the fact's and the two can be shown not to intersect.
+  //   * A WRONG ANSWER IS NEVER PUNISHED WITH MOTION. Nothing in this block is
+  //     reachable from a `wrong` or a `reveal` event. The design's second
+  //     pillar is that a mistake costs the streak and nothing else, and the
+  //     500 ms sputter on the field is the whole of what a wrong answer does.
+
+  // ------------------------------------------------------------- the clock
+  // Milliseconds since the view was built. Monotonic, stepped by `advance()`,
+  // never read from the wall clock or the date -- the same rule the race clock
+  // is held to in ui/Race.qml.
+  property real fxClock: 0
+  // The reading at which a hit-stop lets the world go again.
+  property real freezeUntil: 0
+  // ... and the same for Pile-Up's "then 300 at half speed".
+  property real slowUntil: 0
+  property real slowScale: 1.0
+  // Exposed so a test can assert the freeze rather than infer it from a
+  // position that happened not to change.
+  readonly property bool worldFrozen: fxClock < freezeUntil
+  readonly property bool worldSlowed: fxClock < slowUntil
+
+  // Design v4: "hit-stop | the world freezes for 60 to 120 ms at the moment of
+  // impact ... one property". Reduced motion removes it entirely, which is the
+  // design's own substitution rule.
+  function fxHold(ms) {
+    if (reducedMotion || ms <= 0)
+      return
+    freezeUntil = Math.max(freezeUntil, fxClock + ms)
+  }
+  function fxSlowMo(ms, scale) {
+    if (reducedMotion || ms <= 0)
+      return
+    slowUntil = Math.max(slowUntil, fxClock + ms)
+    slowScale = scale
+  }
+
+  // -------------------------------------------------- the fact's guard band
+  //
+  // THE ONE PLACE "NOTHING EVER COVERS THE FACT" IS DECIDED.
+  //
+  // `fieldRect` and `factRect` are handed down by ui/Race.qml from the items'
+  // own geometry (they are already used by `crossingOver` for the arches). An
+  // effect item that would be drawn over either is pushed down until its top
+  // edge clears them, and only when it is horizontally over them at all: a tag
+  // on a kart out at the left of the frame is nowhere near the fact and is left
+  // where the projection put it.
+  //
+  // `fxGuardPad` is a hand's margin so the two boxes never touch either.
+  readonly property real fxGuardPad: Math.max(8, height * 0.012)
+
+  function fxGuardTop(cx, halfWidth) {
+    var top = 0
+    var boxes = [fieldRect, factRect]
+    for (var i = 0; i < boxes.length; i++) {
+      var b = boxes[i]
+      if (b.width <= 0 || b.height <= 0)
+        continue
+      if (cx + halfWidth <= b.x || cx - halfWidth >= b.x + b.width)
+        continue
+      top = Math.max(top, b.y + b.height + fxGuardPad)
+    }
+    return top
+  }
+
+  // The highest y an effect item of this size may have, given where it is
+  // across the frame. Callers clamp with `Math.max(fxTopFor(...), wantedY)`.
+  function fxTopFor(cx, halfWidth) { return fxGuardTop(cx, halfWidth) }
+
+  // Does this box enter either guarded box at all? Used by the speed lines,
+  // which radiate from the vanishing point and are the one effect that cannot
+  // simply be pushed downward -- a line has two ends and both are decided by
+  // the geometry. A line that would cross the fact is not drawn; there are
+  // sixteen of them and the fan reads the same with two of them missing.
+  function fxBoxCrossesGuard(x, y, w, h) {
+    var boxes = [fieldRect, factRect]
+    for (var i = 0; i < boxes.length; i++) {
+      var b = boxes[i]
+      if (b.width <= 0 || b.height <= 0)
+        continue
+      if (x < b.x + b.width + fxGuardPad && x + w > b.x - fxGuardPad
+          && y < b.y + b.height + fxGuardPad && y + h > b.y - fxGuardPad)
+        return true
+    }
+    return false
+  }
+
+  // ------------------------------------------------------ the karts, by hand
+  // The effect layer addresses karts by model index. These four are the only
+  // way it ever asks where one is, so a kart that moves takes its smoke, its
+  // sparks and its tag with it.
+  property int heroIndex: -1
+  property int heroBody: 0
+  property int heroPaint: 0
+  property int heroNumber: 7
+
+  function fxIndexOfId(id) {
+    for (var i = 0; i < kartModel.count; i++)
+      if (kartModel.get(i).kartId === id)
+        return i
+    return -1
+  }
+  function fxKartZ(i) {
+    if (i < 0 || i >= kartModel.count)
+      return playerZ
+    var k = kartModel.get(i)
+    return k.isHuman ? playerZ : zForDelta(k.kartProgress - humanProgress)
+  }
+  function fxKartX(i) {
+    if (i < 0 || i >= kartModel.count)
+      return width / 2
+    return uAt(laneOf(kartModel.get(i).kartSeat), fxKartZ(i)) * width + shakeX
+  }
+  function fxKartY(i) {
+    if (i < 0 || i >= kartModel.count)
+      return vAt(playerZ) * height + shakeY
+    return vAt(fxKartZ(i)) * height + shakeY
+  }
+  function fxKartSpan(i) { return kartSheetPixels(fxKartZ(i)) }
+  function kartModelSeat(i) {
+    return (i >= 0 && i < kartModel.count) ? kartModel.get(i).kartSeat : 0
+  }
+  // The roof line: where a smoke sprite is pinned and where a tag sits.
+  //
+  // 0.62 OF THE SHEET, NOT ALL OF IT. `kartSpriteH` is the height of the sheet
+  // CELL, and a car does not fill its cell -- the bake leaves headroom above the
+  // roof and a contact shadow below the wheels. Hanging a tag a whole cell above
+  // the contact point put `+5` a hundred and thirty pixels over an empty piece
+  // of sky, which is the first strip this piece took. The fraction is measured
+  // off the road-camera cells: the roof line sits at about 0.62 of the cell
+  // above the contact point at every yaw.
+  readonly property real kartRoofFraction: 0.62
+  function fxKartTop(i) {
+    return fxKartY(i) - kartSpriteH(fxKartZ(i)) * kartRoofFraction
+  }
+
+  // ------------------------------------------------------- the target state
+  //
+  // Design v4's grammar table: "the victim kart changes: a smoke sprite pinned
+  // to its hood, a wobble in yaw (cycle sprite columns +-1), a bounce in y, a
+  // spin (cycle all eight columns), for as long as the effect lasts". Each is a
+  // pure function of the model's fx roles and the clock, so the kart delegate
+  // holds three bindings and no state.
+  function fxMark(index, kind, ms) {
+    if (index < 0 || index >= kartModel.count || reducedMotion)
+      return
+    kartModel.setProperty(index, "fxKind", kind)
+    kartModel.setProperty(index, "fxFrom", fxClock)
+    kartModel.setProperty(index, "fxUntil", fxClock + ms)
+  }
+  // The hood smokes until the effect ends, which the design defines as the end
+  // of the victim's current lap. ui/Race.qml renews this every frame from
+  // `questionsNeededThisLap`, so the engine -- not a duration typed here --
+  // decides when it stops. The `ms` here is only the floor that carries it
+  // through the impact beat and through a harness injection with no engine
+  // behind it.
+  function fxSmokeFor(index, ms) {
+    if (index < 0 || index >= kartModel.count)
+      return
+    kartModel.setProperty(index, "fxSmoke",
+                          Math.max(kartModel.get(index).fxSmoke, fxClock + ms))
+  }
+  function fxRideLow(index, px, ms) {
+    if (index < 0 || index >= kartModel.count || reducedMotion)
+      return
+    kartModel.setProperty(index, "fxLow", px)
+    kartModel.setProperty(index, "fxSmoke",
+                          Math.max(kartModel.get(index).fxSmoke, fxClock + ms))
+  }
+  function fxTagFlash(index, ms) {
+    if (index < 0 || index >= kartModel.count)
+      return
+    kartModel.setProperty(index, "fxFlash", fxClock + ms)
+  }
+
+  // How far a kart is pushed sideways and down by whatever it is in the middle
+  // of. Both are in pixels and both are scaled by the kart's own drawn size, so
+  // a jolt reads the same on a kart at the vanishing point as on one filling
+  // the frame.
+  function fxKartDx(index, span) {
+    // `now` is read FIRST and unconditionally, because a QML binding only
+    // depends on the properties the function actually read while it ran: an
+    // early return above this line would leave the delegate bound to nothing
+    // and frozen at whatever it evaluated to once.
+    var now = fxClock
+    if (reducedMotion || index < 0 || index >= kartModel.count)
+      return 0
+    var k = kartModel.get(index)
+    if (k.fxKind === "" || now >= k.fxUntil)
+      return 0
+    var u = CardFx.phase(now - k.fxFrom, k.fxUntil - k.fxFrom)
+    if (k.fxKind === "jolt")
+      // Design, Wrench: "the kart jolts sideways one column and back". Out and
+      // back once over the beat, which is one half-cycle of the decay.
+      return CardFx.decay(u, 0.5) * span * 0.20
+    if (k.fxKind === "wobble")
+      // Oil Slick: the fishtail. Three lazy swings over the 800 ms.
+      return CardFx.decay(u, 3) * span * 0.09
+    if (k.fxKind === "bounce")
+      return CardFx.decay(u, 1.5) * span * 0.05
+    return 0
+  }
+  function fxKartDy(index, span) {
+    var now = fxClock
+    if (index < 0 || index >= kartModel.count)
+      return 0
+    var k = kartModel.get(index)
+    var low = reducedMotion ? 0 : k.fxLow
+    // The boost squat, which is the child's own kart only: "the kart squats
+    // one pixel" (Nitro) / "two pixels" (Turbo), through the telegraph.
+    if (k.isHuman)
+      low += fxHeroSquat
+    if (reducedMotion || k.fxKind === "" || now >= k.fxUntil)
+      return low
+    var u = CardFx.phase(now - k.fxFrom, k.fxUntil - k.fxFrom)
+    if (k.fxKind === "bounce")
+      // Pothole: "a two-pixel dip ... the kart bounces twice". Down first,
+      // then two decaying bounces up.
+      return low + (u < 0.18
+                    ? CardFx.easeOut(u / 0.18) * span * 0.07
+                    : -Math.abs(CardFx.decay((u - 0.18) / 0.82, 2)) * span * 0.055)
+    if (k.fxKind === "wobble")
+      return low + Math.abs(CardFx.decay(u, 3)) * span * 0.012
+    return low
+  }
+  // The sprite column offset. `CarSprite` wraps this modulo eight itself.
+  function fxKartYaw(index) {
+    var now = fxClock
+    if (reducedMotion || index < 0 || index >= kartModel.count)
+      return 0
+    var k = kartModel.get(index)
+    if (k.fxKind === "" || now >= k.fxUntil)
+      return 0
+    var u = CardFx.phase(now - k.fxFrom, k.fxUntil - k.fxFrom)
+    if (k.fxKind === "spin")
+      // Pile-Up: "the target kart spins a full turn through all eight columns,
+      // stops sideways". Eight columns eased out, settling on column 2 -- a
+      // kart across the road, which is what "stops sideways" is.
+      return Math.round(CardFx.easeOut(u) * 8) + (u >= 1 ? 2 : 0)
+    if (k.fxKind === "jolt")
+      return CardFx.decay(u, 0.5) > 0.35 ? 1 : (CardFx.decay(u, 0.5) < -0.35 ? -1 : 0)
+    if (k.fxKind === "wobble")
+      // "cycle sprite columns +-1", exactly as the grammar table says.
+      return CardFx.decay(u, 3) > 0.33 ? 1 : (CardFx.decay(u, 3) < -0.33 ? -1 : 0)
+    return 0
+  }
+
+  // ------------------------------------------------------------- the models
+  //
+  // Five small ListModels rather than one general one, for the same reason the
+  // karts are a ListModel: a delegate is built once and only the bindings that
+  // read a changed role are re-evaluated. Everything in them is pruned by
+  // `fxAdvance` the frame after it dies, so a whole race allocates a handful of
+  // rows and frees them again.
+  ListModel { id: fxDecalModel }   // things lying on the road
+  ListModel { id: fxFlyerModel }   // things travelling in z
+  ListModel { id: fxPuffModel }    // smoke, dust, exhaust
+  ListModel { id: fxSparkModel }   // spark bursts
+  ListModel { id: fxTagModel }     // +5, +15, TOWED
+
+  // Every spawn takes a life in milliseconds and is dead the moment the clock
+  // passes it. Nothing is ever removed by hand.
+  function fxDecal(kind, atTravel, lane, worldWidth, life, growMs) {
+    fxDecalModel.append({
+      "dKind": kind, "dAt": atTravel, "dLane": lane, "dWorld": worldWidth,
+      "dBorn": fxClock, "dLife": life, "dGrow": growMs, "dFall": 0, "dFrame": 0
+    })
+  }
+  // The Pile-Up: the same road decal, but it falls in from above first.
+  function fxFallingDecal(kind, atTravel, lane, worldWidth, life, fallMs) {
+    fxDecalModel.append({
+      "dKind": kind, "dAt": atTravel, "dLane": lane, "dWorld": worldWidth,
+      "dBorn": fxClock, "dLife": life, "dGrow": 0, "dFall": fallMs, "dFrame": 0
+    })
+  }
+  function fxFlyer(kind, fromKart, toKart, dur, spins, worldWidth, frames) {
+    fxFlyerModel.append({
+      "yKind": kind, "yFrom": fromKart, "yTo": toKart, "yBorn": fxClock,
+      "yDur": dur, "ySpins": spins, "yWorld": worldWidth, "yFrames": frames,
+      "yLine": 0, "yArc": 1
+    })
+  }
+  function fxPuff(kart, dx, dy, size, grow, life, tone, rise) {
+    fxPuffModel.append({
+      "pKart": kart, "pDx": dx, "pDy": dy, "pSize": size, "pGrow": grow,
+      "pBorn": fxClock, "pLife": life, "pTone": String(tone), "pRise": rise,
+      "pDelay": 0, "pPeak": 0.62
+    })
+  }
+  function fxPuffLater(kart, dx, dy, size, grow, life, tone, rise, delay, peak) {
+    fxPuffModel.append({
+      "pKart": kart, "pDx": dx, "pDy": dy, "pSize": size, "pGrow": grow,
+      "pBorn": fxClock, "pLife": life, "pTone": String(tone), "pRise": rise,
+      "pDelay": delay, "pPeak": peak === undefined ? 0.62 : peak
+    })
+  }
+  function fxSparks(kart, count, reach, life, tone, delay) {
+    fxSparkModel.append({
+      "sKart": kart, "sCount": count, "sReach": reach, "sBorn": fxClock,
+      "sLife": life, "sTone": String(tone), "sSeed": fxSparkModel.count,
+      "sDelay": delay
+    })
+  }
+  // The HUD echo the design asks for on the victim: "the victim's name tag
+  // shows +8 and ticks down". `big` is the large type reserved for Pile-Up.
+  function fxTag(kart, text, tone, life, big, delay) {
+    fxTagModel.append({
+      "gKart": kart, "gText": text, "gTone": String(tone), "gBorn": fxClock,
+      "gLife": life, "gBig": big, "gDelay": delay
+    })
+  }
+
+  // --------------------------------------------------------------- the sound
+  //
+  // Design v4 gives every card a Sound row, and two of them are not one sound
+  // but a scheduled few: Oil Slick's "three squeals staggered by 120", and the
+  // Pothole's "thud, rattle, hubcap ring". So a cue can be asked for with a
+  // delay, and the delay is measured on the EFFECT CLOCK rather than by a
+  // Timer -- the same rule everything else in this block obeys, so a cue fires
+  // on the frame the picture it belongs to is drawn and a strip that steps the
+  // clock steps the sound with it.
+  //
+  // `ui/parts/Sfx.qml` is the cue table and the seam. It plays nothing today:
+  // the multimedia component is piece 6's, at M6', and the reasons are written
+  // out in that file. What is built and tested here is the ROUTING -- which cue
+  // fires on which beat of which event.
+  property var fxSoundQueue: []
+
+  function fxSound(cue, delay) {
+    if (!delay || delay <= 0) {
+      Sfx.play(cue)
+      return
+    }
+    var queue = fxSoundQueue.slice()
+    queue.push({ "cue": cue, "at": fxClock + delay })
+    fxSoundQueue = queue
+  }
+
+  function fxSoundAdvance() {
+    if (fxSoundQueue.length === 0)
+      return
+    var keep = []
+    for (var i = 0; i < fxSoundQueue.length; i++) {
+      if (fxClock >= fxSoundQueue[i].at)
+        Sfx.play(fxSoundQueue[i].cue)
+      else
+        keep.push(fxSoundQueue[i])
+    }
+    fxSoundQueue = keep
+  }
+
+  // A new race is a new screen: nothing from the last one may still be in the
+  // air. Called by `setKarts`, which is the one thing a new race does here.
+  function fxReset() {
+    fxDecalModel.clear()
+    fxFlyerModel.clear()
+    fxPuffModel.clear()
+    fxSparkModel.clear()
+    fxTagModel.clear()
+    cueCard = ""
+    cueImpacted = false
+    cuePending = []
+    hitCard = ""
+    freezeUntil = 0
+    slowUntil = 0
+    flashBorn = -1e9
+    boostBorn = -1e9
+    bloomBorn = -1e9
+    stretchBorn = -1e9
+    cageBorn = -1e9
+    cageCracked = 0
+    cageCount = 0
+    towBorn = -1e9
+    towKart = -1
+    lampChaseBorn = -1e9
+    minimapPulseBorn = -1e9
+    minimapPulseKart = -1
+    heroIndex = -1
+    fxSoundQueue = []
+  }
+
+  function fxPruneModel(model, bornRole, lifeRole) {
+    for (var i = model.count - 1; i >= 0; i--) {
+      var row = model.get(i)
+      if (fxClock - row[bornRole] > row[lifeRole])
+        model.remove(i)
+    }
+  }
+
+  // ------------------------------------------------------------- the cue
+  //
+  // ONE CARD AT A TIME, AND THAT IS A PROPERTY OF THE GAME. Using a card spends
+  // the whole hand, so the child cannot have two in flight; a rival's card
+  // reaches this screen only as the `hit` it causes, which is the separate cue
+  // below. Two cues is therefore the whole state machine.
+  property string cueCard: ""
+  property real cueBorn: 0
+  property int cueActor: -1
+  property bool cueImpacted: false
+  // The victims the engine reported for this card, queued by `fxLandedOn`
+  // until the telegraph has run. `cardUsed` and its `hit` events arrive in the
+  // same step (see the ordering guarantee in src/engine/events.ts), so without
+  // this the victim would react 500 ms before the wrench reached them.
+  property var cuePending: []
+  readonly property var cueBeats: (cueCard !== "" && CardFx.BEATS[cueCard])
+                                  ? CardFx.BEATS[cueCard] : null
+  readonly property real cueT: fxClock - cueBorn
+  readonly property bool cueTelegraphing: cueBeats !== null && !cueImpacted
+  // The first victim, for the things that only ever have one (the wrench's
+  // flight, the pothole's decal, the pile that falls).
+  readonly property int cueTarget: cuePending.length > 0 ? cuePending[0].kart : -1
+  property int cueAimed: -1
+
+  // Being hit, which has no telegraph the child could have seen coming.
+  property string hitCard: ""
+  property real hitBorn: 0
+  property int hitFrom: -1
+  readonly property real hitT: fxClock - hitBorn
+  // 0..1, the red-amber frame at the edges of the screen.
+  readonly property real hitEdge: (hitCard === "" || hitT > CardFx.HIT.edgeMs)
+                                  ? 0
+                                  : CardFx.bump(CardFx.phase(hitT, CardFx.HIT.edgeMs))
+
+  // -------------------------------------------------- what ui/Race.qml calls
+  //
+  // Five entry points, one per engine event the design's section names. None of
+  // them decides anything: the card, the racers and the delta are all read off
+  // the event.
+
+  // `cardUsed`, the child's own. Starts the telegraph; the impact follows it by
+  // the card's own beat.
+  function fxCardUsed(card, actorId, targetId) {
+    if (!CardFx.BEATS[card])
+      return
+    cueCard = card
+    cueBorn = fxClock
+    cueActor = fxIndexOfId(actorId)
+    cueAimed = targetId && targetId.length > 0 ? fxIndexOfId(targetId) : -1
+    cueImpacted = false
+    cuePending = []
+    fxTelegraph()
+  }
+
+  // `hit`, where the child is the attacker. Queued behind the telegraph.
+  function fxLandedOn(victimId, card, delta) {
+    var kart = fxIndexOfId(victimId)
+    if (kart < 0)
+      return
+    var entry = { "kart": kart, "card": card, "delta": delta }
+    if (cueCard === card && !cueImpacted) {
+      var next = cuePending.slice()
+      next.push(entry)
+      cuePending = next
+      return
+    }
+    fxLand(entry, 0)
+  }
+
+  // `blocked`, where the child is the attacker. Design, Wrench: "the wrench
+  // shatters against the target's Roll Cage with a white flash and a ring, the
+  // cage outline cracks and vanishes".
+  function fxBlockedOn(victimId, card) {
+    var kart = fxIndexOfId(victimId)
+    if (kart < 0)
+      return
+    var entry = { "kart": kart, "card": card, "delta": 0, "blocked": true }
+    if (cueCard === card && !cueImpacted) {
+      var next = cuePending.slice()
+      next.push(entry)
+      cuePending = next
+      return
+    }
+    fxLand(entry, 0)
+  }
+
+  // `hit`, where the child is the victim. Design, "Being hit, from the child's
+  // seat": hit-stop 80, a red-amber frame at the edges, a 200 ms shake with
+  // decay, then the horizon pull-back with the attacker sweeping past.
+  function fxHitMe(card, fromId, delta, stallMs) {
+    hitCard = card
+    hitBorn = fxClock
+    hitFrom = fxIndexOfId(fromId)
+    fxHold(CardFx.HIT.hitStop)
+    fxSound("hit", 0)
+    pullBack(Math.min(1, 0.35 + Math.max(0, delta) / 18))
+    shake = reducedMotion ? 0 : Math.min(1, 0.85)
+    fxWorldFlash(CardFx.HIT.edgeHot, 0.30, 220)
+    if (heroIndex >= 0) {
+      // "Your own hood smokes until the effect ends." The floor is the stall
+      // the engine reported; Race.qml renews it from the lap requirement.
+      fxSmokeFor(heroIndex, Math.max(1400, stallMs))
+      if (!reducedMotion)
+        fxMark(heroIndex, "bounce", 420)
+    }
+  }
+
+  function fxBlockedMe(card, fromId) {
+    // The child's own cage taking the hit. The white flash and the ring, and
+    // the cage cracks and goes.
+    fxWorldFlash("#ffffff", 0.42, 160)
+    fxSound("block", 0)
+    fxHold(60)
+    cageCracked = fxClock
+    if (heroIndex >= 0)
+      fxSparks(heroIndex, 12, fxKartSpan(heroIndex) * 0.5, 420, "#f2e6c4", 0)
+  }
+
+  // `swap`. Design, Tow Hook: "the line goes taut and the two karts zip past
+  // each other ... the camera whips to follow ... the rival's tag reads TOWED
+  // for 1.6 s". The karts themselves move because the ENGINE swapped their
+  // progress; what is added here is the whip, the blur and the tag.
+  function fxSwapped(aId, bId) {
+    var other = fxIndexOfId(aId === "" ? bId : aId)
+    if (other < 0)
+      return
+    // A Tow Hook's `swap` arrives in the SAME STEP as its `cardUsed` -- the
+    // engine's ordering guarantee puts the effects of a card straight after the
+    // card -- so running it here would trade the two karts 400 ms before the
+    // hook the child is watching has reached the rival. It waits behind the
+    // telegraph exactly as a `hit` does.
+    var entry = { "kart": other, "card": "towHook", "delta": 0, "swap": true }
+    if (cueCard === "towHook" && !cueImpacted) {
+      var next = cuePending.slice()
+      next.push(entry)
+      cuePending = next
+      return
+    }
+    fxLand(entry, 0)
+  }
+
+  // The latch and the zip past, once the hook has arrived.
+  function fxTowLand(other) {
+    var b = CardFx.BEATS.towHook
+    if (!reducedMotion) {
+      // "the camera whips to follow"
+      shake = Math.min(1, b.whip)
+      lurch = Math.min(1, lurch + 0.35)
+    }
+    towBorn = fxClock
+    towKart = other
+    fxTag(other, "TOWED", Theme.teal, b.towedMs, false, 0)
+  }
+
+  // The engine's own lease on the smoke. ui/Race.qml calls this every frame for
+  // every racer whose lap requirement is still above the clean lap, which is
+  // the design's definition of an effect still running. Nothing else decides
+  // when a hood stops smoking.
+  function fxAfflicted(index, on) {
+    if (!on || index < 0 || index >= kartModel.count)
+      return
+    kartModel.setProperty(index, "fxSmoke", fxClock + 500)
+  }
+  function fxClearLow(index) {
+    if (index >= 0 && index < kartModel.count && kartModel.get(index).fxLow !== 0)
+      kartModel.setProperty(index, "fxLow", 0)
+  }
+
+  // ---------------------------------------------------------- the telegraph
+  //
+  // The beat the eye has to catch BEFORE the impact. It is what turns a card
+  // from a number into a thing that happened.
+  function fxTelegraph() {
+    var b = cueBeats
+    if (!b)
+      return
+    // The sound the telegraph opens with. Every one is the design's own Sound
+    // row for that card, and the cue names are `ui/parts/Sfx.qml`'s table.
+    if (cueCard === "nitro" || cueCard === "turbo" || cueCard === "oilSlick"
+        || cueCard === "pileUp")
+      fxSound(cueCard === "oilSlick" ? "oilslick" : cueCard.toLowerCase(), 0)
+    else if (cueCard === "wrench")
+      fxSound("wrench-flight", 0)
+    else if (cueCard === "towHook")
+      fxSound("towhook", 0)
+
+    if (cueCard === "wrench" && cueAimed >= 0 && !reducedMotion) {
+      // "a wrench sprite leaves your kart spinning, arcs along the road toward
+      // the target with the projection scaling it, trailing two sparks"
+      fxFlyer("wrench", cueActor, cueAimed, b.telegraph, b.spins, 1.4, 4)
+    } else if (cueCard === "towHook" && cueAimed >= 0 && !reducedMotion) {
+      // "a hook and line fire from your kart to the target along the road"
+      fxFlyer("towHook", cueActor, cueAimed, b.telegraph, 0, 0.9, 2)
+    } else if (cueCard === "oilSlick") {
+      // "a black slick sprite drops from the back of your kart and spreads
+      // across the road width behind you (a decal that grows for 400 and stays
+      // on the road as a prop until it scrolls out of view)"
+      fxDecal("oilSlick", travel + playerZ, 0, roadHalf * 2 - 0.2,
+              5200, b.decalGrow)
+    } else if (cueCard === "pothole" && cueAimed >= 0) {
+      // "a pothole decal materialises on the road just ahead of the target"
+      // 2.6 world units, not the prop's nominal 1.8: a pothole is a thing a
+      // kart falls INTO, so it has to be about a lane wide on the road, and at
+      // the depth a rival sits at (z ~ 9) the nominal size drew a 130 x 24 px
+      // dark smudge on dark tarmac that the first strip could not find.
+      fxDecal("pothole", travel + fxKartZ(cueAimed) + 1.6,
+              laneOf(kartModel.count > cueAimed ? kartModel.get(cueAimed).kartSeat : 0),
+              2.6, 6000, b.telegraph)
+    } else if (cueCard === "pileUp" && cueAimed >= 0) {
+      // "a shadow grows on the road ahead of the target, and a stack of tyres,
+      // barrels and crates tumbles in from the top of the frame".
+      //
+      // Under reduced motion the WRECK still arrives -- it is the thing on the
+      // road that says what happened, and the design's substitution rule takes
+      // out the hit-stop, the shake and the spin, not the event. What goes is
+      // the tumble: the fall time is zero, so the pile is simply there.
+      fxFallingDecal("pileUp", travel + fxKartZ(cueAimed) + 0.8,
+                     laneOf(kartModel.count > cueAimed ? kartModel.get(cueAimed).kartSeat : 0),
+                     3.0, 7000, reducedMotion ? 0 : b.telegraph)
+    } else if (cueCard === "nitro" || cueCard === "turbo") {
+      // "the kart squats one pixel, exhaust flares blue-white" / two pixels.
+      // The squat itself is `fxHeroSquat` below; this is the exhaust.
+      if (!reducedMotion && heroIndex >= 0) {
+        var span = fxKartSpan(heroIndex)
+        fxPuff(heroIndex, -span * 0.20, -span * 0.06, span * 0.16, 2.1,
+               b.telegraph + 220, b.exhaust, 0.10)
+        fxPuff(heroIndex, span * 0.20, -span * 0.06, span * 0.16, 2.1,
+               b.telegraph + 220, b.exhaust, 0.10)
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- the impact
+  //
+  // Fired by `fxAdvance` on the frame the clock crosses the telegraph, so the
+  // hit-stop, the flash and the victim's reaction all land together and all
+  // land AFTER the wind-up rather than with it.
+  function fxImpact() {
+    var b = cueBeats
+    if (!b)
+      return
+    fxHold(b.hitStop)
+
+    if (cueCard === "nitro") {
+      // "the road throws forward as now but with speed lines from the corners,
+      // the sun blooms for 300, the four next lap lamps light in a chase"
+      throwForward(0.55)
+      boostBorn = fxClock
+      boostMs = b.impact + b.aftermath
+      boostPower = b.speedLines
+      bloomBorn = fxClock
+      lampChaseBorn = fxClock
+      lampChaseCount = b.lampChase
+      lampChaseMs = b.lampChaseMs
+      fxWorldFlash(b.tone, 0.16, 200)
+    } else if (cueCard === "turbo") {
+      // "hit-stop 90, one white frame, then the road stretches ... heavy speed
+      // lines, the horizon dips ... Ten lap lamps chase in 500."
+      throwForward(1.0)
+      boostBorn = fxClock
+      boostMs = b.impact + b.aftermath
+      boostPower = b.speedLines
+      stretchBorn = fxClock
+      lampChaseBorn = fxClock
+      lampChaseCount = b.lampChase
+      lampChaseMs = b.lampChaseMs
+      fxWorldFlash("#ffffff", reducedMotion ? 0.26 : 0.62, 120)
+    } else if (cueCard === "rollCage") {
+      // "a cage frame draws itself around your kart line by line over 300, then
+      // settles to a soft amber pulse that stays as long as it is active"
+      // Sound: "four metallic clicks".
+      fxSound("rollcage", 0)
+      cageBorn = fxClock
+      cageCracked = 0
+    } else if (cueCard === "towHook") {
+      // The latch. The zip past is the engine's `swap`, which arrives in the
+      // same step and is handled by `fxSwapped`.
+      fxWorldFlash(b.tone, 0.14, 150)
+    }
+
+    // The victims, in the order the engine reported them, staggered by the
+    // card's own number (Oil Slick's "three squeals staggered by 120", so a
+    // child sees three separate hits rather than one).
+    var stagger = b.stagger ? b.stagger : 0
+    for (var i = 0; i < cuePending.length; i++)
+      fxLand(cuePending[i], i * stagger)
+    cuePending = []
+  }
+
+  // What lands on one victim.
+  function fxLand(entry, delay) {
+    var kart = entry.kart
+    var card = entry.card
+    var b = CardFx.BEATS[card]
+    if (!b || kart < 0)
+      return
+    var span = fxKartSpan(kart)
+    var lane = kartModel.count > kart ? laneOf(kartModel.get(kart).kartSeat) : 0
+
+    if (entry.swap === true) {
+      fxTowLand(kart)
+      return
+    }
+
+    if (entry.blocked === true) {
+      // "the wrench shatters against the target's Roll Cage with a white flash
+      // and a ring, the cage outline cracks and vanishes"
+      fxSparks(kart, 16, span * 0.55, 460, "#ffffff", delay)
+      fxSound("block", delay)
+      fxWorldFlash("#ffffff", 0.30, 150)
+      fxTag(kart, "BLOCKED", Theme.teal, 1200, false, delay)
+      return
+    }
+
+    if (card === "oilSlick") {
+      // "each rival kart fishtails ... and a small slick sprite appears under
+      // each of them so the child sees three hits"
+      fxMark(kart, "wobble", b.fishtail)
+      // "three squeals staggered by 120" -- the stagger is the caller's own
+      // `delay`, which is the card's `stagger` times the victim's index.
+      fxSound("squeal", delay)
+      fxDecal("oilSlick", travel + fxKartZ(kart), lane, 2.2, 4200, 180)
+    } else if (card === "wrench") {
+      // "a spark burst on the target kart, the kart jolts sideways one column
+      // and back"
+      fxSparks(kart, b.sparks, span * 0.60, 480, b.tone, delay)
+      fxSound("wrench-clang", delay)
+      // The burst's own light on the panel it struck. A spark is a chip of
+      // metal and reads as a pixel; the flare around it is what says the
+      // wrench ARRIVED, and it is the difference between a hit a child sees
+      // and fourteen dots on a dark road.
+      fxPuffLater(kart, 0, -span * 0.28, span * 0.26, 2.2, 300, "#fffbe8", 0.05, delay, 1.0)
+      fxMark(kart, "jolt", b.joltMs)
+    } else if (card === "pothole") {
+      // "a two-pixel dip, a dust burst, the kart bounces twice, a hubcap sprite
+      // flies off and rolls to the verge"
+      fxMark(kart, "bounce", b.bounceMs)
+      // "thud, rattle, hubcap ring": the first two are one cue, the ring
+      // follows the hubcap off the wheel.
+      fxSound("pothole", delay)
+      fxSound("hubcap", delay + 180)
+      fxPuff(kart, -span * 0.32, 0, span * 0.40, 2.6, 700, "#e7c489", 0.18)
+      fxPuff(kart, span * 0.32, 0, span * 0.36, 2.6, 700, "#e7c489", 0.18)
+      fxPuff(kart, 0, span * 0.04, span * 0.30, 2.4, 520, "#fff0cc", 0.06)
+      if (!reducedMotion)
+        fxFlyer("hubcap", kart, -1, b.hubcapMs, 4, 0.7, 3)
+      // "the kart rides one pixel low with a rattle animation on the wheels
+      // until the effect ends"
+      fxRideLow(kart, Math.max(1, span * 0.012), 2600)
+    } else if (card === "pileUp") {
+      // "the target kart spins a full turn through all eight columns, stops
+      // sideways, and a smoke column rises. Every other racer's tag flashes
+      // once so the field reads the event."
+      fxSlowMo(b.impact, b.slowMo)
+      fxMark(kart, "spin", b.spinMs)
+      for (var s = 0; s < 4; s++)
+        fxPuffLater(kart, 0, -span * (0.10 + s * 0.16), span * (0.36 + s * 0.10),
+                    1.9, 2200, s === 0 ? "#c9b0a8" : "#8d7480", 0.30, s * 130)
+      fxWorldFlash(b.tone, 0.20, 220)
+      for (var o = 0; o < kartModel.count; o++)
+        if (o !== kart)
+          fxTagFlash(o, b.fieldFlash)
+      minimapPulseKart = kart
+      minimapPulseBorn = fxClock
+    }
+
+    // The HUD echo. "the victim's name tag shows +8 and ticks down", and
+    // Pile-Up's "callout is in the large type reserved for this card".
+    if (entry.delta > 0)
+      fxTag(kart, "+" + entry.delta, card === "pileUp" ? Theme.hazard : Theme.amber,
+            card === "pileUp" ? 2200 : 1600, card === "pileUp", delay)
+    // "smoke from the target's hood until the effect ends"
+    if (entry.delta > 0)
+      fxSmokeFor(kart, card === "pileUp" ? 3200 : 2400)
+  }
+
+  // ------------------------------------------------------ the world singles
+  // One flash, one boost, one bloom, one stretch, one cage, one tow, one
+  // minimap pulse. Each is a start reading plus a length; none of them is ever
+  // more than one at a time, because none of the cards can overlap.
+  property real flashBorn: -1e9
+  property real flashMs: 0
+  property real flashPeak: 0
+  property color flashTone: "#ffffff"
+  function fxWorldFlash(tone, peak, ms) {
+    flashTone = tone
+    flashPeak = peak
+    flashMs = ms
+    flashBorn = fxClock
+  }
+  readonly property real flashNow: (fxClock - flashBorn) > flashMs
+                                   ? 0
+                                   : flashPeak * CardFx.bump(CardFx.phase(fxClock - flashBorn, flashMs))
+
+  property real boostBorn: -1e9
+  property real boostMs: 0
+  property real boostPower: 0
+  readonly property real boostNow: (reducedMotion || (fxClock - boostBorn) > boostMs)
+                                   ? 0
+                                   : boostPower * (1 - CardFx.phase(fxClock - boostBorn, boostMs))
+
+  property real bloomBorn: -1e9
+  readonly property real bloomNow: {
+    var b = CardFx.BEATS.nitro
+    var t = fxClock - bloomBorn
+    return (reducedMotion || t > b.bloom) ? 0 : CardFx.bump(CardFx.phase(t, b.bloom))
+  }
+
+  property real stretchBorn: -1e9
+  readonly property real stretchNow: {
+    var b = CardFx.BEATS.turbo
+    var t = fxClock - stretchBorn
+    return (reducedMotion || t > b.impact) ? 0 : (1 - CardFx.phase(t, b.impact))
+  }
+  // Turbo's two camera moves, and the only two terms this piece adds to the
+  // projection.
+  readonly property real fxFocalBump: stretchNow * 0.30
+  readonly property real fxHorizonDip: -stretchNow * CardFx.BEATS.turbo.horizonDip
+
+  // The squat: "the kart squats one pixel" / "two pixels", through the
+  // telegraph of a boost only.
+  readonly property real fxHeroSquat: {
+    if (reducedMotion || !cueTelegraphing)
+      return 0
+    if (cueCard !== "nitro" && cueCard !== "turbo")
+      return 0
+    return CardFx.easeOut(CardFx.phase(cueT, cueBeats.telegraph)) * cueBeats.squatPx
+  }
+  // Turbo's "the screen edges darken slightly" through its telegraph.
+  readonly property real fxEdgeDark: (reducedMotion || cueCard !== "turbo" || !cueTelegraphing)
+                                     ? 0
+                                     : CardFx.easeOut(CardFx.phase(cueT, cueBeats.telegraph))
+                                       * CardFx.BEATS.turbo.edgeDarken
+  // Pile-Up's "the sky flashes amber twice" through its 600 ms telegraph.
+  //
+  // TWICE IN 600 ms IS 3.3 Hz AND THE DESIGN'S CAP IS 3. The accessibility rule
+  // -- "nothing flashes faster than 3 Hz" -- is not negotiable against a beat
+  // description, so the two flashes are spaced `skyGap` = 340 ms peak to peak,
+  // which is 2.94 Hz. The second one runs 20 ms past the telegraph and into the
+  // impact, which is where a wind-up wants to end anyway.
+  readonly property real fxSkyGap: 340
+  readonly property real fxSkyFlash: {
+    if (cueCard !== "pileUp" || cueBorn <= 0)
+      return 0
+    var t = cueT
+    if (t < 0 || t > fxSkyGap + 280)
+      return 0
+    var a = (t < 280) ? CardFx.bump(t / 280) : 0
+    var b = (t >= fxSkyGap && t < fxSkyGap + 280) ? CardFx.bump((t - fxSkyGap) / 280) : 0
+    return Math.max(a, b)
+  }
+
+  // The Roll Cage.
+  property real cageBorn: -1e9
+  property real cageCracked: 0
+  readonly property bool cageActive: cageBorn > -1e8 && cageCracked <= 0
+  readonly property real cageDraw: CardFx.phase(fxClock - cageBorn, CardFx.BEATS.rollCage.drawMs)
+  // "settles to a soft amber pulse". 0.8 Hz, under the 3 Hz cap by a factor of
+  // nearly four, and it is a fade rather than a blink.
+  readonly property real cagePulse: 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(
+      (fxClock - cageBorn) / CardFx.BEATS.rollCage.pulseMs * Math.PI * 2))
+  // The crack: 260 ms of the outline breaking up, then gone.
+  readonly property real cageCrackT: cageCracked > 0 ? (fxClock - cageCracked) : -1
+
+  // The tow.
+  property real towBorn: -1e9
+  property int towKart: -1
+  readonly property real towNow: {
+    var b = CardFx.BEATS.towHook
+    var t = fxClock - towBorn
+    return t < 0 || t > b.impact ? 0 : (1 - CardFx.phase(t, b.impact))
+  }
+
+  // The HUD echoes ui/Race.qml binds to. Held here rather than signalled, so
+  // that a frame drawn at a given clock reading is the same frame however it
+  // was reached -- a signal would have to have been received.
+  property real lampChaseBorn: -1e9
+  property int lampChaseCount: 0
+  property real lampChaseMs: 400
+  readonly property real lampChase: (fxClock - lampChaseBorn) > lampChaseMs
+                                    ? 0
+                                    : 1 - CardFx.phase(fxClock - lampChaseBorn, lampChaseMs)
+  // "the extra lap lamps you now owe appear as dark lamps added to the row with
+  // a rattle". The lamps themselves are the engine's -- `questionsNeededThisLap`
+  // went up -- so what is published here is only the rattle, off the same hit
+  // the road's shake is off, and it is zero under reduced motion because a
+  // rattle is a shake.
+  readonly property real lampRattle: (reducedMotion || hitCard === ""
+                                      || hitT > CardFx.HIT.rattleMs)
+                                     ? 0
+                                     : 1 - CardFx.phase(hitT, CardFx.HIT.rattleMs)
+  property real minimapPulseBorn: -1e9
+  property int minimapPulseKart: -1
+  readonly property real minimapPulse: (fxClock - minimapPulseBorn) > 900
+                                       ? 0
+                                       : 1 - CardFx.phase(fxClock - minimapPulseBorn, 900)
+
+  // --------------------------------------------------------- the fx clock's
+  // one job besides counting: fire the impact when the telegraph is over, and
+  // free what has died.
+  function fxAdvance() {
+    if (cueBeats !== null && !cueImpacted && cueT >= cueBeats.telegraph) {
+      cueImpacted = true
+      fxImpact()
+    }
+    if (cueBeats !== null && cueT > CardFx.drawnSpan(cueCard)) {
+      cueCard = ""
+      cueImpacted = false
+      cuePending = []
+    }
+    if (hitCard !== "" && hitT > 3400)
+      hitCard = ""
+    // A cage that has cracked is gone. Whether another one goes up is the
+    // engine's answer, delivered by `fxSetCages` on the next frame.
+    fxSoundAdvance()
+    if (cageCracked > 0 && fxClock - cageCracked > 300) {
+      cageCracked = 0
+      cageBorn = -1e9
+    }
+    fxPruneModel(fxDecalModel, "dBorn", "dLife")
+    fxPruneModel(fxFlyerModel, "yBorn", "yDur")
+    fxPruneModel(fxPuffModel, "pBorn", "pLife")
+    fxPruneModel(fxSparkModel, "sBorn", "sLife")
+    fxPruneModel(fxTagModel, "gBorn", "gLife")
+    // A decal that has scrolled past the camera is gone whatever its life says.
+    for (var i = fxDecalModel.count - 1; i >= 0; i--)
+      if (fxDecalModel.get(i).dAt - travel < nearDistance - 0.5)
+        fxDecalModel.remove(i)
+  }
+
+  // ==========================================================================
+  // The drawing. Everything below is a delegate over one of the five models or
+  // one of the world singles, and every one of them carries an `objectName` so
+  // `dev/Harness.qml --dump-rects` prints its box beside the fact's.
+  // ==========================================================================
+
+  // ----------------------------------------------------------- road decals
+  // The oil slick, the pothole and the Pile-Up's wreck: kit cells laid flat on
+  // the tarmac at a fixed point on the circuit, so they come toward the camera
+  // and scroll out exactly as a roadside prop does.
+  Repeater {
+    model: fxDecalModel
+
+    Item {
+      id: decal
+      readonly property real zed: dAt - view.travel
+      readonly property real age: view.fxClock - dBorn
+      // "a decal that grows for 400": across the road, from a fifth of its
+      // width to all of it.
+      readonly property real grow: dGrow > 0 ? (0.45 + 0.55 * CardFx.easeOut(CardFx.phase(age, dGrow))) : 1
+      readonly property real px: view.sizeAt(dWorld, zed) * grow
+      // The Pile-Up falls in from above. `fxTopFor` is what keeps it off the
+      // fact: where its own column is over the answer field or the fact's ink,
+      // the fall starts below them instead of at the top of the frame.
+      readonly property real fall: dFall > 0 ? (1 - CardFx.easeIn(CardFx.phase(age, dFall))) : 0
+      readonly property real groundY: view.vAt(zed) * view.height + view.shakeY
+      readonly property real cx: view.uAt(dLane, zed) * view.width + view.shakeX
+      readonly property real halfW: px / 2
+      readonly property real topLimit: view.fxTopFor(cx, halfW)
+      readonly property real fallFrom: topLimit > 0 ? topLimit + sprite.drawnBoundsHeight / 2
+                                                    : -sprite.drawnBoundsHeight
+      readonly property real cy: groundY - (groundY - fallFrom) * fall
+
+      objectName: "fx.decal." + dKind
+      x: cx - halfW
+      y: cy - sprite.drawnBoundsHeight / 2
+      width: px
+      height: Math.max(1, sprite.drawnBoundsHeight)
+      // Under the karts at the same depth: a slick is on the road, not in
+      // front of the car standing on it.
+      z: 1000 - zed - 0.002
+      // Culled a little further out than the karts are: a road decal at the
+      // near limit is drawn thousands of pixels wide, almost all of it off the
+      // frame, and it has already passed under the camera by then.
+      visible: zed > view.nearDistance + 0.55 && zed < view.drawDistance && px > 2
+               && sprite.amount > 0.01
+
+      EffectSprite {
+        id: sprite
+        objectName: "fx.decalArt." + dKind
+        x: decal.width / 2
+        y: decal.height / 2
+        kind: dKind
+        frame: dFrame
+        boundsWidth: decal.px
+        // Fades out over its last second rather than blinking off.
+        amount: Math.min(1, (dLife - decal.age) / 900)
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- the flyers
+  // The wrench, the tow hook and the pothole's hubcap: kit cells travelling in
+  // z along the road with the projection scaling them, which is design v4's
+  // second tool -- "the beat that says I did that".
+  Repeater {
+    model: fxFlyerModel
+
+    Item {
+      id: flyer
+      readonly property real u: CardFx.phase(view.fxClock - yBorn, yDur)
+      readonly property real z0: view.fxKartZ(yFrom) + 0.10
+      // A hubcap has no destination kart: it goes to the verge and stays put in
+      // world terms, so it falls back toward the camera as the road moves.
+      readonly property real z1: yTo >= 0 ? view.fxKartZ(yTo) : (z0 - 0.8)
+      readonly property real zed: z0 + (z1 - z0) * CardFx.easeOut(u)
+      readonly property real lane0: view.laneOf(view.kartModelSeat(yFrom))
+      readonly property real lane1: yTo >= 0 ? view.laneOf(view.kartModelSeat(yTo))
+                                             : (lane0 < 0 ? -(view.roadHalf + 0.7) : view.roadHalf + 0.7)
+      readonly property real lane: lane0 + (lane1 - lane0) * u
+      readonly property real px: view.sizeAt(yWorld, zed)
+      readonly property real cx: view.uAt(lane, zed) * view.width + view.shakeX
+      // "arcs along the road": up and over, peaking in the middle of the
+      // flight, on top of the projection's own vertical travel.
+      readonly property real arc: CardFx.bump(u) * view.sizeAt(1.5, zed) * yArc
+      readonly property real cy: view.vAt(zed) * view.height + view.shakeY
+                                 - view.kartSpriteH(zed) * 0.55 - arc
+
+      objectName: "fx.flyer." + yKind
+      x: cx - px / 2
+      y: Math.max(view.fxTopFor(cx, px / 2), cy - px / 2)
+      width: Math.max(1, px)
+      height: Math.max(1, px)
+      z: 1000 - zed + 0.5
+      visible: zed > view.nearDistance && zed < view.drawDistance && px > 2 && u < 1
+
+      EffectSprite {
+        objectName: "fx.flyerArt." + yKind
+        x: flyer.width / 2
+        y: flyer.height / 2
+        kind: yKind
+        // The frame cycle: the wrench's four frames spun `ySpins` times over
+        // the flight, the hook's two frames latching at the end, the hubcap's
+        // three-frame tumble.
+        frame: yKind === "towHook"
+               ? (flyer.u > 0.86 ? 1 : 0)
+               : Math.floor(flyer.u * Math.max(1, ySpins) * yFrames)
+        boundsWidth: flyer.px
+        spin: yKind === "hubcap" ? flyer.u * 540 : 0
+        amount: 1
+      }
+
+      // "a hook AND LINE fire from your kart to the target along the road".
+      // The line is drawn from the child's kart to wherever the hook has got
+      // to, so it pays out as the hook flies -- and it is drawn in QML because
+      // both its ends move every frame, which is why `docs/prop-kit.md` lists
+      // the tow line among the things that are never baked.
+      Line {
+        visible: yKind === "towHook"
+        x1: view.fxKartX(yFrom) - flyer.x
+        y1: view.fxKartY(yFrom) - view.kartSpriteH(view.playerZ) * 0.35 - flyer.y
+        x2: flyer.width / 2
+        y2: flyer.height / 2
+        thickness: Math.max(1, flyer.px * 0.06)
+        tone: Theme.teal
+        amount: 0.85
+      }
+
+      // "trailing two sparks". Two hot chips a little behind the wrench, on
+      // the line it has actually flown: the direction is taken from where the
+      // wrench is now against where it started, so the trail follows the arc
+      // rather than a guess at it.
+      Repeater {
+        model: yKind === "wrench" ? 2 : 0
+
+        Rectangle {
+          readonly property real bx: view.fxKartX(yFrom) - flyer.cx
+          readonly property real by: view.fxKartY(yFrom) - flyer.cy
+          readonly property real len: Math.max(1, Math.sqrt(bx * bx + by * by))
+          readonly property real back: flyer.px * (0.42 + index * 0.40)
+          width: Math.max(1, Math.round(flyer.px * (0.12 - index * 0.03)))
+          height: width
+          antialiasing: false
+          color: "#ffd489"
+          opacity: 0.80 - index * 0.30
+          x: flyer.width / 2 + bx / len * back - width / 2
+          y: flyer.height / 2 + by / len * back - height / 2
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- the puffs
+  // Smoke from a hood, dust out of a pothole, the exhaust flare on a boost, the
+  // column off a Pile-Up. Drawn in QML on purpose (`docs/prop-kit.md`: a
+  // hard-edged bake of a soft thing reads as gravel).
+  Repeater {
+    model: fxPuffModel
+
+    Item {
+      readonly property real age: view.fxClock - pBorn - pDelay
+      readonly property real u: CardFx.phase(age, Math.max(1, pLife - pDelay))
+      readonly property real span: view.fxKartSpan(pKart)
+      readonly property real cx: view.fxKartX(pKart) + pDx
+      readonly property real cy: view.fxKartY(pKart) + pDy - span * pRise * CardFx.easeOut(u)
+      readonly property real d: pSize * (1 + (pGrow - 1) * CardFx.easeOut(u))
+
+      objectName: "fx.puff"
+      x: cx - d / 2
+      y: Math.max(view.fxTopFor(cx, d / 2), cy - d / 2)
+      width: Math.max(1, d)
+      height: Math.max(1, d)
+      z: 1000 - view.fxKartZ(pKart) + 0.004
+      visible: age >= 0 && u < 1 && d > 1
+
+      Puff {
+        anchors.centerIn: parent
+        tone: pTone
+        size: parent.d
+        // In fast, out slow, so a puff is a puff and not a fade.
+        // In fast, out slow. `pPeak` is the puff's own strength: smoke sits low
+        // so it stays smoke against a sunset, and an impact flare is near
+        // opaque at its core for the two frames it lives.
+        amount: pPeak * Math.min(1, parent.u * 6) * (1 - parent.u)
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- the sparks
+  Repeater {
+    model: fxSparkModel
+
+    Item {
+      readonly property real age: view.fxClock - sBorn - sDelay
+      readonly property real u: CardFx.phase(age, Math.max(1, sLife - sDelay))
+      readonly property real span: view.fxKartSpan(sKart)
+      readonly property real cx: view.fxKartX(sKart)
+      readonly property real cy: view.fxKartTop(sKart) + span * 0.06
+
+      objectName: "fx.sparks"
+      x: cx - sReach
+      y: Math.max(view.fxTopFor(cx, sReach), cy - sReach)
+      width: sReach * 2
+      height: sReach * 2
+      z: 1000 - view.fxKartZ(sKart) + 0.005
+      visible: age >= 0 && u < 1
+
+      Sparks {
+        x: parent.width / 2
+        y: parent.height / 2
+        t: parent.u
+        count: sCount
+        reach: sReach
+        grain: Math.max(3, parent.span * 0.055)
+        tone: sTone
+        seed: sSeed
+      }
+    }
+  }
+
+  // ------------------------------------------------- the smoke on the hood
+  // "a smoke sprite pinned to its hood ... for as long as the effect lasts".
+  // Not a spawned puff but a standing one, because its life is the engine's:
+  // ui/Race.qml renews `fxSmoke` for as long as the victim's lap requirement is
+  // above a clean lap. Three staggered plumes rising off the roof line.
+  Repeater {
+    model: kartModel
+
+    Item {
+      id: hood
+      readonly property bool smoking: view.fxClock < fxSmoke && !isGhost
+      readonly property real zed: !smoking ? view.playerZ
+                                  : (isHuman ? view.playerZ
+                                             : view.zForDelta(kartProgress - view.humanProgress))
+      readonly property real span: smoking ? view.kartSheetPixels(zed) : 1
+      readonly property real cx: smoking ? view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX : 0
+      readonly property real cy: smoking ? view.vAt(zed) * view.height + view.shakeY
+                                           - view.kartSpriteH(zed) * view.kartRoofFraction : 0
+
+      objectName: "fx.hoodSmoke"
+      x: cx - span * 0.30
+      y: Math.max(view.fxTopFor(cx, span * 0.30), cy - span * 0.62)
+      width: span * 0.60
+      height: span * 0.62
+      z: 1000 - zed + 0.006
+      visible: smoking && zed > view.nearDistance && zed < view.drawDistance && span > 8
+
+      Repeater {
+        model: hood.smoking ? 3 : 0
+
+        Puff {
+          // Under reduced motion the plume is still: the same three puffs at a
+          // fixed phase, so the victim is still visibly smoking and nothing
+          // moves. That is the design's "flashes and tag changes" rule applied
+          // to a thing that is not a flash -- the state stays readable.
+          readonly property real ph: view.reducedMotion
+                                     ? (0.25 + index * 0.22)
+                                     : (((view.fxClock / 900) + index * 0.33) % 1)
+          tone: index === 0 ? "#b49aa4" : "#8a7280"
+          size: hood.span * (0.16 + ph * 0.26)
+          amount: 0.62 * (1 - ph) * Math.min(1, ph * 5)
+          x: hood.width / 2 - width / 2 + Math.sin(ph * 3.1 + index) * hood.span * 0.06
+          y: hood.height - hood.height * ph - height / 2
+        }
+      }
+    }
+  }
+
+  // --------------------------------------------------------------- the tags
+  // The HUD echo over the victim: `+5`, `+15`, `TOWED`. It is drawn ABOVE the
+  // kart, which is the one place in this view that can reach the fact -- so it
+  // is the item `fxTopFor` matters most for, and its box is in the dump.
+  Repeater {
+    model: fxTagModel
+
+    Item {
+      id: tagBox
+      readonly property real age: view.fxClock - gBorn - gDelay
+      readonly property real u: CardFx.phase(age, Math.max(1, gLife - gDelay))
+      readonly property real zed: view.fxKartZ(gKart)
+      readonly property real cx: view.fxKartX(gKart)
+      // "pops over it": up and out over the first fifth of its life, then held.
+      readonly property real pop: CardFx.easeOut(Math.min(1, u * 5))
+      readonly property real size: Math.max(gBig ? 30 : 17,
+                                            Math.round(view.kartSpriteH(zed)
+                                                       * (gBig ? 0.46 : 0.26)))
+
+      objectName: "fx.tag"
+      x: cx - width / 2
+      y: Math.max(view.fxTopFor(cx, width / 2),
+                  view.fxKartTop(gKart) + view.kartSpriteH(zed) * 0.14
+                  - pop * view.kartSpriteH(zed) * 0.16 - height)
+      width: tagText.implicitWidth + 14
+      height: tagText.implicitHeight + 8
+      z: 1990
+      visible: age >= 0 && u < 1 && view.fxKartZ(gKart) < view.drawDistance
+      opacity: Math.min(1, (1 - u) * 3.2)
+      scale: 0.7 + pop * 0.3
+
+      Rectangle {
+        anchors.fill: parent
+        radius: 3
+        color: view.plateGround
+        border.width: gBig ? 2 : 1
+        border.color: gTone
+      }
+
+      Text {
+        id: tagText
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: gText
+        color: gTone
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: tagBox.size
+        font.letterSpacing: 1
+      }
+    }
+  }
+
+  // ------------------------------------------------- the field's tag flash
+  // Pile-Up: "Every other racer's tag flashes once so the field reads the
+  // event." One ring around each other racer's plate, on the plate's own
+  // position, so the flash is on the thing it names.
+  Repeater {
+    model: kartModel
+
+    Rectangle {
+      // Every one of these is short-circuited while the ring is down, for the
+      // reason `Puff` gates its rings: four karts x five projections on every
+      // frame of a whole race, to draw nothing.
+      readonly property real flashLeft: fxFlash - view.fxClock
+      readonly property bool live: flashLeft > 0
+      readonly property real zed: !live ? view.playerZ
+                                  : (isHuman ? view.playerZ
+                                             : view.zForDelta(kartProgress - view.humanProgress))
+      readonly property real cx: live ? view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX : 0
+      readonly property real cy: live ? view.vAt(zed) * view.height + view.shakeY : 0
+      readonly property real d: live ? view.kartSheetPixels(zed) * 0.9 : 1
+
+      objectName: "fx.fieldFlash"
+      x: cx - d / 2
+      y: Math.max(view.fxTopFor(cx, d / 2), cy - d)
+      width: d
+      height: d
+      radius: 4
+      color: "transparent"
+      border.width: 2
+      border.color: Theme.hazard
+      opacity: live ? Math.min(1, flashLeft / 400) * 0.85 : 0
+      visible: live && opacity > 0.02 && zed > view.nearDistance && zed < view.drawDistance
+      z: 1980
+    }
+  }
+
+  // -------------------------------------------------------- the afterimages
+  // "an afterimage trail behind the kart fading out" (Nitro, 700 ms) and
+  // "afterimages and a heat shimmer at the exhaust" (Turbo, 1200 ms). Three
+  // copies of the child's own car, further down the road and fainter, which is
+  // where the car WAS -- the camera is behind it, so behind is further away.
+  Repeater {
+    model: view.boostNow > 0.02 && view.heroIndex >= 0 ? 3 : 0
+
+    Item {
+      readonly property real zed: view.playerZ + (index + 1) * 0.42
+      readonly property var fit: view.kartCell(zed)
+
+      objectName: "fx.afterimage"
+      x: view.uAt(view.heroLane, zed) * view.width + view.shakeX
+      y: view.vAt(zed) * view.height + view.shakeY
+      width: 0
+      height: 0
+      z: 1000 - zed - 0.01
+      opacity: view.boostNow * (0.34 - index * 0.09)
+
+      CarSprite {
+        body: view.heroBody
+        paint: view.heroPaint
+        number: view.heroNumber
+        camera: "road"
+        yaw: 0
+        sheetScale: parent.fit.sheetScale
+        pixelScale: parent.fit.pixelScale
+        showNumber: false
+      }
+    }
+  }
+
+  // ------------------------------------------------------- the speed lines
+  // "speed lines from the corners" (Nitro) and "heavy speed lines" (Turbo).
+  // Drawn in QML, from the four corners toward the vanishing point, so they
+  // read as the frame itself being pulled forward rather than as the streaks
+  // that are always there.
+  Item {
+    id: boostLines
+    anchors.fill: parent
+    visible: view.boostNow > 0.02 && !view.reducedMotion
+    readonly property real washAlpha: visible ? view.boostNow * 0.80 : 0
+    z: 2400
+
+    readonly property real vx: view.uAt(0, 6000) * view.width + view.shakeX
+    readonly property real vy: view.horizon * view.height + view.shakeY
+
+    Repeater {
+      model: boostLines.visible ? 16 : 0
+
+      // Each line is wrapped in an item with the segment's own bounding box, so
+      // it is an OBJECT as far as `--dump-rects` and tst_trackview_fx.qml are
+      // concerned: its box is printed beside the fact's, and it is not drawn at
+      // all where the two would meet.
+      Item {
+        id: streak
+        readonly property real ang: (index / 16) * Math.PI * 2 + 0.11
+        readonly property real reach: Math.max(view.width, view.height) * 0.80
+        readonly property real inner: reach * (0.30 - view.boostNow * 0.16)
+        readonly property real ax: boostLines.vx + Math.cos(ang) * inner
+        readonly property real ay: boostLines.vy + Math.sin(ang) * inner * 0.62
+        readonly property real bx: boostLines.vx + Math.cos(ang) * reach
+        readonly property real by: boostLines.vy + Math.sin(ang) * reach * 0.62
+
+        objectName: "fx.speedLine"
+        x: Math.min(ax, bx)
+        y: Math.min(ay, by)
+        width: Math.max(1, Math.abs(bx - ax))
+        height: Math.max(1, Math.abs(by - ay))
+        visible: !view.fxBoxCrossesGuard(x, y, width, height)
+
+        Line {
+          x1: streak.ax - streak.x
+          y1: streak.ay - streak.y
+          x2: streak.bx - streak.x
+          y2: streak.by - streak.y
+          thickness: 2 + view.boostNow * 4
+          tone: Theme.cream
+          amount: view.boostNow * 0.80
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------- the sun bloom
+  // Nitro: "the sun blooms for 300". A soft disc on the sun's own place in the
+  // sky, over the plane rather than inside it, so it is not quantised by the
+  // 480 x 270 layer.
+  Puff {
+    objectName: "fx.sunBloom"
+    visible: view.bloomNow > 0.01
+    tone: Theme.duskSun
+    size: view.height * 0.62
+    amount: view.bloomNow * 0.55
+    readonly property real washAlpha: visible ? amount : 0
+    x: view.sunU * view.width - width / 2
+    y: view.horizon * view.height - height / 2
+    z: 4
+  }
+
+  // ------------------------------------------------------------ the tow line
+  // "a hook and line fire from your kart to the target ... the line goes taut".
+  // Two lines: one during the flight, from the child's kart to the hook, and
+  // one taut one while the karts trade places.
+  Line {
+    objectName: "fx.towLine"
+    readonly property int other: view.towKart
+    visible: view.towNow > 0.01 && other >= 0 && !view.reducedMotion
+    x1: view.fxKartX(view.heroIndex)
+    y1: view.fxKartY(view.heroIndex) - view.kartSpriteH(view.playerZ) * 0.45
+    x2: view.fxKartX(other)
+    y2: view.fxKartY(other) - view.kartSpriteH(view.fxKartZ(other)) * 0.45
+    thickness: 2
+    tone: Theme.teal
+    amount: view.towNow * 0.9
+    z: 1970
+  }
+
+  // --------------------------------------------------------- the Roll Cage
+  // "a cage frame draws itself around your kart line by line over 300, then
+  // settles to a soft amber pulse that stays as long as it is active."
+  //
+  // Eight lines around the child's own car, each starting a little after the
+  // one before it so the cage is built rather than switched on. Drawn in QML
+  // for the reason the kit lists it as not-baked: it is an outline around a
+  // thing whose size changes every frame.
+  Item {
+    id: cage
+    objectName: "fx.rollCage"
+    readonly property real span: view.kartSheetPixels(view.playerZ) * 0.52
+    readonly property real tall: view.kartSpriteH(view.playerZ) * 0.92
+    readonly property real cx: view.uAt(view.heroLane, view.playerZ) * view.width + view.shakeX
+    readonly property real cy: view.vAt(view.playerZ) * view.height + view.shakeY
+    // The crack: the outline breaks up over 260 ms and goes.
+    readonly property real crack: view.cageCrackT < 0 ? 0
+                                  : CardFx.phase(view.cageCrackT, 260)
+    readonly property real amount: view.cageBorn <= -1e8 ? 0
+                                   : (crack > 0 ? Math.max(0, 1 - crack) * (crack < 0.5 ? 1 : 0.4)
+                                                : view.cagePulse)
+
+    // top, bottom, the two sides, the four uprights and the two waist rails,
+    // each [x1, y1, x2, y2, start] in the item's own 0..1 box.
+    readonly property var spec: [[0, 0, 1, 0, 0.00], [0, 1, 1, 1, 0.62],
+                                 [0, 0, 0, 1, 0.24], [1, 0, 1, 1, 0.24],
+                                 [0.22, 0, 0.22, 1, 0.42], [0.78, 0, 0.78, 1, 0.42],
+                                 [0, 0.36, 1, 0.36, 0.80], [0, 0.70, 1, 0.70, 0.86]]
+
+    x: cx - span
+    y: Math.max(view.fxTopFor(cx, span), cy - tall)
+    width: span * 2
+    height: tall
+    z: 1000 - view.playerZ + 0.007
+    visible: amount > 0.02 && view.cageCrackT < 260
+
+    // top, bottom, left, right, and the four uprights, each with its own start
+    // in the 300 ms draw so the frame assembles.
+    Repeater {
+      model: cage.visible ? cage.spec : 0
+
+      Line {
+        readonly property real begin: modelData[4]
+        readonly property real g: view.reducedMotion
+                                  ? 1
+                                  : Math.max(0, Math.min(1, (view.cageDraw - begin) / 0.20))
+        x1: modelData[0] * cage.width
+        y1: modelData[1] * cage.height
+        x2: modelData[2] * cage.width
+        y2: modelData[3] * cage.height
+        thickness: 2
+        tone: Theme.amber
+        grow: cage.crack > 0 ? Math.max(0, 1 - cage.crack * (1 + begin)) : g
+        amount: cage.amount
+      }
+    }
+  }
+
+  // ------------------------------------------------ the world flash and edges
+  // The last of the design's five tools. One rectangle for the flash -- Turbo's
+  // white frame, a hit's red-amber, Pile-Up's amber sky -- and four gradient
+  // bands for the edges: Turbo's telegraph darkening and the "red-amber frame
+  // at the edges" of being hit.
+  //
+  // NEITHER EVER COVERS THE FACT, and neither has to be clamped to do it: they
+  // are inside TrackView, which ui/Race.qml declares BEFORE the fact and the
+  // field, so both are drawn over these however bright they get. The flash's
+  // own peak is 0.78 for one white frame and 0.30 or less for everything else.
+  Rectangle {
+    objectName: "fx.worldFlash"
+    anchors.fill: parent
+    z: 2600
+    visible: opacity > 0.004
+    color: view.flashTone
+    opacity: Math.max(view.flashNow, view.fxSkyFlash * 0.32)
+    // THE ALPHA THE PIXEL ACTUALLY GETS, published for the test.
+    //
+    // Three of the four washes are containers whose CHILDREN carry the paint --
+    // the edge frame's four gradient bands, the sixteen speed lines, the sun
+    // bloom's rings -- so an `item.opacity` read off the container measures 1
+    // and says nothing. `washAlpha` is each wash's own strongest paint, so
+    // `tst_trackview_fx.qml` can bound what the fact has to be read against
+    // rather than bounding a number that was always one.
+    readonly property real washAlpha: opacity
+  }
+
+  Item {
+    id: edgeFrame
+    objectName: "fx.edges"
+    anchors.fill: parent
+    z: 2500
+    // Turbo's telegraph darkening, and the red-amber frame of being hit. The
+    // hit wins where both are up, because it is the one that is telling the
+    // child something happened TO them.
+    readonly property real dark: view.fxEdgeDark
+    readonly property real hot: view.hitEdge
+    readonly property color tone: hot > dark ? CardFx.HIT.edgeTone : "#1a0612"
+    readonly property real amount: Math.max(dark * 0.55, hot * 0.62)
+    readonly property real washAlpha: amount
+    visible: amount > 0.004
+
+    Repeater {
+      model: 4
+
+      Rectangle {
+        readonly property bool vertical: index < 2
+        readonly property bool atEnd: index === 1 || index === 3
+        width: vertical ? Math.round(edgeFrame.width * 0.16) : edgeFrame.width
+        height: vertical ? edgeFrame.height : Math.round(edgeFrame.height * 0.16)
+        x: index === 1 ? edgeFrame.width - width : 0
+        y: index === 3 ? edgeFrame.height - height : 0
+        gradient: Gradient {
+          orientation: vertical ? Gradient.Horizontal : Gradient.Vertical
+          GradientStop {
+            position: 0.0
+            color: atEnd ? "transparent"
+                         : Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
+                                   edgeFrame.tone.b, edgeFrame.amount)
+          }
+          GradientStop {
+            position: 1.0
+            color: atEnd ? Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
+                                   edgeFrame.tone.b, edgeFrame.amount)
+                         : "transparent"
+          }
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------- the cage's count
+  // The HUD carries one shield per held Roll Cage already (ui/Race.qml); this
+  // is the cage on the CAR, and it is up exactly while the engine says the
+  // child holds one. Race.qml calls this every frame off `human.rollCages`, so
+  // a cage that is spent -- by blocking, or by the race ending -- takes its
+  // outline with it without anything here counting.
+  property int cageCount: 0
+  function fxSetCages(n) {
+    if (n > 0 && cageBorn <= -1e8) {
+      cageBorn = fxClock
+      cageCracked = 0
+    }
+    // A grace, and it is not cosmetic. The harness can inject `cardUsed:rollCage`
+    // at a screen whose engine holds no cage, and without this the outline would
+    // be cleared on the very next frame by a count that never moved -- so the
+    // one card whose whole effect IS the outline would have no strip. In play the
+    // engine has already incremented `rollCages` by the time this runs, so the
+    // grace never fires; when a cage is spent, the crack above removes it.
+    if (n <= 0 && cageCracked <= 0 && cageBorn > -1e8
+        && fxClock - cageBorn > CardFx.BEATS.rollCage.drawMs + 1400)
+      cageBorn = -1e9
+    cageCount = n
+  }
+
+  // How many effect items are alive. Exposed for the tests and for the
+  // harness's strip report; nothing in the picture reads it.
+  readonly property int fxLiveCount: fxDecalModel.count + fxFlyerModel.count
+                                     + fxPuffModel.count + fxSparkModel.count
+                                     + fxTagModel.count
 }

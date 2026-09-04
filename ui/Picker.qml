@@ -1,5 +1,6 @@
 import QtQuick
 import "parts"
+import "parts/CardFx.js" as CardFx
 import "../engine/engine.mjs" as Engine
 
 // The powerup hand, and the keys that spend it.
@@ -159,6 +160,62 @@ FocusScope {
     text: picker.deferredHead + "      ESC  BACK"
   }
 
+  // ======================================================== PIECE F: FEEL
+  //
+  // Design v4, "The hand and the charge", in full:
+  //
+  //   "Reaching twelve: the charge bar flashes, the twelve segments burst into
+  //    three cards that slide up from the bottom right with a deal sound, and
+  //    POWER-UP READY reads once. An unused hand breathes gently so the child
+  //    remembers it.
+  //    Choosing: the chosen card enlarges for 150, then slams down and
+  //    dissolves into the telegraph. The other two flip face down and fly off;
+  //    the charge bar shows empty."
+  //
+  // Three beats, and all three are pure functions of `fxNow` -- which is
+  // `TrackView.fxClock`, handed down by ui/Race.qml. This panel starts no timer
+  // and runs no animation, for the same reason nothing in the effect layer
+  // does: a frame strip has to be reproducible, and an animation started on a
+  // key press is not.
+  //
+  // THE HAND OUTLIVES ITSELF FOR 570 ms, ON PURPOSE. Spending a card spends the
+  // whole hand, so by the time the slam should be drawn the engine has already
+  // taken all three cards away and `hand` is empty. `confirm()` therefore keeps
+  // a copy -- the cards, and which one was chosen -- and the panel draws that
+  // copy until the fly-off is over. Without it the design's most-used beat
+  // ("the chosen card enlarges, then slams down") would be a card that vanished
+  // on the frame the child pressed Enter, which is what shipped before.
+  property real fxNow: 0
+
+  property real dealBorn: -1e9
+  readonly property real dealT: picker.fxNow - picker.dealBorn
+  readonly property bool dealing: picker.dealT >= 0 && picker.dealT < CardFx.HAND.dealMs * 1.6
+  function deal() { picker.dealBorn = picker.fxNow }
+
+  property real slamBorn: -1e9
+  property var slamHand: []
+  property int slamChosen: -1
+  readonly property real slamT: picker.fxNow - picker.slamBorn
+  readonly property real slamSpan: CardFx.HAND.enlargeMs + CardFx.HAND.slamMs + CardFx.HAND.flyMs
+  readonly property bool slamming: picker.slamT >= 0 && picker.slamT < picker.slamSpan
+
+  // What the panel actually draws: the live hand, or the hand that is on its
+  // way out.
+  readonly property var shownHand: picker.hand.length > 0
+                                   ? picker.hand
+                                   : (picker.slamming ? picker.slamHand : [])
+
+  // "An unused hand breathes gently so the child remembers it." 0.38 Hz -- an
+  // eighth of the design's 3 Hz cap -- and it is a fade in the border rather
+  // than a blink, so it never reads as an alarm. It stops the moment a card is
+  // chosen, because a chosen card is not an unused hand.
+  readonly property real breathe: (picker.reducedMotion || picker.chosen >= 0
+                                   || picker.hand.length === 0 || picker.slamming)
+                                  ? 0
+                                  : 0.5 + 0.5 * Math.sin(picker.fxNow / CardFx.HAND.breatheMs
+                                                         * Math.PI * 2)
+  property bool reducedMotion: false
+
   // -1 is "no card chosen yet", which is the state a hand sits in for as long
   // as the child likes. The design: "You may hold a hand as long as you like."
   property int chosen: -1
@@ -245,7 +302,7 @@ FocusScope {
   // needs no rival.
   signal cardUsed(int index, string targetId)
 
-  visible: hand.length > 0
+  visible: hand.length > 0 || picker.slamming
 
   // Two invariants the previous version did not keep, and both were reachable
   // in a real Grand Prix.
@@ -351,6 +408,15 @@ FocusScope {
       return false
     var index = picker.chosen
     var target = picker.needsTarget ? picker.targetId : ""
+    // PIECE F. Keep the hand that is about to be taken away, and which card of
+    // it was chosen, so the slam and the fly-off have something to draw. See
+    // the block at the top of this file.
+    picker.slamHand = picker.hand.slice()
+    picker.slamChosen = index
+    picker.slamBorn = picker.fxNow
+    // "the chosen card enlarges for 150, then slams down". The sound is the
+    // slam's, not the choice's: choosing costs nothing and says nothing.
+    Sfx.play("slam")
     // No `letGoShowing = false` here, deliberately. Spending a card empties the
     // hand, and `onHandChanged` below drops the line for that reason -- a
     // second clear on this path would be a line no test could ever falsify.
@@ -454,16 +520,92 @@ FocusScope {
       }
 
       Repeater {
-        model: picker.hand
+        model: picker.shownHand
 
-        HandCard {
+        // PIECE F. The three beats of the hand, each one a function of the
+        // panel's clock and of nothing else.
+        //
+        //   deal    the card slides up from the bottom right and fades in,
+        //           staggered a sixth of the deal apart so three cards arrive
+        //           as three cards
+        //   breathe an unused hand's gentle fade
+        //   slam    the chosen card enlarges for 150 then slams down; the other
+        //           two flip face down (a scale through zero in x, which is
+        //           what a card turning over is) and fly off to the right
+        Item {
+          id: cardSlot
+          readonly property int slot: index
+          readonly property bool isChosen: picker.slamming
+                                           ? picker.slamChosen === slot
+                                           : picker.chosen === slot
+          readonly property real dealU: picker.dealing
+                                        ? Math.max(0, Math.min(1,
+                                            (picker.dealT - slot * CardFx.HAND.dealMs / 6)
+                                            / CardFx.HAND.dealMs))
+                                        : 1
+          readonly property real slamU: picker.slamming
+                                        ? picker.slamT / picker.slamSpan : -1
+          readonly property real enlargeEnd: CardFx.HAND.enlargeMs / picker.slamSpan
+          readonly property real slamEnd: (CardFx.HAND.enlargeMs + CardFx.HAND.slamMs)
+                                          / picker.slamSpan
+
           width: body.width
-          cardId: String(modelData)
-          index: model.index + 1
-          selected: picker.chosen === model.index
-          scaleUnit: picker.s
-          labelSize: picker.fsFloor(22, 18)
-          detailSize: picker.fsFloor(14, 13)
+          height: card.implicitHeight
+
+          HandCard {
+            id: card
+            width: body.width
+            cardId: String(modelData)
+            index: cardSlot.slot + 1
+            selected: cardSlot.isChosen && !picker.slamming
+            scaleUnit: picker.s
+            labelSize: picker.fsFloor(22, 18)
+            detailSize: picker.fsFloor(14, 13)
+            breathe: picker.breathe
+
+            // The deal: up from the bottom right.
+            y: picker.reducedMotion ? 0
+               : (1 - CardFx.easeOut(cardSlot.dealU)) * picker.dockWidth * 0.30
+            opacity: Math.min(1, cardSlot.dealU * 2.4)
+                     * (cardSlot.slamU < 0 ? 1
+                        : (cardSlot.isChosen
+                           ? (cardSlot.slamU < cardSlot.slamEnd ? 1
+                              : 1 - (cardSlot.slamU - cardSlot.slamEnd)
+                                    / Math.max(0.001, 1 - cardSlot.slamEnd))
+                           : Math.max(0, 1 - cardSlot.slamU / Math.max(0.001, cardSlot.slamEnd + 0.35))))
+            transformOrigin: Item.Center
+            // The chosen card: enlarge, then slam.
+            scale: (picker.reducedMotion || cardSlot.slamU < 0) ? 1
+                   : (cardSlot.isChosen
+                      ? (cardSlot.slamU < cardSlot.enlargeEnd
+                         ? 1 + 0.16 * CardFx.easeOut(cardSlot.slamU / cardSlot.enlargeEnd)
+                         : (cardSlot.slamU < cardSlot.slamEnd
+                            ? 1.16 - 0.30 * CardFx.easeIn((cardSlot.slamU - cardSlot.enlargeEnd)
+                                                          / Math.max(0.001, cardSlot.slamEnd - cardSlot.enlargeEnd))
+                            : 0.86))
+                      : 1)
+            // The other two: flip face down, then fly off to the right.
+            transform: [
+              Scale {
+                origin.x: card.width / 2
+                origin.y: card.height / 2
+                // A flip is a scale through zero in x. It is the whole of what
+                // "flip face down" can be without a second face to draw, and it
+                // reads as a turn rather than as a shrink because the height
+                // does not change.
+                xScale: (picker.reducedMotion || cardSlot.slamU < 0 || cardSlot.isChosen)
+                        ? 1
+                        : Math.max(0.02, Math.cos(Math.min(1, cardSlot.slamU / Math.max(0.001, cardSlot.slamEnd))
+                                                  * Math.PI * 0.5))
+              },
+              Translate {
+                x: (picker.reducedMotion || cardSlot.slamU < cardSlot.slamEnd || cardSlot.isChosen)
+                   ? 0
+                   : CardFx.easeIn((cardSlot.slamU - cardSlot.slamEnd)
+                                   / Math.max(0.001, 1 - cardSlot.slamEnd)) * picker.dockWidth * 1.2
+              }
+            ]
+          }
         }
       }
 

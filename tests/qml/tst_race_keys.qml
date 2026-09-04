@@ -758,7 +758,21 @@ Item {
       compare(held.cards - covered.cards, 0, "no card was played")
       compare(held.chosen, -1, "and nothing was chosen while the field was covered")
 
-      tc.wait(1700)
+      // WAIT FOR THE WINDOW, NOT FOR A NUMBER OF MILLISECONDS.
+      //
+      // This read `tc.wait(1700)` against a reveal the engine holds for 1500,
+      // which is two hundred milliseconds of slack -- and on a loaded machine
+      // the whole of this file has been measured taking anywhere between 108
+      // and 448 seconds, so a Qt Timer can and does land outside it. The test
+      // then failed on "the queue was replayed", which is not the rule it is
+      // about: the rule is that the keys wait for the FIELD and are replayed
+      // when it comes back, and the field coming back is a state, not a
+      // duration. `tryVerify` polls for that state and then the assertions
+      // below are made against it, so the check is stricter than it was rather
+      // than looser -- nothing about what must be true has changed, only what
+      // the test waits on. Three seconds is twice the reveal's own hold.
+      tryVerify(function () { return !race.holdsForReveal() }, 3000,
+                "the reveal let the field go")
       compare(race.revealQueue.length, 0, "the queue was replayed when the field came back")
       verify(!race.holdsForReveal(), "and the window is closed")
       var after = tc.snap()

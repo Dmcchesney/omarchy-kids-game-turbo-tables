@@ -56,7 +56,67 @@ import "../ui/parts"
 //                       rather than the ones a builder remembered.
 //   --dump-rects        the same walk, but printing every item that carries
 //                       an objectName, so a measurement script can find the
-//                       car on the dais without guessing at geometry.
+//                       car on the dais without guessing at geometry. Columns:
+//                       name, x, y, width, height, effective opacity (0 when
+//                       the item is not drawn at all).
+//   --warmup <n>        for a screen with buildRace() (Race): advance the race
+//                       by n scripted correct answers before showing it, so a
+//                       shot has lamps lit, a charge part-full and rivals up
+//                       the road. The screen's own `warmup` property; the race
+//                       is rebuilt after it is set.
+//
+// ------------------------------------------------------------------ PIECE F
+//
+//   --inject <e>[:<a>]  deliver ONE engine-shaped event, or the short sequence
+//                       the engine's ordering guarantee puts with it, to the
+//                       loaded screen. The screen's own `injectEvent(kind, arg)`
+//                       builds it to the shapes in src/engine/events.ts and
+//                       pushes it through the same `handleEvents` funnel a real
+//                       event goes through; the engine is NOT stepped, so this
+//                       is a probe of the view and not of the rules. Events:
+//
+//                         --inject cardUsed:wrench    the child plays a card
+//                         --inject hit:pothole        the child is hit by one
+//                         --inject blocked:wrench     a rival's cage holds
+//                         --inject swap               a Tow Hook lands
+//                         --inject handDealt          a hand arrives
+//                         --inject chooseCard:1       press 1 then Enter, which
+//                                                     is the hand's slam beat
+//                                                     (a key press, not an event)
+//
+//                       The card names are the engine's own keys: nitro,
+//                       oilSlick, wrench, pothole, rollCage, pileUp, turbo,
+//                       towHook.
+//
+//   --strip <path>      write a CONTACT SHEET of frames from the injection to
+//                       <path>, and the individual frames beside it as
+//                       <path minus .png>-<index>.png at the full window size.
+//   --strip-step <ms>   milliseconds of the screen's clock between frames.
+//                       Default 60, which is the step the piece F gate asks for.
+//   --strip-frames <n>  how many frames. Default 10.
+//   --strip-preroll <ms> how long the screen runs before the injection, so the
+//                       road is moving rather than sitting on its first frame.
+//                       Default 320. Stepped in 16 ms slices like the rest.
+//   --strip-scale <f>   how much each frame is scaled down in the contact
+//                       sheet. Default 0.5; the individual frames are always
+//                       full size.
+//   --strip-columns <n> columns in the contact sheet. Default 2.
+//
+//                       `--strip --dump-rects` prints every named item's box
+//                       on every frame of the strip, prefixed by a `frame`
+//                       line, so the fact's box, the answer field's box and
+//                       every effect item's box can be compared frame by frame
+//                       on the very frames the contact sheet shows.
+//
+//                       THE STRIP IS DETERMINISTIC, and that is the whole point
+//                       of it. `--strip` sets the screen's `externalClock`,
+//                       which stops its FrameAnimation and its 100 ms engine
+//                       pulse, stops the caret's blink, and cuts the callouts'
+//                       and the minimap's wall-clock fades. Every millisecond
+//                       the screen sees is one this file handed it. The same
+//                       strip written twice is the same bytes; the piece F
+//                       evidence proves that by writing one twice and diffing.
+//
 //   --hide-text         render with every Text painted transparent (NOT
 //                       hidden: hiding one reflows its Row). Paired with
 //                       --dump-text it gives the exact background behind each
@@ -106,6 +166,20 @@ Window {
   readonly property bool dumpText: flag("dump-text")
   readonly property bool dumpRects: flag("dump-rects")
   readonly property bool hideText: flag("hide-text")
+  readonly property int warmup: parseInt(argument("warmup", "0"), 10)
+
+  // ---------------------------------------------------------------- piece F
+  readonly property string injectArg: argument("inject", "")
+  readonly property string injectKind: injectArg.split(":")[0]
+  readonly property string injectValue: injectArg.indexOf(":") >= 0
+                                        ? injectArg.slice(injectArg.indexOf(":") + 1) : ""
+  readonly property string stripPath: argument("strip", "")
+  readonly property bool stripMode: stripPath.length > 0
+  readonly property int stripStep: parseInt(argument("strip-step", "60"), 10)
+  readonly property int stripFrames: parseInt(argument("strip-frames", "10"), 10)
+  readonly property int stripPreroll: parseInt(argument("strip-preroll", "320"), 10)
+  readonly property real stripScale: parseFloat(argument("strip-scale", "0.5"))
+  readonly property int stripColumns: parseInt(argument("strip-columns", "2"), 10)
 
   // ------------------------------------------------------ the item walk
   // One depth-first walk of the loaded screen, used by --dump-text,
@@ -159,9 +233,15 @@ Window {
     harness.walk(screen, function (item) {
       if (harness.dumpRects && String(item.objectName).length > 0) {
         var r = item.mapToItem(harness.contentItem, 0, 0)
+        // The seventh column is the EFFECTIVE OPACITY, added by piece F: the
+        // walk prints every named item whether or not it is drawn, and a proof
+        // that no effect box crosses the fact is only as good as its knowing
+        // which boxes were on the screen. It is the same `effectiveOpacity`
+        // --dump-text has always used, so 0 means "not drawn at all".
         console.log("rect\t" + item.objectName + "\t" + Math.round(r.x) + "\t"
                     + Math.round(r.y) + "\t" + Math.round(item.width) + "\t"
-                    + Math.round(item.height))
+                    + Math.round(item.height) + "\t"
+                    + harness.effectiveOpacity(item).toFixed(3))
       }
       if (harness.dumpText && harness.isText(item) && item.text.length > 0
           && harness.effectiveOpacity(item) > 0.02) {
@@ -371,6 +451,15 @@ Window {
     onLoaded: {
       if (item.hasOwnProperty("seed"))
         item.seed = harness.seed
+      // PIECE F. The warm-up and the external clock both have to be in place
+      // BEFORE the race is rebuilt, or the strip's first frame is a race that
+      // was built under a different clock.
+      if (harness.warmup > 0 && item.hasOwnProperty("warmup"))
+        item.warmup = harness.warmup
+      if (harness.stripMode && item.hasOwnProperty("externalClock"))
+        item.externalClock = true
+      if ((harness.warmup > 0 || harness.stripMode) && typeof item.buildRace === "function")
+        item.buildRace()
       if (harness.travelArg.length > 0 && item.hasOwnProperty("travel"))
         item.travel = parseFloat(harness.travelArg)
       if (harness.fieldArg.length > 0 && typeof item.setKarts === "function")
@@ -510,7 +599,8 @@ Window {
         harness.applyHideText()
       if (harness.dumpText || harness.dumpRects) {
         harness.runDump()
-        if (harness.shotPath.length === 0) {
+        // In strip mode the dump is per FRAME, below, so the run carries on.
+        if (harness.shotPath.length === 0 && !harness.stripMode) {
           Qt.exit(0)
           return
         }
@@ -522,10 +612,23 @@ Window {
         Qt.exit(0)
         return
       }
-      if (harness.shotPath.length > 0)
+      if (harness.stripMode)
+        stripStart.start()
+      else if (harness.shotPath.length > 0) {
+        // A plain shot may still carry an injection, so a single frame of an
+        // effect can be taken without a whole strip.
+        if (harness.injectArg.length > 0 && screen
+            && typeof screen.injectEvent === "function")
+          console.log("harness: inject " + harness.injectArg + " -> "
+                      + screen.injectEvent(harness.injectKind, harness.injectValue))
         settle.start()
-      else if (harness.measureMs > 0)
+      } else if (harness.measureMs > 0) {
+        if (harness.injectArg.length > 0 && screen
+            && typeof screen.injectEvent === "function")
+          console.log("harness: inject " + harness.injectArg + " -> "
+                      + screen.injectEvent(harness.injectKind, harness.injectValue))
         measure.start()
+      }
     }
   }
 
@@ -568,6 +671,206 @@ Window {
                   + " screen=" + harness.screenName)
       Qt.exit(0)
     }
+  }
+
+  // ========================================================================
+  // PIECE F -- the frame strip.
+  // ========================================================================
+  //
+  // A strip is: run the screen forward on a clock this file owns, deliver one
+  // engine-shaped event, then grab a frame every `--strip-step` milliseconds of
+  // that clock. The frames go out at the full window size and a contact sheet
+  // of them, labelled with the millisecond offset of each, goes to `--strip`.
+  //
+  // WHY THE CLOCK IS OURS. Everything the effect layer draws is a pure function
+  // of `TrackView.fxClock`, which is stepped by `advance(dt)` -- so if the dt
+  // comes from a FrameAnimation sampling the wall clock, two runs land between
+  // different beats and the strip is different bytes each time. A strip that
+  // differs run to run cannot be evidence, so `--strip` sets the screen's
+  // `externalClock` and hands it exactly the milliseconds below.
+  //
+  // The contact sheet is composed in QML rather than by a second tool: the
+  // frames are loaded back as Images into a Grid and the Grid is grabbed. That
+  // keeps the whole strip one command, which is what the piece F gate asks for
+  // ("anyone can reproduce a strip in one command").
+  property int stripIndex: 0
+  property var stripFiles: []
+  readonly property string stripStem: harness.stripPath.replace(/\.png$/i, "")
+
+  function stripFileFor(i) {
+    return harness.stripStem + "-" + (i < 10 ? "0" : "") + i + ".png"
+  }
+
+  function stripBegin() {
+    var screen = screenLoader.item
+    if (!screen) {
+      Qt.exit(3)
+      return
+    }
+    // The pre-roll, in 16 ms slices: the road has to be moving before the card
+    // is played, or the first frame of every strip is a stationary world.
+    var slices = Math.max(0, Math.round(harness.stripPreroll / 16))
+    for (var i = 0; i < slices; i++)
+      if (typeof screen.stepClock === "function")
+        screen.stepClock(16)
+    if (harness.injectArg.length > 0 && typeof screen.injectEvent === "function") {
+      var ok = screen.injectEvent(harness.injectKind, harness.injectValue)
+      console.log("harness: inject " + harness.injectArg + " -> " + ok)
+    }
+    harness.stripIndex = 0
+    harness.stripFiles = []
+    stripGrab()
+  }
+
+  function stripGrab() {
+    if (harness.stripIndex >= harness.stripFrames) {
+      stripCompose()
+      return
+    }
+    // `--strip --dump-rects` prints every named item's box on every frame of
+    // the strip, so "no effect item ever crosses the fact" is a measurement of
+    // the same frames the contact sheet shows rather than a separate claim.
+    if (harness.dumpRects || harness.dumpText) {
+      console.log("frame\t" + harness.stripIndex + "\t"
+                  + (harness.stripIndex * harness.stripStep))
+      harness.runDump()
+    }
+    var path = harness.stripFileFor(harness.stripIndex)
+    var started = harness.contentItem.grabToImage(function (result) {
+      result.saveToFile(path)
+      var files = harness.stripFiles.slice()
+      files.push({ "path": path, "at": harness.stripIndex * harness.stripStep })
+      harness.stripFiles = files
+      harness.stripIndex += 1
+      var screen = screenLoader.item
+      if (screen && typeof screen.stepClock === "function")
+        screen.stepClock(harness.stripStep)
+      // Next grab on the following event-loop turn, so the step above has been
+      // applied to every binding before the frame is rendered.
+      stripNext.restart()
+    }, Qt.size(harness.width, harness.height))
+    if (!started) {
+      console.log("harness: grabToImage refused on strip frame " + harness.stripIndex)
+      Qt.exit(2)
+    }
+  }
+
+  Timer {
+    id: stripNext
+    interval: 1
+    onTriggered: harness.stripGrab()
+  }
+
+  function stripCompose() {
+    sheetLoader.active = true
+    sheetSettle.restart()
+  }
+
+  Loader {
+    id: sheetLoader
+    active: false
+    // Off the visible area: the sheet is grabbed, never looked at in the
+    // window, and it is taller than the window by design.
+    x: 0
+    y: harness.height + 40
+
+    sourceComponent: Column {
+      spacing: 0
+
+      Rectangle {
+        width: harness.stripColumns * Math.round(harness.width * harness.stripScale)
+        height: 44
+        color: "#101018"
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          x: 14
+          textFormat: Text.PlainText
+          color: "#f2e6c4"
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: 20
+          text: "TURBO TABLES  ·  " + harness.screenName + "  ·  inject "
+                + (harness.injectArg.length > 0 ? harness.injectArg : "(none)")
+                + "  ·  seed " + harness.seed + "  ·  warmup " + harness.warmup
+                + "  ·  " + harness.stripStep + " ms steps  ·  "
+                + harness.width + "x" + harness.height
+                + (Store.setting("reducedMotion") === true ? "  ·  REDUCED MOTION" : "")
+        }
+      }
+
+      Grid {
+        columns: harness.stripColumns
+        spacing: 0
+
+        Repeater {
+          model: harness.stripFiles
+
+          Column {
+            spacing: 0
+
+            Rectangle {
+              width: Math.round(harness.width * harness.stripScale)
+              height: 26
+              color: "#1a1b26"
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                x: 10
+                textFormat: Text.PlainText
+                color: "#9ece6a"
+                font.family: Theme.mono
+                font.bold: true
+                font.pixelSize: 16
+                text: "t = +" + modelData.at + " ms"
+              }
+            }
+
+            Image {
+              width: Math.round(harness.width * harness.stripScale)
+              height: Math.round(harness.height * harness.stripScale)
+              source: "file://" + modelData.path
+              smooth: true
+              cache: false
+              asynchronous: false
+            }
+          }
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: sheetSettle
+    // The frames are read back off disk; one turn of the loop is enough with
+    // `asynchronous: false`, and this is a little more than that.
+    interval: 200
+    onTriggered: {
+      var item = sheetLoader.item
+      if (!item) {
+        console.log("harness: contact sheet did not build")
+        Qt.exit(2)
+        return
+      }
+      var started = item.grabToImage(function (result) {
+        result.saveToFile(harness.stripPath)
+        console.log("harness: wrote " + harness.stripPath + " at "
+                    + Math.round(item.width) + "x" + Math.round(item.height)
+                    + " from " + harness.stripFiles.length + " frames of "
+                    + harness.width + "x" + harness.height)
+        Qt.exit(0)
+      }, Qt.size(Math.round(item.width), Math.round(item.height)))
+      if (!started) {
+        console.log("harness: grabToImage refused on the contact sheet")
+        Qt.exit(2)
+      }
+    }
+  }
+
+  Timer {
+    id: stripStart
+    interval: harness.settleMs
+    onTriggered: harness.stripBegin()
   }
 
   Timer {

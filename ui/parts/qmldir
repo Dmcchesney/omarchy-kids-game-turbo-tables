@@ -1,3 +1,6 @@
 # The icon grids are a singleton so every part reads one copy. Everything else
 # in this directory is found by the implicit directory lookup.
 singleton Glyphs 1.0 Glyphs.qml
+# The sound cue table and the one seam a sound is played through (piece F).
+# A singleton for the same reason Glyphs is: one copy, read from three files.
+singleton Sfx 1.0 Sfx.qml

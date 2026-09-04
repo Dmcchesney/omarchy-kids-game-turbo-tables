@@ -14,6 +14,12 @@ Item {
   property color tone: Theme.amber
   property int holdMs: 1600
   property bool reducedMotion: false
+  // PIECE F. Design v4, Pile-Up: "the callout is in the large type reserved for
+  // this card." One card in the game sets this, and the size below is the only
+  // thing it changes -- the ground, the rule and the hold are the same, so a
+  // legendary card reads as the same object shouted rather than as a different
+  // object.
+  property bool big: false
   readonly property bool showing: hold.running || fade.opacity > 0
 
   function say(message, colour) {
@@ -40,7 +46,7 @@ Item {
     opacity: 0
     radius: Theme.cornerRadiusSmall
     color: Qt.rgba(Theme.panelRaised.r, Theme.panelRaised.g, Theme.panelRaised.b, 0.96)
-    border.width: 1
+    border.width: callout.big ? 3 : 1
     border.color: callout.tone
     implicitWidth: message.implicitWidth + message.font.pixelSize * 2.2
     implicitHeight: message.implicitHeight + message.font.pixelSize * 1.2
@@ -66,7 +72,7 @@ Item {
       color: Theme.textBright
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: Math.max(10, Math.round(callout.height * 0.34))
+      font.pixelSize: Math.max(10, Math.round(callout.height * (callout.big ? 0.56 : 0.34)))
       font.letterSpacing: 1
     }
   }
