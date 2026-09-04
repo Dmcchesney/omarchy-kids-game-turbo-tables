@@ -28,11 +28,44 @@ Item {
   readonly property bool glowing: value >= glowFrom
   readonly property color tone: ready ? Theme.amberGlow : (glowing ? Theme.amber : Theme.teal)
 
+  // THE CAPTION DREW STRAIGHT ONTO THE ROAD, AND THE ROAD IS A GOLD KERB.
+  //
+  // `POWER-UP CHARGE` and `n / 12` are grey-lavender strings at 0.8 alpha with
+  // nothing behind them, over the bottom right of a moving racing view.
+  // Measured on shipped 1920x1080 frames: 48% of the caption's box under 3:1
+  // at t = 1 s, where it crosses the amber kerb, and 61% of it under 3:1 with a
+  // MEDIAN of 1.23:1 at t = 18 s, where a lit prop is behind it. `0 / 12`
+  // crossed the cream lane marking and measured 24% under 3:1. A previous round
+  // wrote "I did not measure a contrast floor for it, and I am not claiming
+  // one", which was honest and still understated it: this was not unmeasured,
+  // it was failing.
+  //
+  // So the charge gets the gauge face every other instrument on this screen
+  // already has -- the same ground, the same corner radius, the same border as
+  // the lap, place and time readouts and the table-name block -- and the strings
+  // are read against a surface this file controls instead of against whatever
+  // the track happens to be drawing underneath. The numbers after are in the
+  // evidence.
+  property real padX: 16
+  property real padY: 12
+  readonly property real innerWidth: Math.max(1, width - padX * 2)
+
   implicitWidth: 260
-  implicitHeight: caption.height + 6 + cellHeight + 6 + status.height
+  implicitHeight: padY * 2 + caption.height + 6 + cellHeight + 6 + status.height
+
+  Rectangle {
+    id: face
+    anchors.fill: parent
+    radius: Theme.cornerRadiusSmall
+    color: Qt.rgba(0.11, 0.045, 0.10, 0.92)
+    border.width: 1
+    border.color: Theme.lineStrong
+  }
 
   Text {
     id: caption
+    x: bar.padX
+    y: bar.padY
     textFormat: Text.PlainText
     text: bar.title
     color: Theme.textLabel
@@ -44,8 +77,9 @@ Item {
 
   Row {
     id: cells
-    y: caption.height + 6
-    width: bar.width
+    x: bar.padX
+    y: bar.padY + caption.height + 6
+    width: bar.innerWidth
     height: bar.cellHeight
     spacing: bar.cellGap
 
@@ -54,7 +88,7 @@ Item {
 
       Rectangle {
         readonly property bool lit: index < bar.value
-        width: (bar.width - bar.cellGap * (bar.segments - 1)) / bar.segments
+        width: (bar.innerWidth - bar.cellGap * (bar.segments - 1)) / bar.segments
         height: bar.cellHeight
         radius: 2
         color: lit ? bar.tone : "transparent"
@@ -81,7 +115,8 @@ Item {
   Text {
     id: status
     textFormat: Text.PlainText
-    y: caption.height + 6 + bar.cellHeight + 6
+    x: bar.padX
+    y: bar.padY + caption.height + 6 + bar.cellHeight + 6
     text: bar.ready ? (bar.holdingHand ? "HAND HELD  ·  " + bar.value : "POWER-UP READY")
                     : (bar.value + " / " + bar.segments)
     color: bar.ready ? Theme.amberGlow : Theme.textLabel

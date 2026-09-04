@@ -10,11 +10,33 @@ import "parts"
 // horizon and the tarmac holding its own tone further out than the floor does.
 // road.frag draws the same thing per pixel.
 //
-// THIS IS THE PICTURE AN OMARCHY VM ACTUALLY RENDERS. The VM image pins every
-// Qt client to llvmpipe, so its scene graph has no shader pipeline and this
-// file -- not road.frag -- is what a child sees. It is held to the shader's
-// picture rather than to a cheaper one, and the evidence puts the two side by
-// side at the same camera.
+// THIS IS THE FALLBACK, NOT THE PICTURE THE VM RENDERS, AND THE SENTENCE THAT
+// USED TO STAND HERE WAS WRONG.
+//
+// It said: "THIS IS THE PICTURE AN OMARCHY VM ACTUALLY RENDERS. The VM image
+// pins every Qt client to llvmpipe, so its scene graph has no shader pipeline
+// and this file -- not road.frag -- is what a child sees." Two different things
+// were being run together. `LIBGL_ALWAYS_SOFTWARE=1`, which is what the VM's
+// Hyprland environment sets, selects Mesa's **llvmpipe**, which is an OpenGL
+// DRIVER: `GraphicsInfo.api` is `OpenGL`, a `ShaderEffect` compiles and runs,
+// and `TrackView.shaderMode` is true. `QT_QUICK_BACKEND=software` selects Qt's
+// **QPainter scene graph**, which has no shader pipeline at all -- and that is
+// the only thing `TrackView.softwareScene` gates on.
+//
+// Measured in the VM, on the real stack, round five: with the Wayland platform
+// and `LIBGL_ALWAYS_SOFTWARE=1` the log reads
+//   qt.rhi.general: OpenGL VENDOR: Mesa RENDERER: llvmpipe (LLVM 22.1.8)
+//   qml: TrackView: road path = shader
+// and with `QT_QUICK_BACKEND=software` added to the same command it reads
+//   qt.scenegraph.general: Loading backend software
+//   qml: TrackView: road path = canvas (software scene graph)
+//
+// So `road.frag` is what a child sees in the VM and on any machine with a GL
+// or Vulkan stack; this file is the fallback for Qt's software scene graph,
+// which is what this project's own headless Mac harness runs under and what a
+// machine whose shader refuses to compile falls back to. It is still held to
+// the shader's picture rather than to a cheaper one, and the evidence now puts
+// the two side by side AS RENDERED, at the same camera, on the same machine.
 //
 // Design, Rendering approach, Fallback and floor: "If the shader fails to
 // compile on a machine, the view falls back to a Canvas port of the classic
@@ -333,14 +355,41 @@ Canvas {
             var gn = uAt(gx, zNear) * w
             if ((gf < -0.05 * w && gn < -0.05 * w) || (gf > 1.05 * w && gn > 1.05 * w))
               continue
-            // A hairline, not a smear. This plane is 480 px wide and is scaled
-            // up with a nearest-neighbour filter, so one plane pixel is already
-            // four on a 1920 screen. Round two's width expression hit its own
-            // 2.4 cap at every depth inside z = 24 and drew the grid as
-            // five-plane-pixel bars -- twenty screen pixels, measured, which is
-            // most of why the floor read as a contour map.
-            quad(gf - 0.5, yFar, gf + 0.5, yFar,
-                 gn + 0.5, yNear + 1, gn - 0.5, yNear + 1)
+            // A HAIRLINE IS DRAWN A ROW AT A TIME, NOT AS A SLIVER OF POLYGON.
+            //
+            // This was one `quad` a plane pixel wide, running from the band's
+            // far edge to its near one, filled with `antialiasing: false` -- a
+            // polygon that thin lands on whichever pixel centres it happens to
+            // contain, which is not a thing to rely on for the picture the
+            // fallback is held to. One plane pixel per plane ROW, at the
+            // column's own x on that row, is the same line and cannot be
+            // dropped. Measured whole-floor against a real road.frag frame at
+            // the same camera (see the evidence): 73.04% -> 73.50% of floor
+            // pixels within 4/255, mean |delta| 8.15 -> 7.92.
+            //
+            // What is left between the two renderers is line WIDTH, and it is
+            // named here because it is the next thing anyone measuring this
+            // will find. road.frag's `lineMask` resolves to a line five to
+            // seven plane pixels wide with a derivative-scaled falloff either
+            // side; this draws a hard one-pixel hairline in the same place, to
+            // the same peak. Traced on the plain at z ~ 4 the shader reads
+            // 31 32 37 44 51 53 50 42 35 31 where this reads 31 31 31 52 31 31.
+            // Closing that means drawing a soft profile here, and it has not
+            // been done.
+            //
+            // The band is a handful of plane pixels tall, so this is the same
+            // order of fill the quad was.
+            var yTop = Math.floor(yFar)
+            var yBot = Math.ceil(yNear)
+            if (yBot <= yTop) {
+              ctx.fillRect(Math.round(gf), yTop, 1, 1)
+            } else {
+              for (var gy = yTop; gy < yBot; gy++) {
+                var gt = (gy + 0.5 - yFar) / Math.max(1e-6, yNear - yFar)
+                gt = gt < 0 ? 0 : (gt > 1 ? 1 : gt)
+                ctx.fillRect(Math.round(gf + (gn - gf) * gt), gy, 1, 1)
+              }
+            }
           }
         }
 

@@ -345,17 +345,21 @@ Item {
   // the drawn karts can never contradict a callout. See `orderedProgress`.
   //
   // `exact`, if given, is the UNSMOOTHED effective progress per kart, in the
-  // same order -- the integers the engine ranks by and the HUD's ladder prints.
-  // The name plates take their gap from it. Without it the plate has to round
-  // the smoothed value, which is one question out for a fraction of a second
-  // after every answer, and a plate that says "+3" beside a ladder that says
-  // "2" is two sources of truth for one number.
+  // same order -- the integers the engine ranks by, and the ones the minimap's
+  // dots and the pass callouts are driven from. The name plates take their gap
+  // from it.
+  //
+  // (These three sentences named "the HUD's ladder" until round five. There is
+  // no ladder: the four-rung standings strip was deleted for breaking the
+  // design's Fairness rule, `tst_race_keys.qml` has a case that keeps it
+  // deleted, and the comment outlived it by two rounds.)
+  //
   // A plate shows its gap ONLY when `exact` was supplied. Rounding the smoothed
   // delta instead is wrong on 17% of frames -- measured, 320 of 1875 -- because
   // the smoothing takes about four tenths of a second to cross the next half
-  // question, and a plate reading "+3" beside a HUD ladder reading "2" is two
-  // sources of truth for one number. Without `exact` the plate is the name
-  // alone, which is still every rival named at every distance.
+  // question, and a plate reading "+3" beside a minimap and a callout built on
+  // "2" is two sources of truth for one number. Without `exact` the plate is
+  // the name alone, which is still every rival named at every distance.
   property bool haveExact: false
 
   function setProgress(values, order, exact) {
@@ -754,46 +758,161 @@ Item {
   readonly property var sectorFiller: ["cone", "banner", "drum", "tireWall",
                                        "banner", "cone"]
 
-  // ARCHES AND THE FACT: THE ONE PROP THAT HAS TO GIVE WAY.
+  // ARCHES AND THE ANSWER FIELD: THE FIELD IS WHAT YIELDS.
   //
   // Plan v2, Risks: "Arches vs. the fixed answer field | M4': props that span
-  // the road cross under the field's line or the field yields for the frame."
-  // The first of those is not available, and the arithmetic says so rather
-  // than an opinion. An arch stands on the road and spans it, so its top is
+  // the road cross under the field's line OR THE FIELD YIELDS FOR THE FRAME."
+  // Two remedies. Round four took neither: it measured the arches against the
+  // FACT -- a different object, further up the screen; on a 1920x1080 race
+  // screen the fact's ink ends at y = 286 and the field's box is y 345..443 --
+  // reported no overlap with it, and then suppressed the arches. Measured
+  // against the object the plan actually names, a crossbar is inside the
+  // field's rows at EVERY depth in the draw distance: y 312..389 at z = 10,
+  // 375..413 at z = 20, 406..425 at z = 40, 421..431 at z = 80. So the
+  // criterion was unmet everywhere, and the two landmarks the design names by
+  // name -- "the sevens run under the roller door" -- had been traded away for
+  // nothing.
   //
-  //     yTop(z) = vAt(z) * H - sizeAt(archHeight, z)
+  // The first remedy really is unavailable, and the arithmetic says so rather
+  // than an opinion. An arch stands on the road and spans it, so its crossbar
+  // is at
   //
-  // and with the shipped numbers -- a 9.4-unit span on a 320x200 sheet, so
-  // 5.875 units tall, focal 1.20, camHeight 2.20, H = 1080 -- that is
-  // 436.6 - 2381/z px. It is above the answer field's bottom edge (y = 415 at
-  // 1920x1080) for every z below 110 world units, which is the entire draw
-  // distance at any size an arch is legible. There is no depth at which a
-  // road-spanning arch passes UNDER a field that sits above the horizon.
+  //     yBeam(z) = vAt(z) H - sizeAt(archHeight, z) (1 - archBeamTop)
   //
-  // So the arch yields, and it yields where it would otherwise be drawn behind
-  // the FACT -- the pillar the design will not trade: "the fact is the largest
-  // thing on screen at every moment of a race." `factFloorY` is the lowest row
-  // the question block's ink reaches, handed down by Race.qml from the block's
-  // own measured geometry rather than assumed here, and an arch dissolves over
-  // the depth range in which its crossbar crosses that line. A bare TrackView
-  // in the harness gets 0 and no arch ever fades.
+  // and with the shipped numbers -- a 9.4-unit span on a 320 x 200 sheet, so
+  // 5.875 units tall, focal 1.20, camHeight 2.20, H = 1080 -- that is above
+  // the field's bottom edge for every depth inside the draw distance at which
+  // an arch is legible at all. There is no depth at which a road-spanning arch
+  // passes UNDER a box that sits above the horizon.
   //
-  // What this costs is stated in the evidence and not hidden: a child sees the
-  // gantry and the roller door approach and dissolve, and never passes under
-  // one. The alternative was a checkered band and the word TURBO drawn across
-  // `2 x 1`, which is what the shipped build did.
-  property real factFloorY: 0
-  readonly property real archFadeBand: Math.max(24, height * 0.09)
-  // The arch sheet is 320 x 200, so an arch is 0.625 of its span tall.
+  // SO THE FIELD YIELDS. `fieldRect` is the answer field's box on this screen,
+  // handed down by Race.qml from the item's own geometry rather than assumed
+  // here, and `fieldYield` rises to 1 for the second or so in which a
+  // road-spanning prop's crossbar is over it. Race.qml fades the field's FACE
+  // -- its ground, its border and its sun rim -- and leaves the digits, the
+  // caret and the reveal at full strength, so nothing the child typed goes
+  // anywhere: the arch is seen through the slab instead of being sliced by it.
+  // It is a paint change and not a behaviour change, which is the whole reason
+  // this is the remedy the plan offers. A bare TrackView in the harness gets an
+  // empty rect and nothing ever yields.
+  //
+  // AND THE ARCHES ARE BACK. Nothing throttles them at any depth: a child sees
+  // the gantry and the roller door come up the road, fill the frame and pass
+  // over them, which is what the sector landmarks are for.
+  property rect fieldRect: Qt.rect(0, 0, 0, 0)
+  // The fact's ink box, for the same reason. The fact does not yield -- it is
+  // the pillar the design will not trade -- so what this drives is the ground
+  // Race.qml puts UNDER the glyphs for the frames a crossbar is behind them.
+  // The fact is drawn over every prop either way; what a chequered beam takes
+  // from it is contrast, not visibility, and a ground is the answer to that.
+  property rect factRect: Qt.rect(0, 0, 0, 0)
+  // The arch sheet is 320 x 200, so an arch is 0.625 of its span tall; the
+  // crossbar is drawn between 0.30 and 0.50 of the sheet's height (the
+  // gantry's beam and the roller door's lintel, both in ui/parts/PropSprite).
   readonly property real archAspect: 200 / 320
+  readonly property real archBeamTop: 0.30
+  readonly property real archBeamBottom: 0.50
+  readonly property real archSpan: 9.4
   function archTopAt(worldWidth, z) {
     return vAt(z) * height - sizeAt(worldWidth * archAspect, z)
   }
-  function archOpacity(worldWidth, z) {
-    if (factFloorY <= 0)
+
+  // Which props on the loop span the road. Computed once: `propKind` is a table
+  // lookup and this is read on every frame.
+  readonly property var archProps: {
+    var out = []
+    for (var i = 0; i < propCount; i++) {
+      var k = propKind(i)
+      if (k === "rollerDoor" || k === "gantry")
+        out.push(i)
+    }
+    return out
+  }
+
+  // HOW FAR INTO YIELDING THE FIELD IS: BY HOW MUCH, NOT WHETHER AT ALL.
+  //
+  // The first cut of this yielded whenever a crossbar touched the box, and
+  // measured over the whole circuit that was 40% of a lap: arches converge on
+  // the vanishing point and the field's bottom edge sits a few pixels below the
+  // horizon, so there is nearly always SOME arch out at z = 80 whose eight-pixel
+  // beam clips the field's last few rows. A field that is absent for two fifths
+  // of a lap has not yielded, it has been deleted.
+  //
+  // So the yield is proportional to how much of the field the crossbar is
+  // actually behind -- the fraction of the box's AREA it covers -- and reaches
+  // 1 at `fieldYieldAt`. A hairline near the horizon moves it by a couple of
+  // per cent, which is invisible; the gantry that would be sliced covers a third
+  // of the box and takes the face away completely.
+  readonly property real fieldYieldAt: 0.25
+
+  // How strongly a road-spanning prop's crossbar is over `box`, 0..1. Every
+  // property it reads is live, so a binding written against it re-evaluates
+  // with `travel` exactly as the props themselves do.
+  function crossingOver(box) {
+    if (box.width <= 0 || box.height <= 0)
+      return 0
+    var worst = 0
+    for (var i = 0; i < archProps.length; i++) {
+      var raw = (archProps[i] * propSpacing - travel) % propLoop
+      var z = (raw < 0 ? raw + propLoop : raw) + nearDistance
+      if (z <= nearDistance + 0.2 || z >= drawDistance)
+        continue
+      var top = archTopAt(archSpan, z)
+      var stand = vAt(z) * height
+      var beam0 = top + (stand - top) * archBeamTop
+      var beam1 = top + (stand - top) * archBeamBottom
+      var halfW = sizeAt(archSpan, z) / 2
+      var cx = uAt(0, z) * width + shakeX
+      var down = Math.min(beam1, box.y + box.height) - Math.max(beam0, box.y)
+      var across = Math.min(cx + halfW, box.x + box.width) - Math.max(cx - halfW, box.x)
+      if (down <= 0 || across <= 0)
+        continue
+      var covered = (down / box.height) * (across / box.width)
+      worst = Math.max(worst, Math.min(1, covered / fieldYieldAt))
+      if (worst >= 1)
+        break
+    }
+    return worst
+  }
+
+  readonly property real fieldYield: crossingOver(fieldRect)
+  readonly property real factYield: crossingOver(factRect)
+
+  // NEAR PROPS FADE, AND EVERY CLASS OBEYS IT.
+  //
+  // Round four applied its throttle to `arch` kinds alone, so the two props
+  // the design names as landmarks were the ONLY ones ever dimmed while every
+  // other class was exempt at any size. A critic measured one 3-unit tyre wall
+  // filling x 1250-1920, y 100-730 on a shipped frame -- 35% of it, top edge
+  // 336 px ABOVE the horizon -- and round five reproduced it on the SHADER path
+  // at t = 18 s: x 1155-1410, y 265-570, top edge 171 px above the horizon,
+  // over the sun and the right-hand hills. The prop that was a landmark was
+  // suppressed and the prop that wrecked the frame was not.
+  //
+  // The rule is now on DRAWN SIZE and every roadside class obeys it: a prop
+  // dissolves as it sweeps past the lens, from the depth at which it is
+  // `nearFadeFrom` of the frame's height to `nearFadeGone` of it. That band is
+  // about four tenths of a second of transit at racing speed, which is where a
+  // near prop is a blur anyway.
+  //
+  // Road-spanning props are exempt, and that is the point of them: an arch you
+  // pass under is meant to fill the frame, and the road goes through its
+  // opening rather than behind it.
+  readonly property real propAspect: 176 / 128
+  readonly property real nearFadeFrom: 0.45
+  readonly property real nearFadeGone: 0.85
+  function nearFade(worldWidth, z) {
+    var frac = sizeAt(worldWidth * propAspect, z) / Math.max(1, height)
+    if (frac <= nearFadeFrom)
       return 1
-    var t = (archTopAt(worldWidth, z) - factFloorY) / archFadeBand
-    return Math.max(0, Math.min(1, t))
+    if (frac >= nearFadeGone)
+      return 0
+    return 1 - (frac - nearFadeFrom) / (nearFadeGone - nearFadeFrom)
+  }
+  // The one place a prop's opacity is decided, so a test can ask the view the
+  // same question the delegate asks it.
+  function propOpacity(spanning, worldWidth, z) {
+    return spanning ? 1 : nearFade(worldWidth, z)
   }
   readonly property var bannerLabels: ["TURBO", "PIT", "BOLT", "PISTON", "GASKET"]
   // Eight units, not twelve: at twelve the roadside read as two thin rows of
@@ -837,7 +956,7 @@ Item {
       width: 0
       height: 0
       z: 1000 - zed
-      opacity: arch ? view.archOpacity(worldWidth, zed) : 1
+      opacity: view.propOpacity(arch, worldWidth, zed)
       visible: zed > view.nearDistance + 0.2 && zed < view.drawDistance
                && sc > 0.010 && x > -view.width * 0.7 && x < view.width * 1.7
                && opacity > 0.004

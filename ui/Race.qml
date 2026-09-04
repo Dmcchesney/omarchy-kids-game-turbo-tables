@@ -1051,7 +1051,38 @@ FocusScope {
     // pressed -- exactly what typing those two digits does with no hand held.
     race.flushPending()
     if (race.entryLength() > 0) {
-      race.clearProvisional()
+      // ROUND 5, AND IT COST A STREAK IN SIX RUNS OUT OF SIX.
+      //
+      // This branch used to call `clearProvisional()`, which zeroes the COUNT
+      // and leaves the DIGIT in the field. On `4 x 12 = 48` with a hand held,
+      // `1` chooses card one and prints a provisional `1` (branch (c) below is
+      // the one that put it there); the child then types their answer, `4`,
+      // which is not a card key -- 4 is past the end of a hand of three -- so
+      // it lands here. The `1` stayed, the field became `14`, and a two-digit
+      // answer submits itself the moment it is two digits long: streak to 0,
+      // one `missed`, one attempt, on a question the child answered right.
+      // Reproduced with real key events on seeds 140 to 145; the file's own
+      // claim that "no answer in the tables has become untypable while a hand
+      // is held" was false for every two-digit answer whose first digit is
+      // past the hand.
+      //
+      // Branch (c) has taken the digit back since round two -- but only when
+      // the NEXT key is also a card key, which is the shape every neighbouring
+      // test covers and this one is not.
+      //
+      // What decides it is whether the provisional digits are still part of
+      // the answer being typed. On `2 x 12 = 24` a provisional `2` followed by
+      // `4` IS the answer and must stay, which is why this is a prefix test
+      // and not an unconditional take-back. `takeBackProvisional()` only ever
+      // removes digits a card press put there, so a field of the child's own
+      // digits (`provisional` is 0) is untouched either way.
+      var cand = race.shownEntry + String(digit)
+      var expected = race.expectedAnswer()
+      if (race.provisional > 0
+          && !(expected.length > 0 && expected.indexOf(cand) === 0))
+        race.takeBackProvisional()
+      else
+        race.clearProvisional()
       picker.reset()
     }
     race.send({ "kind": "digit", "value": digit })
@@ -1078,11 +1109,15 @@ FocusScope {
     id: track
     anchors.fill: parent
     reducedMotion: race.reducedMotion
-    // The lowest row the fact's ink reaches, plus a hand's margin, so a
-    // road-spanning arch gets out of the way of the one thing the design will
-    // not trade. Measured off the glyphs on screen rather than typed: see
-    // `factInkRect` below and the note on `factFloorY` in TrackView.qml.
-    factFloorY: race.factInkRect.y + race.factInkRect.height + race.px(12)
+    // The answer field's own box, so a road-spanning prop can be measured
+    // against the object the plan's acceptance line names -- not against the
+    // fact, which is a different object further up the screen and is what
+    // round four measured instead. The field yields for the frames a crossbar
+    // is over it; see `fieldYield` in TrackView.qml and `fieldFace` below.
+    fieldRect: Qt.rect(question.x + fieldBox.x,
+                       question.y + fieldBox.y,
+                       fieldBox.width, fieldBox.height)
+    factRect: race.factInkRect
   }
 
   // THE SKY IS NEVER BLACK, AND THIS USED TO MAKE IT BLACK.
@@ -1375,9 +1410,10 @@ FocusScope {
   // it, and both are the reason it is a live measurement of the item rather
   // than a constant:
   //
-  //   * `TrackView.factFloorY`, so a road-spanning arch gets out of the way of
-  //     the fact that is actually there -- `7 x 8` and `12 x 12` are not the
-  //     same width and the ceiling has to follow;
+  //   * `factGround` below, which is what the fact yields with when a
+  //     road-spanning prop is behind it -- `7 x 8` and `12 x 12` are not the
+  //     same width, so a ground sized off a constant would be the wrong shape
+  //     on most facts;
   //   * the evidence, which quotes the ink as a fraction of the frame height.
   //     The design's floor is "never smaller than a tenth of the screen
   //     height", and a round of this project already reported `font.pixelSize`
@@ -1403,6 +1439,35 @@ FocusScope {
     return Qt.rect(question.x + factText.x + r.x,
                    question.y + factText.y + factFace.ascent + r.y,
                    r.width, r.height)
+  }
+
+  // -------------------------------------------------- the fact's own ground
+  //
+  // THE OTHER HALF OF GIVING THE ARCHES BACK.
+  //
+  // The fact is drawn over every prop -- it is declared after the track, so a
+  // gantry can never cover a glyph -- and what a road-spanning prop takes from
+  // it is contrast, not visibility: the gantry's beam is a cream-and-ink
+  // chequer and the fact is cream. So for the frames a crossbar is behind the
+  // ink, and only those, the fact gets a ground.
+  //
+  // It is the floor's own near-black purple, at the alpha the light rule
+  // allows, and it is NOT the round-three vignette coming back: that was a
+  // full-frame 0.55 BLACK wash over the whole sky on every frame of every
+  // race. This is a box the size of the glyphs, in purple, for about a second
+  // a lap, and it is at zero the rest of the time. `race.factInkRect` is the
+  // ink as it is on the screen now, so the ground is the shape of the fact
+  // that is actually there.
+  Rectangle {
+    id: factGround
+    visible: opacity > 0.004
+    opacity: track.factYield * 0.86
+    x: race.factInkRect.x - race.px(22)
+    y: race.factInkRect.y - race.px(14)
+    width: race.factInkRect.width + race.px(44)
+    height: race.factInkRect.height + race.px(28)
+    radius: Theme.cornerRadiusSmall
+    color: Qt.rgba(0.235, 0.071, 0.157, 0.80)
   }
 
   // ------------------------------------------------------- fact and field
@@ -1466,6 +1531,18 @@ FocusScope {
         id: fieldFace
         anchors.fill: parent
         radius: Theme.cornerRadiusSmall
+        // THE FIELD YIELDS FOR THE FRAME.
+        //
+        // Plan v2's remedy for road-spanning props against the fixed answer
+        // field, taken as written. `TrackView.fieldYield` is 1 while a gantry
+        // or a roller door's crossbar is over this box, and for that second or
+        // so the FACE goes -- the ground, the border and the sun rim -- while
+        // the digits, the caret and the reveal above stay at full strength.
+        // Nothing the child typed moves or disappears; what goes is the slab
+        // the arch was being sliced by, so the landmark passes over the screen
+        // whole. The floor of 0.06 keeps a whisper of the box on screen so it
+        // never reads as having been deleted.
+        opacity: Math.max(0.06, 1 - track.fieldYield)
         // 0.74, not opaque: enough of the sunset comes through that the field
         // reads as smoked glass in front of the sky rather than as a slab cut
         // out of it, and `Theme.amberGlow` digits at 72 px still stand at more
@@ -1683,6 +1760,10 @@ FocusScope {
     cellHeight: race.px(24)
     cellGap: race.px(4)
     titleSize: race.fs(14)
+    // The gauge face's padding, on the same scale as the readouts along the
+    // top: the charge is an instrument like the rest and now reads like one.
+    padX: race.px(16)
+    padY: race.px(12)
     visible: race.state ? race.state.powerupsEnabled : false
   }
 

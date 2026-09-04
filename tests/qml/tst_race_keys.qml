@@ -953,6 +953,75 @@ Item {
              + JSON.stringify(race.handPanel.letGoLineText))
     }
 
+    // Q -- THE HOLE BETWEEN THE ROWS ABOVE, AND IT COST A STREAK.
+    //
+    // Every shape either side of this one is guarded: a card key followed by
+    // another card key (I1..I3), a card key followed by Enter (D), Backspace
+    // (F), Escape (M), the hint (L), and an answer whose FIRST digit is itself
+    // a card key (C2, C3, P2). The one in the middle was not: a card key, then
+    // an answer digit that is NOT a card key.
+    //
+    // `4 x 12 = 48`. `1` chooses card one and prints a provisional `1`. `4` is
+    // past the end of a hand of three, so it is not a card key at all and goes
+    // straight to the engine -- and the provisional `1` was still in the field.
+    // `14` is two digits long, so it submitted itself: the streak gone, one
+    // `missed`, one attempt, on a question the child got right. Six runs out of
+    // six before the fix.
+    function test_29_a_card_key_then_an_answer_the_hand_cannot_type() {
+      tc.fresh(140)
+      tc.dealHand()
+      tc.streakTo(3)
+      // A two-digit answer whose first digit is past a hand of three, so the
+      // press that follows the card key cannot be read as another card.
+      tc.hintUntil(function (a) { return a.length === 2 && Number(a.charAt(0)) > 3 })
+      tc.quiet()
+      var before = tc.snap()
+      tc.press("1")
+      compare(race.handPanel.chosen, 0, "Q: the card key chose card one")
+      compare(after0(), "1", "Q: and printed its digit, provisionally")
+      tc.press(before.answer.charAt(0))
+      compare(after0(), before.answer.charAt(0),
+              "Q: the card's digit came back out, so the field is the child's own first"
+              + " digit and nothing else")
+      tc.press(before.answer.charAt(1))
+      var after = tc.snap()
+      tc.row("Q", "2-digit answer, card key then an answer starting past the hand",
+             "1 " + before.answer, before, after)
+      compare(after.streak, before.streak + 1, "Q: the answer was accepted")
+      compare(after.missed, before.missed, "Q: nothing was recorded as missed")
+      compare(after.attempts, before.attempts + 1,
+              "Q: one attempt, for the one answer that was given")
+      compare(after.hand, before.hand, "Q: the hand is intact")
+      compare(after.cards - before.cards, 0, "Q: no card was played")
+      compare(after.chosen, -1, "Q: and the card choice was let go of")
+    }
+
+    // The same shape on five more seeds, because the bug it guards depended on
+    // which fact the deck happened to be showing and a single seed could hide
+    // it again.
+    function test_30_the_same_on_five_more_decks() {
+      var seeds = [141, 142, 143, 144, 145]
+      for (var i = 0; i < seeds.length; i++) {
+        tc.fresh(seeds[i])
+        tc.dealHand()
+        tc.streakTo(3)
+        tc.hintUntil(function (a) { return a.length === 2 && Number(a.charAt(0)) > 3 })
+        var before = tc.snap()
+        tc.press("1" + before.answer)
+        var after = tc.snap()
+        compare(after.streak, before.streak + 1,
+                "seed " + seeds[i] + ": `1` then " + before.answer
+                + " on " + before.fact + " = " + before.answer
+                + " is the answer, not " + ("1" + before.answer.charAt(0)))
+        compare(after.missed, before.missed,
+                "seed " + seeds[i] + ": and nothing was missed")
+        compare(after.cards - before.cards, 0,
+                "seed " + seeds[i] + ": and no card was played")
+      }
+    }
+
+    function after0() { return race.shownEntry }
+
     function cleanup() {
       // Whatever a case did with the focus, the next one starts from the race.
       race.forceActiveFocus()

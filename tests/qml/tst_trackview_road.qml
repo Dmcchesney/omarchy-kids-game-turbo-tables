@@ -10,7 +10,7 @@ import "../../ui"
 // Each name is a claim, and each case is written so that undoing the change it
 // names makes it fail: put `surfaceFog` back to 1.0 and the far road case
 // fails; widen `lanes` back to +-1.34 and the kerb case fails; return
-// `archOpacity` to a constant 1 and the arch case fails.
+// `propOpacity` to a throttle on arches and the arch case fails.
 //
 // Run it:
 //   qmltestrunner -platform offscreen -import ui -import dev/imports -input tests/qml
@@ -28,6 +28,7 @@ Item {
   }
 
   TestCase {
+    id: tc
     name: "TrackViewRoad"
     when: windowShown
 
@@ -91,40 +92,143 @@ Item {
              + " is not brighter than groundTone " + luma(view.groundTone).toFixed(3))
     }
 
-    // ------------------------------------------- an arch never crosses the fact
+    // ------------------------------------------------- the arches came back
     //
-    // `factFloorY` is the lowest row the fact's ink reaches. An arch whose top
-    // has risen to that line must be drawn at zero, and an arch far enough
-    // away that its top is well below it must be drawn in full -- otherwise
-    // the fix is "no arches", which is not a fix.
-    function test_an_arch_is_gone_before_its_top_reaches_the_fact() {
-      view.factFloorY = 274
-      var span = 9.4
-      var crossed = 0
-      var full = 0
-      for (var z = 2; z < 160; z += 0.25) {
-        var top = view.archTopAt(span, z)
-        var op = view.archOpacity(span, z)
-        if (top <= view.factFloorY) {
-          crossed += 1
-          compare(op, 0, "an arch at z = " + z.toFixed(2) + " has its top at y = "
-                  + top.toFixed(1) + ", at or above the fact's floor "
-                  + view.factFloorY + ", and is drawn at " + op.toFixed(3))
-        }
-        if (op >= 0.999)
-          full += 1
-      }
-      verify(crossed > 0, "no sampled arch ever reached the fact's floor")
-      verify(full > 0, "no sampled arch was ever drawn at full opacity")
-      view.factFloorY = 0
+    // Round four suppressed the two props the design names as landmarks --
+    // "the sevens run under the roller door" -- to keep them off the FACT, and
+    // in doing so met a criterion the plan did not set while leaving the one it
+    // did set (the answer field) unmet. Nothing throttles an arch now, at any
+    // depth, and this is what keeps that true.
+    function test_no_road_spanning_prop_is_ever_dimmed() {
+      for (var z = view.nearDistance; z < view.drawDistance; z += 0.25)
+        compare(view.propOpacity(true, view.archSpan, z), 1,
+                "a road-spanning prop was dimmed at z = " + z.toFixed(2))
     }
 
-    // With no ceiling set -- a bare TrackView in the harness -- nothing fades.
-    function test_no_ceiling_means_no_arch_ever_fades() {
-      view.factFloorY = 0
-      for (var z = 2; z < 60; z += 0.5)
-        compare(view.archOpacity(9.4, z), 1,
-                "an arch faded at z = " + z.toFixed(2) + " with no ceiling set")
+    // ------------------------------------------------ and the field yields
+    //
+    // The plan's second remedy, measured against the object the plan names.
+    // At a travel where a crossbar is over the field's box the yield must be
+    // full; at a travel where no arch is anywhere near it, zero. Both are read
+    // off the view's own `crossingOver`, which is what `Race.qml` binds the
+    // field's face to.
+    function test_the_field_yields_exactly_when_a_crossbar_is_over_it() {
+      // The answer field's box on a 1920x1080 race screen, read off
+      // `dev/Harness.qml --dump-text` rather than assumed.
+      var box = Qt.rect(853, 345, 214, 98)
+      var yielded = 0
+      var clear = 0
+      var worstCoveredWhileClear = 0
+      var worstCoveredWhileNotFull = 0
+      for (var t = 0; t < view.circuitLength; t += 0.5) {
+        view.travel = t
+        var y = view.crossingOver(box)
+        var covered = tc.beamCoverage(box)
+        if (y >= 0.999)
+          yielded += 1
+        else {
+          if (covered > worstCoveredWhileNotFull)
+            worstCoveredWhileNotFull = covered
+          if (y <= 0.001) {
+            clear += 1
+            if (covered > worstCoveredWhileClear)
+              worstCoveredWhileClear = covered
+          }
+        }
+      }
+      view.travel = 216
+      var samples = Math.ceil(view.circuitLength / 0.5)
+      console.log("YIELD|full on " + (100 * yielded / samples).toFixed(1)
+                  + "% of the circuit, untouched on " + (100 * clear / samples).toFixed(1)
+                  + "%, partway on the rest; worst coverage while not fully yielded "
+                  + (100 * worstCoveredWhileNotFull).toFixed(1) + "% of the box")
+      verify(yielded > 0, "the field never yielded anywhere on the circuit")
+      verify(clear > 0, "the field yielded everywhere on the circuit, which is not a yield")
+      // A face that is absent for most of a lap has not yielded, it has been
+      // deleted. This is what the first cut of the rule did, at 40%.
+      verify(yielded / samples < 0.20,
+             "the field is fully yielded on " + (100 * yielded / samples).toFixed(1)
+             + "% of the circuit, which is a field that mostly is not there")
+      // THE CRITERION: no crossbar ever covers more than a quarter of the
+      // answer field without the field being fully out of the way. Coverage is
+      // recomputed here rather than read off `crossingOver`, so the case is not
+      // asserting that function against itself.
+      verify(worstCoveredWhileNotFull <= view.fieldYieldAt + 1e-6,
+             "a crossbar covered " + (100 * worstCoveredWhileNotFull).toFixed(1)
+             + "% of the answer field on a frame where the field had not fully yielded")
+      verify(worstCoveredWhileClear <= 1e-9,
+             "a crossbar covered " + (100 * worstCoveredWhileClear).toFixed(2)
+             + "% of the answer field on a frame where the field had not moved at all")
+    }
+
+    // What fraction of `box` a road-spanning prop's crossbar is behind right
+    // now. Written out here rather than called on the view, so the case above
+    // is not asserting `crossingOver` against itself.
+    function beamCoverage(box) {
+      var worst = 0
+      for (var i = 0; i < view.archProps.length; i++) {
+        var raw = (view.archProps[i] * view.propSpacing - view.travel) % view.propLoop
+        var z = (raw < 0 ? raw + view.propLoop : raw) + view.nearDistance
+        if (z <= view.nearDistance + 0.2 || z >= view.drawDistance)
+          continue
+        var top = view.archTopAt(view.archSpan, z)
+        var stand = view.vAt(z) * view.height
+        var beam0 = top + (stand - top) * view.archBeamTop
+        var beam1 = top + (stand - top) * view.archBeamBottom
+        var halfW = view.sizeAt(view.archSpan, z) / 2
+        var cx = view.uAt(0, z) * view.width
+        var down = Math.min(beam1, box.y + box.height) - Math.max(beam0, box.y)
+        var across = Math.min(cx + halfW, box.x + box.width) - Math.max(cx - halfW, box.x)
+        if (down <= 0 || across <= 0)
+          continue
+        var covered = (down / box.height) * (across / box.width)
+        if (covered > worst)
+          worst = covered
+      }
+      return worst
+    }
+
+    // An empty rect -- a bare TrackView in the harness -- yields nothing ever.
+    function test_no_box_means_nothing_ever_yields() {
+      compare(view.fieldYield, 0, "an unset field rect yielded")
+      compare(view.factYield, 0, "an unset fact rect yielded")
+      for (var t = 0; t < view.circuitLength; t += 3.0) {
+        view.travel = t
+        compare(view.crossingOver(Qt.rect(0, 0, 0, 0)), 0,
+                "an empty box yielded at travel " + t)
+      }
+      view.travel = 216
+    }
+
+    // ------------------------------------- no roadside prop fills the frame
+    //
+    // Round four's throttle was on `arch` kinds only, so a 3-unit tyre wall was
+    // exempt at any size and one of them measured x 1250-1920, y 100-730 on a
+    // shipped frame -- 35% of it, top edge 336 px above the horizon, over the
+    // sun. The rule is now on drawn size and every roadside class obeys it.
+    function test_every_roadside_class_fades_before_it_fills_the_frame() {
+      var widths = [3.0, 3.2, 2.0, 1.35]   // tyre wall, banner, timing board, drum/cone
+      for (var i = 0; i < widths.length; i++) {
+        var worstDrawn = 0
+        for (var z = view.nearDistance + 0.2; z < view.drawDistance; z += 0.05) {
+          var op = view.propOpacity(false, widths[i], z)
+          if (op <= 0.004)
+            continue
+          var drawn = view.sizeAt(widths[i] * view.propAspect, z) / view.height
+          if (drawn > worstDrawn)
+            worstDrawn = drawn
+        }
+        verify(worstDrawn <= view.nearFadeGone + 0.001,
+               "a " + widths[i] + "-unit roadside prop is still drawn at "
+               + (worstDrawn * 100).toFixed(0) + "% of the frame height")
+      }
+    }
+
+    // ... and the rule leaves ordinary roadside furniture alone.
+    function test_a_prop_at_an_ordinary_distance_is_never_dimmed() {
+      for (var z = 6; z < view.drawDistance; z += 0.5)
+        compare(view.propOpacity(false, 3.2, z), 1,
+                "a banner at z = " + z.toFixed(1) + " was dimmed")
     }
   }
 }
