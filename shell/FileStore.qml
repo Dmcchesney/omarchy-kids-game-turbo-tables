@@ -148,6 +148,28 @@ import Quickshell.Io
 // write, measured on the same Quickshell build, so a fresh install needs no
 // mkdir and this plugin never has to start anything to make one.
 //
+// The write side, measured the same way (evidence: vm-b9fb591.md §4.5, one
+// throwaway FileView per case, `blockWrites: true`):
+//
+//   chmod 000 file, atomicWrites on   saveFailed(PermissionDenied=3), file kept
+//   chmod 000 file, atomicWrites off  saveFailed(PermissionDenied=3), file kept
+//   chmod 444 file                    saveFailed(PermissionDenied=3), file kept
+//   chmod 600 file                    saved; new inode, mode copied from the old
+//   chmod 000 file in a chmod 555 dir saveFailed(PermissionDenied=3)
+//   no file, into a chmod 555 dir     saveFailed(Unknown=1), nothing created
+//   no file, into a chmod 000 dir     saveFailed(PermissionDenied=3)  [seam r4]
+//   no file, missing parents          saved, parents created, mode 644
+//   identical bytes over a good file  saved IS raised on this build
+//
+// The first row is the one that decides what the way out can do: `QSaveFile`
+// will not open a target this user cannot write, so a save file at mode 000
+// cannot be replaced from inside the game at all. That is a dead end, and this
+// file's job is to make it a dead end that says what to do -- see
+// `_writeFailureReason()`. The last row contradicts the sentence under
+// `writeNow()` about an unchanged write raising neither signal; nothing here
+// depends on it either way, because `_wroteTheFile` is deliberately not
+// conditioned on `_saves` moving.
+//
 // ---------------------------------------------------------------------------
 // SOMEBODY ELSE'S BYTES
 // ---------------------------------------------------------------------------
@@ -739,6 +761,7 @@ QtObject {
 
     var failuresBefore = _saveFailures
     var savesBefore = _saves
+    _writeWasAuthorised = authorised
     file.setText(text)
 
     // `blockWrites: true`, so both signals have already fired by here
@@ -746,7 +769,7 @@ QtObject {
     // setText). An unchanged file writes nothing and raises neither, which is
     // why only an explicit failure counts as one.
     if (_saveFailures > failuresBefore) {
-      stopWriting("the save file at " + path + " could not be written: " + _lastSaveErrorName)
+      stopWriting(_writeFailureReason())
       return
     }
 
@@ -862,6 +885,55 @@ QtObject {
     return false
   }
 
+  // What a failed write says to the family, and it is the only message in the
+  // plugin that has to survive being the last one.
+  //
+  // The way out of a read-side quarantine is one button, and there is a case it
+  // cannot win: measured in the Omarchy VM on Quickshell 0.3.1, `setText` over a
+  // `chmod 000` file raises `saveFailed(PermissionDenied)` and leaves the file,
+  // with `atomicWrites` on or off, because `QSaveFile` will not open a target
+  // this user cannot write. The test double had modelled that write as
+  // succeeding, so for a round the way out was believed to work for the one case
+  // it is named after.
+  //
+  // A dead end is an acceptable answer. A dead end that reads like an internal
+  // note is not: the family is then holding a locked garage, a red strip, and a
+  // sentence about a file mode. So when the file layer knows the kernel's own
+  // reason, it says what a person can do about it -- named actions, on the path
+  // this plugin actually owns, neither of which loses anything. Anything else is
+  // reported with its error name and the one step that is always true.
+  function _writeFailureReason() {
+    // Two screens print this sentence and one of them, the RESET panel in
+    // ui/Settings.qml, is a narrow column: a message that runs on climbs over
+    // the button it is about. The path is named once at the front and once in
+    // the command that recovers everything, and the second remedy is described
+    // rather than spelled, which is what keeps it to four lines there.
+    var act = _writeWasAuthorised ? "could not be replaced" : "could not be written to"
+    if (_lastSaveError === FileViewError.PermissionDenied) {
+      // Which thing is locked: the file, or the folder holding it? Measured in
+      // the VM, both answer PermissionDenied on the write -- a save at chmod
+      // 000, and a save that is not there at all behind a directory at chmod
+      // 000 (an fscrypt home that has not unlocked is the realistic one). A
+      // message that always named the file would send a parent to chmod
+      // something that does not exist. One probe settles it, on the failure
+      // path, where a stat costs nothing.
+      var folder = _parentOf(path)
+      if (_probe(path) === FileViewError.FileNotFound)
+        return "the save file at " + path + " " + act + ": this computer will not let the game"
+             + " write into " + folder + " (Permission denied), and there is no save file in"
+             + " there to read either. A grown-up can put it right from a terminal:"
+             + " chmod u+rwx " + folder + ". Then close the game and open it again."
+      return "the save file at " + path + " " + act + ": this computer will not let the game"
+           + " write to it (Permission denied). A grown-up can put it right from a terminal,"
+           + " without losing anything: chmod u+rw " + path
+           + " -- or move that file somewhere else to start fresh."
+           + " Then close the game and open it again."
+    }
+    return "the save file at " + path + " " + act + ": " + _lastSaveErrorName
+         + ". Nothing was written. A grown-up can look at that file; once it can be written"
+         + " to, close the game and open it again."
+  }
+
   function stopWriting(reason) {
     if (!_writable)
       return
@@ -919,7 +991,14 @@ QtObject {
 
   property int _saveFailures: 0
   property int _saves: 0
+  // The code as well as the name: the message a family is left with turns on
+  // which failure it was, and a name comparison would be a second spelling of
+  // the enum this file already compares against by value everywhere else.
+  property int _lastSaveError: -1
   property string _lastSaveErrorName: ""
+  // Whether the write that is landing is the one a person asked for through the
+  // Confirm dialog, so a refusal can name the act rather than the mechanism.
+  property bool _writeWasAuthorised: false
 
   property Timer debounce: Timer {
     interval: fileStore.debounceMs
@@ -966,6 +1045,7 @@ QtObject {
 
     onSaveFailed: function (error) {
       fileStore._saveFailures += 1
+      fileStore._lastSaveError = error
       fileStore._lastSaveErrorName = FileViewError.toString(error)
     }
   }

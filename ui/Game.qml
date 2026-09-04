@@ -113,6 +113,11 @@ FocusScope {
   // not be checking the screen, and "a screen says so" is exactly the claim
   // four rounds of review could not verify because nothing said anything.
   readonly property bool noticeVisible: quarantineNotice.visible
+
+  // How much of the bottom the quarantine strip has taken. Every screen is
+  // laid out inside what is left, so the strip cannot cover a control -- see
+  // the note on the loaders below.
+  readonly property real noticeReserve: quarantineNotice.visible ? quarantineNotice.height : 0
   readonly property string noticeSays: noticeText.text
   readonly property string noticeWhy: noticeWhy_.text
 
@@ -325,6 +330,7 @@ FocusScope {
   Garage {
     id: garage
     anchors.fill: parent
+    anchors.bottomMargin: game.noticeReserve
     visible: game.screen === "garage"
     focus: true
 
@@ -336,6 +342,12 @@ FocusScope {
   Loader {
     id: countdownLoader
     anchors.fill: parent
+    // The quarantine strip is an overlay along the bottom, and every screen
+    // used to be laid out as though it were not there: on the settings screen
+    // it covered BACK and the banner beside it, and the four-line version the
+    // file layer produces for a save file this computer will not let the game
+    // write to swallowed both. A screen stops where the notice starts.
+    anchors.bottomMargin: game.noticeReserve
     active: game.screen === "countdown"
     visible: active
     sourceComponent: Component {
@@ -352,6 +364,12 @@ FocusScope {
   Loader {
     id: raceLoader
     anchors.fill: parent
+    // The quarantine strip is an overlay along the bottom, and every screen
+    // used to be laid out as though it were not there: on the settings screen
+    // it covered BACK and the banner beside it, and the four-line version the
+    // file layer produces for a save file this computer will not let the game
+    // write to swallowed both. A screen stops where the notice starts.
+    anchors.bottomMargin: game.noticeReserve
     active: game.screen === "race"
     visible: active
     sourceComponent: Component {
@@ -386,6 +404,12 @@ FocusScope {
   Loader {
     id: resultsLoader
     anchors.fill: parent
+    // The quarantine strip is an overlay along the bottom, and every screen
+    // used to be laid out as though it were not there: on the settings screen
+    // it covered BACK and the banner beside it, and the four-line version the
+    // file layer produces for a save file this computer will not let the game
+    // write to swallowed both. A screen stops where the notice starts.
+    anchors.bottomMargin: game.noticeReserve
     active: game.screen === "results"
     visible: active
     sourceComponent: Component {
@@ -407,6 +431,12 @@ FocusScope {
   Loader {
     id: settingsLoader
     anchors.fill: parent
+    // The quarantine strip is an overlay along the bottom, and every screen
+    // used to be laid out as though it were not there: on the settings screen
+    // it covered BACK and the banner beside it, and the four-line version the
+    // file layer produces for a save file this computer will not let the game
+    // write to swallowed both. A screen stops where the notice starts.
+    anchors.bottomMargin: game.noticeReserve
     active: game.screen === "settings"
     visible: active
     sourceComponent: Component {
@@ -488,9 +518,17 @@ FocusScope {
         width: parent.width
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
+        // The safe action is named first and the destructive one second, and it
+        // was the other way round for a round. A critic measured the cost: the
+        // realistic causes of a quarantine -- an fscrypt home not yet unlocked,
+        // a root-owned `~/.local/share`, a mount briefly away -- all resolve on
+        // their own, and once one has, closing and reopening the game recovers
+        // everything. A strip that names only the button steers a family at the
+        // one action with no undo.
         text: "For a grown-up: " + Store.quarantineReason
               + "  ·  The save file has been left exactly as it is. "
-              + "Press S for settings to start a new one."
+              + "Close the game and open it again to try that file once more, or "
+              + "press S for settings to start a new one."
         color: Theme.textLabel
         font.family: Theme.mono
         font.pixelSize: Math.max(11, game.fs(15))

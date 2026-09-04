@@ -69,10 +69,11 @@ QtObject {
     view._cached = ""
   }
 
+  // A write of identical bytes used to be modelled as raising neither signal.
+  // The build that ships raises `saved` for it (vm-b9fb591.md §4.5, W9), so
+  // there is no such case here any more and `put()` answers -1 or an error.
   function setText(t) {
     var outcome = FakeFs.put(view.path, t)
-    if (outcome === -2)
-      return                       // nothing changed: neither signal
     if (outcome === -1) {
       view._answeredFor = view.path
       view._hasAnswered = true

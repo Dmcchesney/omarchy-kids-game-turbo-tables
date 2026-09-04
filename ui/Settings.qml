@@ -529,6 +529,7 @@ FocusScope {
       titleSpacing: settings.px(3)
 
       Column {
+        id: resetColumn
         x: settings.px(22)
         y: settings.px(64)
         width: parent.width - settings.px(44)
@@ -619,20 +620,32 @@ FocusScope {
       Text {
         x: settings.px(22)
         width: parent.width - settings.px(44)
-        y: parent.height - settings.px(24) - height
+        // Bottom-aligned, with a floor. It grows upward as the sentence gets
+        // longer, and the file layer's own sentence about a save file this
+        // computer will not let the game write to is four lines wide in this
+        // column -- long enough, measured in the VM, to climb over the START A
+        // NEW SAVE FILE button it is about and make both unreadable. The floor
+        // is the column above it: this paragraph may take the space under the
+        // buttons and no more.
+        y: Math.max(resetColumn.y + resetColumn.height + settings.px(14),
+                    parent.height - settings.px(24) - height)
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         text: settings.quarantined
+              // The strip in ui/Game.qml already says the file is untouched, on
+              // this screen and every other. What only this screen can say is
+              // why the three buttons above it are dead.
               ? (settings.quarantineHeadline + "  " + settings.quarantineReason
-                 + "  ·  It is still on this computer, exactly as it was, and nothing has been"
-                 + " written to it. The three resets above cannot run until it is dealt with.")
+                 + "  ·  The three resets above cannot run until it is dealt with.")
               : ("This computer keeps one file: what you chose, your best times, "
                  + "and how each fact has gone. Each reset above clears its own part "
                  + "and leaves the other two alone.")
         color: settings.quarantined ? Theme.urgent : Theme.textLabel
         font.family: Theme.mono
         font.bold: settings.quarantined
-        font.pixelSize: settings.fs(15)
+        // A step smaller while quarantined: this is the one paragraph on the
+        // screen that has to fit whatever the file layer had to say.
+        font.pixelSize: settings.quarantined ? settings.fs(14) : settings.fs(15)
         lineHeight: 1.3
       }
     }

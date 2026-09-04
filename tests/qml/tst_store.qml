@@ -368,13 +368,7 @@ Item {
     // assigning the same one twice fires no change and would skip the load.
     property var fileBack: null
     function freshFileStore(options) {
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineIssues = []
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       suite.fileBack = suite.fileBackendOf(options)
       Store.backend = suite.fileBack
       return suite.fileBack
@@ -386,23 +380,49 @@ Item {
       return parsed.ok ? parsed.file : null
     }
 
-    // A Store as a freshly built singleton would be, then handed `backend`.
+    // The singleton as the QML engine has just finished building it, before
+    // anything has assigned a backend.
     //
-    // The two flags reset here are the ones a new QML engine would start with.
-    // Reaching into them is deliberate and is the only way one process can ask
-    // the fresh-install question sixteen times; the alternative -- one process
-    // per case -- cannot be a qmltestrunner suite at all, which is the reason
-    // this file did not exist for four rounds. A new backend object is built
-    // every time, because assigning the same one twice fires no change and
-    // would silently skip the load under test.
-    function freshStore(broken) {
+    // Reaching into the flags is deliberate and is the only way one process can
+    // ask the fresh-install question sixteen times; the alternative -- one
+    // process per case -- cannot be a qmltestrunner suite at all, which is the
+    // reason this file did not exist for four rounds.
+    //
+    // WHAT THIS USED TO SET BY HAND, AND WHAT IT COST.
+    //
+    // It set `Store._adoptedFormat = ""` as well, on the reasoning that a new
+    // engine would start with the property's declared value. A new engine does
+    // not: `Component.onCompleted` runs `adopt(null)` on the way out of
+    // construction, and that latched `backendFormat()` -- "object", because
+    // there is no backend to ask. So every scenario below started from a state
+    // the shipping wiring never reaches, and the state it never reaches is the
+    // one where START A NEW SAVE FILE works. In the product the latch was
+    // "object", the real backend declared "text", and `flush()` refused the
+    // family's one way out of every read-side quarantine there is with a
+    // sentence about two protocols. A VM verifier found it by driving the
+    // button in the real shell; 119 tests here and 37 in `tests/qml-shell` said
+    // it worked, because this line held the door open for them.
+    //
+    // So the construction path is now run rather than imitated: this calls the
+    // product's own `completeIfNothingHasAnswered()`, which is exactly what
+    // `Component.onCompleted` calls, and whatever that leaves behind is what
+    // every scenario starts from. `test_62` asserts what it leaves behind.
+    function freshSingleton() {
+      Store._backendHasAnswered = false
+      Store.backend = null
       Store.loaded = false
       Store.quarantined = false
       Store.quarantineIssues = []
       Store.quarantineReason = ""
       Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      Store.completeIfNothingHasAnswered()
+    }
+
+    // A Store as a freshly built singleton would be, then handed `backend`. A
+    // new backend object is built every time, because assigning the same one
+    // twice fires no change and would silently skip the load under test.
+    function freshStore(broken) {
+      suite.freshSingleton()
       Store.backend = suite.backendOf(broken)
     }
 
@@ -1425,12 +1445,7 @@ Item {
       var b = { "format": "text" }
       b.load = function () { return disk.blob }      // no save at all
       var before = disk.blob
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       Store.backend = b
 
       verify(Store.loaded && !Store.quarantined, "a readable file did not load")
@@ -1456,12 +1471,7 @@ Item {
         disk.blob = typeof p === "string" ? p : JSON.stringify(p)
         disk.writes += 1
       }
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       Store.backend = b
       verify(Store.loaded && !Store.quarantined, "the text file did not load")
       var before = disk.blob
@@ -1493,12 +1503,7 @@ Item {
         b.save = function (o) { disk.blob = JSON.stringify(o); disk.writes += 1 }
         disk.blob = suite.victimText()
         disk.writes = 0
-        Store.loaded = false
-        Store.quarantined = false
-        Store.quarantineReason = ""
-        Store.quarantineKind = ""
-        Store._backendHasAnswered = false
-        Store._adoptedFormat = ""
+        suite.freshSingleton()
         Store.backend = b
         suite.assertTheFileSurvived("a JSON array " + arrays[i]
                                     + " under the object protocol")
@@ -1809,13 +1814,7 @@ Item {
       spy.save = function (t) { disk.blob = t }
       spy.quarantine = function (payload) { told.push(payload) }
 
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineIssues = []
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       Store.backend = spy
       verify(Store.quarantined, "an unreadable file did not quarantine")
       compare(told.length, 1, "a backend that offers quarantine() was not told")
@@ -1827,13 +1826,7 @@ Item {
       thrower.save = function (t) { disk.blob = t }
       thrower.quarantine = function () { throw new Error("the copy-aside failed") }
 
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineIssues = []
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       Store.backend = thrower
       verify(Store.quarantined, "a backend that threw out of quarantine() lost the quarantine")
       compare(Store.setSetting("kartBody", 3), false, "the session kept writing")
@@ -1850,13 +1843,7 @@ Item {
       thrower.save = function (t) { disk.blob = t; disk.writes += 1 }
       thrower.replaceUnreadableFile = function () { throw new Error("no") }
 
-      Store.loaded = false
-      Store.quarantined = false
-      Store.quarantineIssues = []
-      Store.quarantineReason = ""
-      Store.quarantineKind = ""
-      Store._backendHasAnswered = false
-      Store._adoptedFormat = ""
+      suite.freshSingleton()
       Store.backend = thrower
       verify(Store.quarantined)
       disk.writes = 0
@@ -1870,6 +1857,158 @@ Item {
       verify(Store.quarantineReason.indexOf("could not be replaced") >= 0,
              Store.quarantineReason)
       compare(disk.writes, 0)
+    }
+
+    // =====================================================================
+    // 9. THE WIRING THAT SHIPS
+    //
+    // Everything above runs the Store against a backend a test assigned, in an
+    // order a test chose. The product's order is `TurboTables.qml`'s, and the
+    // order was the defect: `saveAdapter: Store` builds the singleton, whose
+    // `Component.onCompleted` adopts a fresh install and latched a protocol
+    // from a backend that did not exist yet; `saveFile.format` and
+    // `Store.backend` are assigned afterwards. A VM verifier drove the real
+    // button in the real shell at b9fb591 and found it dead for every read-side
+    // quarantine there is -- corrupt file, legacy file, chmod 000, shut home --
+    // while 119 tests here and 37 in `tests/qml-shell` were green, because the
+    // helpers in this file set that latch by hand before every button scenario.
+    //
+    // These four run the product's own construction and the product's own
+    // order, and nothing in this section writes to `_adoptedFormat`.
+    // =====================================================================
+
+    // What `Component.onCompleted` leaves behind. Nobody has declared a
+    // protocol at that point -- there is no backend to declare one -- so the
+    // latch has to be empty, and `backendFormat()`'s "object" for a null
+    // backend is not an answer about a protocol anyone spoke.
+    function test_62_construction_latches_no_protocol_before_a_backend_answers() {
+      suite.freshSingleton()
+      compare(Store._adoptedFormat, "",
+              "the singleton latched a protocol before any backend had answered,"
+              + " which shuts the way out of every read-side quarantine")
+      compare(Store.loaded, true, "construction did not adopt the fresh install")
+      compare(Store.quarantined, false)
+    }
+
+    // The route, in the order the wiring uses it, for each of the four
+    // read-side quarantines a family can be in. Each one ends at the screen:
+    // the Settings probe's own question and answer, and the sentence it prints.
+    function test_63_the_button_starts_a_new_save_from_the_shipping_order() {
+      var causes = [
+        { "what": "a corrupt file", "blob": "{ this is not a save file", "readable": true },
+        { "what": "a legacy file", "readable": true,
+          "blob": "{\"settings\":{\"kartBody\":1},\"records\":{\"practice:2-5\":61234},"
+                  + "\"facts\":{\"7x8\":3}}" },
+        { "what": "a file that cannot be read", "blob": suite.victimText(), "readable": false },
+        { "what": "a file that is not there and cannot be shown to be",
+          "blob": "", "exists": false, "readable": false }
+      ]
+
+      for (var i = 0; i < causes.length; i++) {
+        var cause = causes[i]
+
+        // TurboTables.qml, in order. 1: the singleton is built.
+        suite.freshSingleton()
+        compare(Store._adoptedFormat, "", cause.what + ": the latch was set at construction")
+
+        // 2: the file layer exists and is told which protocol to speak, which
+        //    the wiring decides from what the Store in the tree can read.
+        realDisk.reset(cause.blob)
+        realDisk.exists = cause.exists === undefined ? true : cause.exists
+        realDisk.readable = cause.readable
+        var back = suite.fileBackendOf({
+          "format": (typeof Store.backendFormat === "function") ? "text" : "object"
+        })
+        // The fourth cause: a not-found that could not be shown to be an
+        // absence. Layer 3 throws for it rather than answering null, which is
+        // the whole of `_absenceIsProven`.
+        if (cause.exists === false) {
+          back.load = function () {
+            throw new Error("the save file was not found, and its absence could not be"
+                            + " established: a directory above it could not be read into")
+          }
+        }
+
+        // 3: assigning the backend is what makes the Store read the file.
+        Store.backend = back
+        verify(Store.quarantined, cause.what + ": did not quarantine")
+        compare(Store.quarantineKind, "read", cause.what + ": the wrong half of the rule")
+        var before = realDisk.blob
+
+        // 4: the family walks the focus chain to START A NEW SAVE FILE and
+        //    answers the Confirm dialog.
+        verify(settingsProbe.quarantined, cause.what + ": the button is not on the screen")
+        settingsProbe.pending = "discard"
+        settingsProbe.answer(true)
+
+        compare(settingsProbe.bannerText, "A NEW SAVE FILE HAS BEEN STARTED",
+                cause.what + ": the screen said " + settingsProbe.bannerText)
+        compare(Store.quarantined, false, cause.what + ": the session is still locked")
+        compare(realDisk.writes, 1, cause.what + ": nothing reached the file layer")
+        verify(realDisk.blob !== before, cause.what + ": the bytes did not move")
+        realDisk.readable = true
+        verify(suite.realDiskFile() !== null,
+               cause.what + ": what was written is not a save file")
+        compare(back.refusals.length, 0, cause.what + ": " + JSON.stringify(back.refusals))
+      }
+    }
+
+    // The latch is not merely unset now: it is set by the load that answered,
+    // and a quarantine is a load that answered. So the guard it exists for
+    // still covers the one write a read-side quarantine can produce.
+    function test_64_a_protocol_that_moved_under_a_quarantine_still_refuses_the_write() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      var back = suite.freshFileStore()
+      verify(Store.quarantined)
+      compare(Store._adoptedFormat, "text",
+              "the protocol the backend declared while quarantining was not latched")
+
+      back.format = "object"                    // the pair disagree from here
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED",
+              "a replacement went ahead in a protocol the load did not answer in")
+      compare(realDisk.writes, 0, "a payload of the other protocol reached the file")
+      verify(Store.quarantined)
+    }
+
+    // A replacement the file layer refuses leaves the family where they were:
+    // holding the defaults, over a file nobody has read. The screen has to keep
+    // saying the read-side sentences for that, because the write-side ones --
+    // "nothing you have done today is lost", "today's best times and fact
+    // history included" -- are both false when no read ever came back, and they
+    // are printed on the one screen with no undo.
+    function test_65_a_refused_replacement_keeps_the_read_side_sentences() {
+      realDisk.reset(suite.victimText())
+      realDisk.readable = false
+      realDisk.writable = false
+      suite.freshFileStore()
+      verify(Store.quarantined)
+      compare(Store.quarantineKind, "read")
+
+      settingsProbe.pending = "discard"
+      settingsProbe.answer(true)
+
+      compare(settingsProbe.bannerText, "NOTHING WAS CHANGED")
+      compare(Store.quarantineKind, "read",
+              "a failed replacement told the screen the file had read perfectly")
+      compare(settingsProbe.writeSide, false)
+      verify(settingsProbe.quarantineHeadline.indexOf("COULD NOT BE READ") >= 0,
+             settingsProbe.quarantineHeadline)
+
+      // And a write-side quarantine over a file this session did read still
+      // gets the write-side half, so this is not a blanket "always read".
+      realDisk.reset(suite.victimText())
+      var back = suite.freshFileStore()
+      verify(Store.loaded && !Store.quarantined, "the good file did not load")
+      realDisk.writable = false
+      Store.setSetting("kartBody", 3)
+      back.flushNow()
+      verify(Store.quarantined, "a failed write did not stop the writing")
+      compare(Store.quarantineKind, "write",
+              "a file that read perfectly was reported as unreadable")
     }
   }
 

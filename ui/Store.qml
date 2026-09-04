@@ -104,6 +104,15 @@ import "../engine/engine.mjs" as Engine
 //   `backend.replaceUnreadableFile()`, and told before this store clears
 //   anything of its own.
 //
+//   **The way out has to be reachable from the wiring that ships.** For a
+//   round it was not, and three tests said it was: this file latched a
+//   protocol at construction, before `TurboTables.qml` had assigned a backend
+//   or decided which protocol to speak, and the guard in `flush()` then refused
+//   the replacement for every read-side quarantine there is. See
+//   `_adoptedFormat`. `tests/qml/tst_store.qml` had hidden it by setting that
+//   latch by hand; it now runs the product's own construction path instead, and
+//   section 7 of that file drives the button through the shipping order.
+//
 //   **Every report of success has to be a report about the file.** These
 //   functions return what happened on disk, not what was asked for -- so
 //   `setSetting`, the three resets and the discard all answer false when the
@@ -179,8 +188,40 @@ QtObject {
   // pair, established once; a later disagreement is a bug and is refused out
   // loud rather than serialised.
   //
-  // "" until a load has been adopted.
+  // "" until a *backend* has answered a load. That word is the whole of a
+  // defect a VM verifier found in the shipping wiring, and it shut the only way
+  // a family has out of a quarantine:
+  //
+  //   `Component.onCompleted` runs `adopt(null)` when the singleton is built,
+  //   which `TurboTables.qml` does at `saveAdapter: Store` -- before it has
+  //   decided which protocol to speak and before any backend exists. That
+  //   `adopt` latched `backendFormat()`, and `backendFormat()` answers "object"
+  //   when there is no backend to ask. So every session started latched to a
+  //   protocol nobody had spoken. The real backend then declared "text", the
+  //   read-side quarantine left the latch alone, and START A NEW SAVE FILE was
+  //   refused by the guard below with a sentence about two protocols -- for a
+  //   corrupt file, a legacy file, a chmod 000 file and a shut home alike.
+  //   Measured in the Omarchy VM at b9fb591: the file layer was never asked.
+  //
+  // A store with no backend has not been told anything about a protocol, and
+  // the honest latch for that is the empty one. Set only where a backend
+  // actually answered: the two adopt paths and `quarantine()`.
   property string _adoptedFormat: ""
+
+  // True while this session has never had a save file handed to it -- set by
+  // `quarantine()`, cleared by any adopt that came off a backend and by a
+  // replacement that landed.
+  //
+  // It exists for one screen decision. A write that fails re-quarantines
+  // through `stopWriting`, which would otherwise stamp the session "write" --
+  // and the write-side sentence `ui/Settings.qml` shows tells a parent that
+  // nothing they did today is lost and that today's best times get written.
+  // Both are true of a file that read perfectly and could not be written. Both
+  // are false when the read never came back: the session is holding the
+  // defaults, and the thing that failed was the attempt to replace a file
+  // nobody could read. A parent who reads the wrong one of those is being
+  // steered by a screen that has forgotten which half of the rule it is in.
+  property bool _neverGotTheFile: false
 
   signal changed()
 
@@ -639,8 +680,16 @@ QtObject {
       records = {}
       facts = []
       loaded = true
-      _adoptedFormat = backendFormat()
-      if (backend) _backendHasAnswered = true
+      // Only a backend can establish a protocol. With none there is nobody who
+      // has spoken one, and latching "object" here -- which is what
+      // `backendFormat()` answers for a null backend -- is the construction-time
+      // latch that shut the way out of every read-side quarantine. See
+      // `_adoptedFormat`.
+      _adoptedFormat = backend ? backendFormat() : ""
+      if (backend) {
+        _backendHasAnswered = true
+        _neverGotTheFile = false
+      }
       changed()
       return
     }
@@ -669,6 +718,7 @@ QtObject {
     loaded = true
     _adoptedFormat = text ? "text" : "object"
     _backendHasAnswered = true
+    _neverGotTheFile = false
     changed()
   }
 
@@ -752,6 +802,16 @@ QtObject {
     // `loaded` is true so that `Component.onCompleted`'s `adopt(null)` cannot
     // arrive afterwards and clobber the quarantine with a fresh install.
     loaded = true
+    // A quarantine IS a load that answered: a backend was asked, and it
+    // declared a protocol while answering. Latching it here is what makes the
+    // guard in `flush()` cover the one write a read-side quarantine can still
+    // produce -- the replacement `discardQuarantinedFile()` asks for. Left
+    // alone when there is no backend, because then nobody declared anything
+    // and "" is the honest answer; see `_adoptedFormat` for what latching a
+    // protocol nobody spoke cost.
+    if (backend)
+      _adoptedFormat = backendFormat()
+    _neverGotTheFile = true
     console.warn("Store: the save file was not readable and has been left alone: "
                  + quarantineReason + " (" + issues.length + " issue(s))")
     if (backend && typeof backend.quarantine === "function") {
@@ -775,7 +835,13 @@ QtObject {
     quarantined = true
     quarantineIssues = issues
     quarantineReason = reasonOf(issues)
-    quarantineKind = "write"
+    // Which half of the rule the family is in is decided by whether a file was
+    // ever read, not by which call re-quarantined. A failed *replacement* of a
+    // file nobody could read is still the read-side situation: the session is
+    // holding the defaults, so the write-side sentences -- "nothing you have
+    // done today is lost", "today's best times and fact history included" --
+    // would both be false on the one screen with no undo. See `_neverGotTheFile`.
+    quarantineKind = _neverGotTheFile ? "read" : "write"
     console.warn("Store: the save file could not be written and will not be written again this"
                  + " session: " + quarantineReason)
     changed()
@@ -887,6 +953,13 @@ QtObject {
         stopWriting([{ "path": "", "problem": "the new save file could not be written: " + e }])
       }
     }
+
+    // A replacement that landed is the file this session now has: the bytes on
+    // disk are the ones it just wrote, so a later write that fails is a
+    // write-side failure over a file this session knows, and the screen should
+    // say the write-side sentence for it.
+    if (!quarantined)
+      _neverGotTheFile = false
 
     // 4. The truth. A refusal anywhere above has re-quarantined this store --
     //    including the file layer's newest one, which is that the file it was

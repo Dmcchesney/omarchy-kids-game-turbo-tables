@@ -132,7 +132,7 @@ Item {
     // like a file that is not there. It may never be read as an absence.
     function test_03_a_shut_directory_is_not_an_absence() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000
       var store = suite.aStore()
       var threw = false
       try { store.load() } catch (error) { threw = true }
@@ -145,7 +145,7 @@ Item {
     // traversability proof from a plausible one.
     function test_04_a_readable_untraversable_directory_does_not_prove_absence() {
       FakeFs.dirs(root.dataDir)
-      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": true })
+      FakeFs.chmod(root.dataDir, 6)                   // chmod 666
       var store = suite.aStore()
       var threw = false
       try { store.load() } catch (error) { threw = true }
@@ -156,7 +156,7 @@ Item {
     // chmod 111: traversable, unreadable. Absence through it is real.
     function test_05_a_traversable_unreadable_directory_can_prove_absence() {
       FakeFs.dirs(root.dataDir)
-      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": false })
+      FakeFs.chmod(root.dataDir, 1)                   // chmod 111
       var store = suite.aStore()
       compare(store.load(), null)
       compare(store.absenceProven, true)
@@ -164,7 +164,7 @@ Item {
 
     function test_06_a_file_that_cannot_be_read_is_a_throw_not_an_absence() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       var threw = false
       try { store.load() } catch (error) { threw = true }
@@ -192,7 +192,7 @@ Item {
     // Refusal 2.
     function test_08_nothing_is_written_over_an_unreadable_file() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
       store.save(suite.anotherSave)
@@ -313,7 +313,7 @@ Item {
       var store = suite.aStore()
       store.load()
 
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       store.save(suite.anotherSave)
       store.flushNow()
 
@@ -333,7 +333,7 @@ Item {
 
     function test_16_a_read_side_refusal_has_no_way_out_without_an_explicit_one() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
 
@@ -348,15 +348,23 @@ Item {
       compare(store.writable, false)
     }
 
+    // The read never came back, and by the time the family presses there is
+    // nothing on the path: the grown-up did what the refusal in
+    // `_writeFailureReason()` names and moved the file out of the way, or a
+    // directory that was shut has opened onto an empty one. This is the shape
+    // of every read-side quarantine the button can actually finish, and it is
+    // here rather than over a `chmod 000` file because the runtime cannot
+    // replace one of those at all -- see test_18.
     function test_17_replacing_an_unreadable_file_writes_and_hands_the_session_back() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
       compare(store.everLoaded, false)
       compare(store.verdict, "unreadable")
 
       // The decision a person made in the Confirm dialog, and nothing else.
+      FakeFs.remove(root.savePath)                    // mv garage.json garage.json.old
       store.replaceUnreadableFile()
       store.save(suite.anotherSave)
       store.flushNow()
@@ -382,11 +390,22 @@ Item {
       compare(store.writable, false)
     }
 
-    // The way out over a file that could not be read AND cannot be written.
-    // Nothing lands, and it says so rather than latching quietly.
-    function test_18_a_replacement_that_cannot_be_written_is_reported() {
+    // The case the button is NAMED after, and the one it cannot win.
+    //
+    // A save file at chmod 000 cannot be replaced from inside the game:
+    // `QSaveFile` will not open a target this user cannot write, so `setText`
+    // raises `saveFailed(PermissionDenied)` and leaves the file, with
+    // `atomicWrites` on or off (vm-b9fb591.md §4.5, rows W3/W4). The model in
+    // `Quickshell/Io/FakeFs.qml` used to say this write succeeded, and on the
+    // strength of that this suite told two rounds that the way out worked here.
+    //
+    // So this is a dead end, and the only thing that makes a dead end
+    // acceptable is that the family is told how to get out of it. A parent
+    // reading the strip has to come away with something they can do, on the one
+    // path this plugin owns, that loses nothing.
+    function test_18_a_replacement_the_runtime_refuses_is_reported_with_what_to_do() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false, "writable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
 
@@ -395,9 +414,47 @@ Item {
       store.flushNow()
 
       compare(FakeFs.textAt(root.savePath), suite.aSave)
+      compare(FakeFs.modeAt(root.savePath), 0, "the refused write moved the file's mode")
       compare(store.writable, false)
       compare(suite.refusals.length, 1, "a failed replacement said nothing")
       compare(suite.wroteCount, 0)
+
+      // What the family is left holding. Not "PermissionDenied" on its own,
+      // which sends a parent nowhere.
+      var said = suite.refusals[0]
+      verify(said.indexOf("could not be replaced") >= 0, said)
+      verify(said.indexOf("Permission denied") >= 0, said)
+      verify(said.indexOf("chmod u+rw " + root.savePath) >= 0,
+             "the refusal does not name the command that unlocks the file: " + said)
+      verify(said.indexOf("move that file somewhere else") >= 0,
+             "the refusal does not name the way out that keeps the file: " + said)
+      verify(said.indexOf("close the game and open it again") >= 0,
+             "the refusal does not say what to do once it is fixed: " + said)
+    }
+
+    // The same dead end, one level up: the save is not there at all and the
+    // folder that would hold it is shut -- an fscrypt home that has not
+    // unlocked, or a root-owned `~/.local/share`. Both answer PermissionDenied
+    // on the write, so the refusal has to work out which of the two a parent
+    // should go and look at; the file it would otherwise name does not exist.
+    function test_18b_a_replacement_blocked_by_the_folder_names_the_folder() {
+      FakeFs.dirs(root.dataDir)
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000, and no file in it
+      var store = suite.aStore()
+      try { store.load() } catch (error) { /* expected */ }
+
+      store.replaceUnreadableFile()
+      store.save(suite.anotherSave)
+      store.flushNow()
+
+      compare(FakeFs.textAt(root.savePath), null, "a file appeared behind a shut directory")
+      compare(suite.refusals.length, 1, "a failed replacement said nothing")
+      var said = suite.refusals[0]
+      verify(said.indexOf("chmod u+rwx " + root.dataDir) >= 0,
+             "the refusal does not name the folder that is actually shut: " + said)
+      verify(said.indexOf("chmod u+rw " + root.savePath) < 0,
+             "the refusal told a parent to chmod a file that is not there: " + said)
+      verify(said.indexOf("close the game and open it again") >= 0, said)
     }
 
     // An authorisation that was never spent does not outlive the question it
@@ -440,7 +497,7 @@ Item {
     function test_20_nothing_else_stands_the_read_side_refusals_down() {
       FakeFs.dirs(root.dataDir)
       FakeFs.file(root.savePath, suite.aSave)
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
       compare(store.replaceAuthorised, false)
@@ -494,8 +551,8 @@ Item {
         store.load()
         store.save(suite.anotherSave)              // something is pending
         store.debounce = null                      // the teardown, held still
-        FakeFs.chmod(root.dataDir, { "writable": false })
-        FakeFs.chmod(root.savePath, { "writable": false })
+        FakeFs.chmod(root.dataDir, 5)                   // chmod 555
+        FakeFs.chmod(root.savePath, 4)                  // chmod 444
 
         // flushNow -> writeNow -> the write fails -> stopWriting -> debounce.stop()
         store.flushNow()
@@ -533,8 +590,8 @@ Item {
       suite.withASaveOnDisk()
       var store = suite.aStore()
       store.load()
-      FakeFs.chmod(root.dataDir, { "writable": false })
-      FakeFs.chmod(root.savePath, { "writable": false })
+      FakeFs.chmod(root.dataDir, 5)                   // chmod 555
+      FakeFs.chmod(root.savePath, 4)                  // chmod 444
       store.save(suite.anotherSave)
 
       store.destroy()
@@ -557,13 +614,13 @@ Item {
     // and a save is sitting there.
     function test_26_an_authorised_write_refuses_a_file_that_reads_again() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
       compare(store.verdict, "unreadable")
 
       store.replaceUnreadableFile()
-      FakeFs.chmod(root.savePath, { "readable": true })     // the permission is fixed
+      FakeFs.chmod(root.savePath, 6)                  // chmod 600: the permission is fixed
       store.save(suite.anotherSave)
       store.flushNow()
 
@@ -584,7 +641,7 @@ Item {
     // behind it.
     function test_27_an_authorised_write_refuses_a_save_behind_a_home_that_unlocked() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000
       var store = suite.aStore()
       var threw = false
       try { store.load() } catch (error) { threw = true }
@@ -593,7 +650,7 @@ Item {
       compare(store.absenceProven, false)
 
       store.replaceUnreadableFile()
-      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+      FakeFs.chmod(root.dataDir, 7)                   // chmod 755
       store.save(suite.anotherSave)
       store.flushNow()
 
@@ -604,16 +661,21 @@ Item {
       verify(suite.refusals[0].indexOf("can be read now") >= 0, suite.refusals[0])
     }
 
-    // And the case the button exists for still works: still unreadable at the
-    // moment of the write, so there is nothing to lose by replacing it. Without
-    // this, "refuse everything" would pass the two rows above.
-    function test_28_an_authorised_write_still_replaces_a_file_that_stayed_shut() {
-      suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+    // And the case the button exists for still works: the shut directory of
+    // test_27, unlocked onto nothing. Nobody's save is behind it, so there is
+    // nothing to lose by writing, and the family gets a garage back. Without
+    // this and test_17, "refuse everything" would pass the two rows above.
+    function test_28_an_authorised_write_still_starts_a_save_where_there_is_none() {
+      FakeFs.dirs(root.dataDir)
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000
       var store = suite.aStore()
-      try { store.load() } catch (error) { /* expected */ }
+      var threw = false
+      try { store.load() } catch (error) { threw = true }
+      verify(threw, "a shut directory was answered for")
+      compare(store.everLoaded, false)
 
       store.replaceUnreadableFile()
+      FakeFs.chmod(root.dataDir, 7)                   // chmod 755: the home unlocks
       store.save(suite.anotherSave)
       store.flushNow()
 
@@ -665,7 +727,7 @@ Item {
     // failed left it standing for the life of the object.
     function test_29_a_failed_write_spends_the_authorisation() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false, "writable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
 
@@ -679,7 +741,7 @@ Item {
       // Which is what used to let an ordinary keystroke spend it: the wiring
       // lifts the write latch on the quarantine-clear transition, and the very
       // next change would have gone past every refusal in the file.
-      FakeFs.chmod(root.savePath, { "writable": true })
+      FakeFs.chmod(root.savePath, 2)                  // chmod 200: writable, still unreadable
       store.allowWritingAgain()
       store.save(suite.anotherSave)
       store.flushNow()
@@ -731,7 +793,7 @@ Item {
     // connected to it, waiting for the next write.
     function test_35_a_refusal_before_any_write_still_ends_the_act() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.savePath, { "readable": false })
+      FakeFs.chmod(root.savePath, 0)                  // chmod 000
       var store = suite.aStore()
       try { store.load() } catch (error) { /* expected */ }
 
@@ -758,7 +820,7 @@ Item {
     // answers `null` -- "fresh install" -- for a real, readable save.
     function test_32_a_proof_of_absence_re_reads_the_file_itself() {
       suite.withASaveOnDisk()
-      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000
       var store = suite.aStore()
       var threw = false
       try { store.load() } catch (error) { threw = true }
@@ -767,7 +829,7 @@ Item {
 
       // The home unlocks. The ancestors now prove out perfectly; only the
       // re-read of the path itself stands between that and "fresh install".
-      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+      FakeFs.chmod(root.dataDir, 7)                   // chmod 755
 
       var answer = store.load()
       compare(answer, suite.aSave,
@@ -786,7 +848,7 @@ Item {
       compare(store.load(), suite.aSave)
 
       // Not deleted: hidden. Every read below it now answers FileNotFound.
-      FakeFs.chmod(root.dataDir, { "traversable": false, "readable": false })
+      FakeFs.chmod(root.dataDir, 0)                   // chmod 000
       store.save(suite.anotherSave)
       store.flushNow()
 
@@ -797,7 +859,7 @@ Item {
              "the refusal blamed the wrong thing: " + suite.refusals[0])
 
       // The file is still there, untouched, behind the directory.
-      FakeFs.chmod(root.dataDir, { "traversable": true, "readable": true })
+      FakeFs.chmod(root.dataDir, 7)                   // chmod 755
       compare(FakeFs.textAt(root.savePath), suite.aSave)
     }
 
