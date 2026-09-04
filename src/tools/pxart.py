@@ -1,17 +1,39 @@
 """Pixel-art post-processor, pure Python (no Pillow on this Mac).
 
+  pxart.py bake    RENDER_DIR OUT.png --paint e0483a [--dither 0.25] [--px 4]
   pxart.py sprite  IN.png OUT_BASE --width 160 [--scale 3] [--outline]
   pxart.py scene   IN.png OUT_BASE --width 640 [--scale 3] [--dither 0.5]
   pxart.py compare LEFT.png RIGHT.png OUT.png [--height 480]
+  pxart.py sheet   OUT.png IMG... [--height H] [--gap G]
+  pxart.py paste   BASE.png OVERLAY.png OUT.png --at x,y
 
-sprite: crop to alpha bbox, box-downscale to --width, Bayer-dither + quantise
-        to the palette, optional 1px outline, write OUT_BASE.png (grid size)
-        and OUT_BASE-x{scale}.png (nearest upscale).
+bake:   the sprite-sheet path. RENDER_DIR holds bake-cars.py's sixteen frames
+        (stall-0..7.png, road-0..7.png), each --px times the 192x128 cell with
+        the car's ground-centre at a fixed point. Every frame is box-downscaled
+        to the three cell sizes (192x128, 96x64, 48x32), quantised to the
+        paint-locked palette with a Bayer dither, despeckled, outlined, and
+        placed in the contract's fixed-cell sheet:
+            row 0..2  stall  at scale 1, 1/2, 1/4
+            row 3..5  road   at scale 1, 1/2, 1/4
+        Semi-transparent pixels (the renderer's contact shadow) become ONE
+        purple tone at half alpha. The PNG is written by this file's own
+        encoder, so the bytes depend only on the pixels -- the renderer's
+        timestamps never reach the sheet.
+sprite: crop to alpha bbox, box-downscale to --width, dither + quantise to the
+        palette, optional 1px outline, write OUT_BASE.png and OUT_BASE-x{k}.png.
 scene:  same without alpha crop/outline (opaque backgrounds).
-compare: put two images side by side on the theme ground at a common height,
-        nearest-neighbour, so a before/after can be judged at one scale.
+compare / sheet / paste: evidence helpers, unchanged.
+
+The palette is a fixed set of neutrals, cream and lamp tones plus ONE paint
+ramp, derived from the paint hex itself (ui/Theme.qml's swatch), so a sheet is
+locked to its own paint: a lit red face can never snap to orange, a shadowed one
+never to purple.
 """
-import struct, sys, zlib
+import os
+import struct
+import sys
+import zlib
+
 
 # ---------------------------------------------------------------- PNG I/O
 def read_png(path):
@@ -21,12 +43,12 @@ def read_png(path):
     while pos < len(data):
         n = struct.unpack(">I", data[pos:pos+4])[0]
         typ = data[pos+4:pos+8]; body = data[pos+8:pos+8+n]; pos += 12 + n
-        if typ == b"IHDR": chunks["IHDR"] = body
+        if typ in (b"IHDR", b"PLTE", b"tRNS"): chunks[typ.decode()] = body
         elif typ == b"IDAT": idat.append(body)
         elif typ == b"IEND": break
     w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", chunks["IHDR"])
-    assert depth == 8 and interlace == 0 and ctype in (2, 6), f"unsupported PNG {depth} {ctype} {interlace}"
-    bpp = 4 if ctype == 6 else 3
+    assert depth == 8 and interlace == 0 and ctype in (2, 3, 6), f"unsupported PNG {depth} {ctype} {interlace}"
+    bpp = {2: 3, 3: 1, 6: 4}[ctype]
     raw = zlib.decompress(b"".join(idat))
     stride = w * bpp
     out = bytearray(w * h * 4)
@@ -53,19 +75,56 @@ def read_png(path):
         o = y * w * 4
         if bpp == 4:
             out[o:o+w*4] = line
-        else:
+        elif bpp == 3:
             for x in range(w):
                 out[o+x*4:o+x*4+3] = line[x*3:x*3+3]; out[o+x*4+3] = 255
+        else:
+            plte, trns = chunks["PLTE"], chunks.get("tRNS", b"")
+            for x in range(w):
+                i = line[x]
+                out[o+x*4:o+x*4+3] = plte[i*3:i*3+3]; out[o+x*4+3] = trns[i] if i < len(trns) else 255
         prev = line
     return w, h, out
 
+
 def write_png(path, w, h, px):
+    """Deterministic: fixed filter (none), fixed zlib level, no ancillary
+    chunks. Same pixels, same bytes."""
     raw = bytearray()
     for y in range(h):
         raw.append(0); raw += px[y*w*4:(y+1)*w*4]
     def chunk(t, b): return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b) & 0xffffffff)
     open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
                            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
+
+def write_png_indexed(path, w, h, px):
+    """The sheet encoder: colour type 3 (palette) with a tRNS chunk, one byte
+    per pixel instead of four, which is what makes 48 sheets fit the 2 MB
+    budget. The palette is built from the pixels in scan order, so the bytes
+    depend only on the pixels. Falls back to RGBA if there are more than 256
+    distinct (r, g, b, a) values, which a quantised sheet never has."""
+    index = {}
+    colours = []
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        row = px[y*w*4:(y+1)*w*4]
+        for x in range(w):
+            c = bytes(row[x*4:x*4+4])
+            i = index.get(c)
+            if i is None:
+                if len(colours) == 256:
+                    return write_png(path, w, h, px)
+                i = len(colours); index[c] = i; colours.append(c)
+            raw.append(i)
+    plte = b"".join(c[:3] for c in colours)
+    trns = bytes(c[3] for c in colours)
+    def chunk(t, b): return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b) & 0xffffffff)
+    open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0))
+                           + chunk(b"PLTE", plte) + chunk(b"tRNS", trns)
+                           + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
 
 # ---------------------------------------------------------------- palette
 # 32 colours built on the theme's anchors, each as a hue-shifted ramp:
@@ -107,6 +166,39 @@ def lock_palette(paint):
     keep = list(range(0, 7)) + list(range(15, 18)) + list(range(21, 24)) + list(range(PAINTS[paint], PAINTS[paint] + 4))
     PALETTE = [hex2rgb(PALETTE_HEX[i]) for i in keep]
 
+
+def mix(a, b, t):
+    return tuple(int(round(a[i] * (1 - t) + b[i] * t)) for i in range(3))
+
+
+def paint_ramp(hexcolour):
+    """Four steps around one swatch: deep shadow toward the ground purple,
+    shadow cooler and darker, the swatch itself, a highlight toward warm
+    cream. The swatch is the middle so the dominant tone IS the paint."""
+    base = hex2rgb(hexcolour)
+    deep = mix(tuple(int(c * 0.42) for c in base), hex2rgb("3c1228"), 0.30)
+    shade = mix(tuple(int(c * 0.68) for c in base), hex2rgb("5f255e"), 0.16)
+    high = mix(base, hex2rgb("fff0d0"), 0.36)
+    return [deep, shade, base, high]
+
+
+# The sprite-sheet palette: neutrals for tyres, rims, trim and glass; cream for
+# the livery, roundels and plate; the lamp tones; and the paint ramp. Amber
+# f5a524 and the hazard yellows are left out on purpose -- they sit too close
+# to the orange and yellow ramps and would steal body pixels.
+SHEET_FIXED_HEX = [
+    "0b0c12", "1a1b26", "2a2b3d", "414868", "6b7291", "a9b1d6",   # cool neutrals
+    "b09a6d", "d9c79a", "f2e6c4",                                 # cream
+    "ffd489",                                                     # headlamp
+    "f01a1a", "ffb3a0",                                           # tail bar, its glow strip
+    "280e27",                                                     # ink / outline
+]
+def sheet_palette(hexcolour):
+    global PALETTE
+    PALETTE = [hex2rgb(h) for h in SHEET_FIXED_HEX] + paint_ramp(hexcolour)
+    return PALETTE
+
+
 def nearest(r, g, b):
     best, bd = PALETTE[0], 1e18
     for c in PALETTE:
@@ -139,8 +231,8 @@ def crop(w, h, px, box):
         out[y*cw*4:(y+1)*cw*4] = px[s:s + cw*4]
     return cw, ch, out
 
-def box_down(w, h, px, tw):
-    th = max(1, round(h * tw / w))
+def box_down(w, h, px, tw, th=None):
+    th = th or max(1, round(h * tw / w))
     out = bytearray(tw * th * 4)
     for ty in range(th):
         ya, yb = int(ty * h / th), max(int(ty * h / th) + 1, int((ty + 1) * h / th))
@@ -158,8 +250,34 @@ def box_down(w, h, px, tw):
                 out[o], out[o+1], out[o+2], out[o+3] = r // a, g // a, b // a, a // n
     return tw, th, out
 
+
+def box_down_exact(w, h, px, k):
+    """Integer k:1 box filter -- the bake path, where the render is an exact
+    multiple of the cell. Same result as box_down, several times faster."""
+    tw, th = w // k, h // k
+    out = bytearray(tw * th * 4)
+    kk = k * k
+    for ty in range(th):
+        rows = [((ty * k + j) * w) * 4 for j in range(k)]
+        o = ty * tw * 4
+        for tx in range(tw):
+            x0 = tx * k * 4
+            r = g = b = a = 0
+            for row in rows:
+                i = row + x0
+                for _ in range(k):
+                    al = px[i+3]
+                    if al:
+                        r += px[i] * al; g += px[i+1] * al; b += px[i+2] * al; a += al
+                    i += 4
+            if a:
+                out[o] = r // a; out[o+1] = g // a; out[o+2] = b // a; out[o+3] = a // kk
+            o += 4
+    return tw, th, out
+
+
 SHADOW = (11, 12, 18)
-def quantise(w, h, px, dither=0.5, alpha_cut=160, shadow_lo=24):
+def quantise(w, h, px, dither=0.5, alpha_cut=160, shadow_lo=24, shadow=SHADOW, shadow_alpha=140):
     """Opaque pixels are dithered onto the palette. Semi-transparent pixels --
     the renderer's soft ground shadow -- become ONE dark tone at half alpha,
     which is how a sprite sheet carries a shadow: a flat shape, not a blur."""
@@ -171,7 +289,7 @@ def quantise(w, h, px, dither=0.5, alpha_cut=160, shadow_lo=24):
             a = px[i+3]
             if a < shadow_lo: continue
             if a < alpha_cut:
-                out[i], out[i+1], out[i+2], out[i+3] = SHADOW[0], SHADOW[1], SHADOW[2], 140
+                out[i], out[i+1], out[i+2], out[i+3] = shadow[0], shadow[1], shadow[2], shadow_alpha
                 continue
             t = (BAYER4[y & 3][x & 3] - 7.5) * amp / 8
             r = min(255, max(0, px[i] + t)); g = min(255, max(0, px[i+1] + t)); b = min(255, max(0, px[i+2] + t))
@@ -237,9 +355,51 @@ def arg(name, default):
         return sys.argv[sys.argv.index(name) + 1]
     return default
 
+
+# ---------------------------------------------------------------- the sheet
+CELL = (192, 128)
+SCALES = (1, 2, 4)                 # divisors: scale 1.0, 0.5, 0.25
+CAMERAS = ("stall", "road")
+YAWS = 8
+SHEET_W = CELL[0] * YAWS           # 1536
+ROW_Y = [0, 128, 192, 224, 352, 416]
+SHEET_H = 448
+SHADOW_TONE = hex2rgb("5f255e")    # the design's purple shadow, never grey
+OUTLINE_TONE = hex2rgb("280e27")   # dusk ink
+
+
+def bake_sheet(render_dir, out_path, paint_hex, dither=0.25, px=4):
+    sheet_palette(paint_hex)
+    sheet = bytearray(SHEET_W * SHEET_H * 4)
+    for ci, cam in enumerate(CAMERAS):
+        for yaw in range(YAWS):
+            w, h, raw = read_png(os.path.join(render_dir, f"{cam}-{yaw}.png"))
+            assert (w, h) == (CELL[0] * px, CELL[1] * px), f"{cam}-{yaw}: render is {w}x{h}, expected {CELL[0] * px}x{CELL[1] * px}"
+            for si, div in enumerate(SCALES):
+                cw, ch, cell = box_down_exact(w, h, raw, px * div)
+                # The renderer's shadow disc lands at alpha ~130; body edges
+                # against transparency land anywhere. Everything under the cut
+                # is shadow tone, and the outline pass then reclaims the edge
+                # pixels that touch the body.
+                cell = quantise(cw, ch, cell, dither=dither, alpha_cut=200, shadow_lo=24, shadow=SHADOW_TONE, shadow_alpha=128)
+                cell = despeckle(cw, ch, cell)
+                cell = outline(cw, ch, cell, colour=OUTLINE_TONE)
+                ox, oy = yaw * cw, ROW_Y[ci * 3 + si]
+                for y in range(ch):
+                    d = ((oy + y) * SHEET_W + ox) * 4
+                    sheet[d:d + cw * 4] = cell[y * cw * 4:(y + 1) * cw * 4]
+    write_png_indexed(out_path, SHEET_W, SHEET_H, sheet)
+    return sheet
+
+
 def main():
     mode = sys.argv[1]
-    if mode in ("sprite", "scene"):
+    if mode == "bake":
+        render_dir, out = sys.argv[2], sys.argv[3]
+        paint = arg("--paint", "e0483a").lstrip("#")
+        bake_sheet(render_dir, out, paint, dither=float(arg("--dither", "0.25")), px=int(arg("--px", "4")))
+        print(f"bake: {render_dir} -> {out} {SHEET_W}x{SHEET_H}, paint {paint}, palette {len(PALETTE)}")
+    elif mode in ("sprite", "scene"):
         src, base = sys.argv[2], sys.argv[3]
         tw = int(arg("--width", "160")); k = int(arg("--scale", "3")); dith = float(arg("--dither", "0.5"))
         w, h, px = read_png(src)

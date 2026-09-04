@@ -1,5 +1,6 @@
 import QtQuick
 import "parts"
+import "parts/CarMeta.js" as CarMeta
 
 // Looking down the track.
 //
@@ -28,12 +29,13 @@ import "parts"
 //
 // WHAT IT COSTS. The road renders into a layer at 480 x 270 and is scaled up
 // with nearest-neighbour filtering, so the fragment work is an eighth of
-// 1080p. The sprites are drawn once each into fixed-size canvases and are
-// moved and scaled by the scene graph after that, so a frame is one shader
-// pass and sixteen textured quads and no drawing at all. The kart list is a
+// 1080p. The roadside props are drawn once each into fixed-size canvases and
+// are moved and scaled by the scene graph after that; the cars are cells of
+// baked sheets (CarSprite) and are never drawn at all -- so a frame is one
+// shader pass and a couple of dozen textured quads. The kart list is a
 // ListModel rather than a JavaScript array on purpose: assigning a new array
 // to a Repeater destroys and rebuilds every delegate, and at sixty frames a
-// second that would rebuild four canvases sixty times a second.
+// second that would rebuild four sprites sixty times a second.
 Item {
   id: view
 
@@ -67,7 +69,7 @@ Item {
   readonly property real kartWorldWidth: 1.36
   // THE SHEET IS NOT THE KART, AND ROUND TWO MEASURED THE SHEET.
   //
-  // TrackSprite draws a kart into a 192 x 128 sheet whose model box is 62 world
+  // The v1 sprite drew a kart into a 192 x 128 sheet whose model box was 62 world
   // units across; the kart itself, wheel to wheel, is 37 of them. Scaling the
   // SHEET to `kartWorldWidth` therefore drew a kart 37/62 = 0.60 of the width
   // it claimed to be. Round two's report said "the furthest kart on the road is
@@ -210,6 +212,26 @@ Item {
   function kartSheetPixels(z) {
     return Math.max(kartMinPixels * kartSheetSpan,
                     sizeAt(kartWorldWidth * kartSheetSpan, z))
+  }
+
+  // PIECE C: THE SHEET IS A CELL, AND A CELL IS DRAWN AT A WHOLE NUMBER.
+  //
+  // A car on the road is one cell of its baked sheet: the `road` camera, the
+  // row (192, 96 or 48 px) and the upscale (1, 2 or 3) whose product is
+  // nearest the width the projection asks for, and the yaw column nearest the
+  // car's heading relative to the camera. So a car steps through seven sizes
+  // -- 48, 96, 144, 192, 288, 384, 576 -- rather than scaling continuously,
+  // and is never resampled: nearest-neighbour at a whole number is the pixel
+  // look and is also free. `CarMeta.fit` is the one place that choice is made.
+  function kartCell(z) { return CarMeta.fit(kartSheetPixels(z)) }
+
+  // The car's heading relative to the camera at depth z, in degrees: the
+  // road's tangent, since a kart follows the road. `uAt` puts the road centre
+  // at x = curve z^2, so its slope is 2 curve z, and a right-hand bend is
+  // positive. The child's own car is followed by the camera and always reads
+  // square.
+  function kartHeadingDeg(z) {
+    return Math.atan(2 * curve * z) * 180 / Math.PI
   }
 
   // Compressed distance for a kart `delta` questions ahead of the child.
@@ -733,7 +755,7 @@ Item {
       visible: zed > view.nearDistance + 0.2 && zed < view.drawDistance
                && sc > 0.010 && x > -view.width * 0.7 && x < view.width * 1.7
 
-      TrackSprite {
+      PropSprite {
         id: furniture
         kind: parent.myKind
         label: parent.myKind === "gantry" ? "TURBO" : view.bannerLabels[index % view.bannerLabels.length]
@@ -759,12 +781,19 @@ Item {
       id: slot
       // The model carries the paint as a string, because a ListModel role is
       // typed by the first value put in it and a colour round-trips through a
-      // string safely. This is where it becomes a colour again.
+      // string safely. The sheet is chosen by paint INDEX, so the string is
+      // matched back to the theme's eight paints here; a paint the theme does
+      // not know falls back to the first.
       readonly property color paintCol: kartPaint
+      readonly property int paintIdx: {
+        for (var i = 0; i < Theme.paints.length; i++)
+          if (Qt.colorEqual(Theme.paints[i], paintCol))
+            return i
+        return 0
+      }
       readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
       readonly property real zed: isHuman ? view.playerZ : view.zForDelta(delta)
-      readonly property real sc: view.kartSheetPixels(zed) / kartArt.sheetW
-      readonly property real spriteH: kartArt.sheetH * sc
+      readonly property var cellFit: view.kartCell(zed)
       // The child's kart bobs a little with speed: the one thing on screen
       // that says the engine is running while the child is thinking.
       readonly property real bob: (isHuman && !view.reducedMotion)
@@ -783,18 +812,23 @@ Item {
       visible: zed > view.nearDistance && zed < view.drawDistance
                && x > -view.width * 0.6 && x < view.width * 1.6
 
-      TrackSprite {
+      // The car: a sheet cell at the anchor, which is this item's origin --
+      // the point the projection put on the road. A ghost is the same car,
+      // translucent. The child's own tail lamps glow with the pull-back a hit
+      // causes, from the lamp centres the sheet's meta lists.
+      CarSprite {
         id: kartArt
-        kind: "kart"
-        paintColor: slot.paintCol
-        number: kartNumber
+        x: 0
+        y: 0
         body: kartBody
-        ghost: isGhost
-        dim: Math.max(0.40, Math.round(Math.max(0.40, 1.06 - slot.zed / 105) * 3) / 3)
+        paint: slot.paintIdx
+        number: kartNumber
+        camera: "road"
+        yaw: isHuman ? 0 : CarMeta.columnForHeading(view.kartHeadingDeg(slot.zed))
+        sheetScale: slot.cellFit.sheetScale
+        pixelScale: slot.cellFit.pixelScale
+        lampGlow: isHuman ? Math.min(1, view.pullback * 1.4) : 0
         opacity: isGhost ? 0.55 : 1.0
-        x: -sheetW / 2
-        y: -sheetH
-        scale: slot.sc
       }
     }
   }

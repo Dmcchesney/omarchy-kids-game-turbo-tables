@@ -176,9 +176,12 @@ FocusScope {
 
   // Where the kart stands, as fractions of the frame; the scene lays the long
   // shadow from the same numbers.
+  // PIECE C: the car is placed by its wheels' contact point, and the baked
+  // cell carries its own contact shadow below that point, so the foot sits
+  // higher than the v1 sprite's did: the wheels on the line, the shadow
+  // running on down the road under the footer.
   readonly property real kartFootX: 0.44
-  readonly property real kartFootY: 0.905
-  readonly property real kartSheetW: Math.round(countdown.width * 0.42)
+  readonly property real kartFootY: 0.875
 
   CountdownScene {
     id: scene
@@ -188,15 +191,21 @@ FocusScope {
     kartFootW: 0.27
   }
 
-  CountdownKart {
+  // PIECE C: the car on the line is a cell of its sheet -- the road camera,
+  // rear square to us, at three times its pixels -- stood on the start line
+  // by its contact point, which is the point the scene's long shadow is laid
+  // from.
+  CarSprite {
     id: hero
-    width: countdown.kartSheetW
-    height: Math.round(countdown.kartSheetW * 0.5)
-    x: Math.round(countdown.width * countdown.kartFootX - width / 2)
-    y: Math.round(countdown.height * countdown.kartFootY - footY)
+    x: Math.round(countdown.width * countdown.kartFootX)
+    y: Math.round(countdown.height * countdown.kartFootY)
     body: countdown.kartBody
-    paintColor: Theme.paint(countdown.kartPaint)
+    paint: countdown.kartPaint
     number: countdown.kartNumber
+    camera: "road"
+    yaw: 0
+    sheetScale: 1.0
+    pixelScale: 3
     z: 1
   }
 

@@ -11,7 +11,7 @@ import "../"
 //
 // The light is the one key the direction names: the sun, low, ahead and to the
 // right of the camera. Every prop in here is a silhouette against it with a
-// warm rim on its sun side, and the child's kart (drawn by CountdownKart on
+// warm rim on its sun side, and the child's kart (a CarSprite cell drawn on
 // top of this) throws its shadow toward the camera, across this floor -- that
 // shadow is drawn here because the floor is here.
 //

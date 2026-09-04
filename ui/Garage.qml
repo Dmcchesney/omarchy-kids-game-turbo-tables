@@ -1,5 +1,6 @@
 import QtQuick
 import "parts"
+import "parts/CarMeta.js" as CarMeta
 
 // The garage: the screen the child lands on, and the only place a race is
 // configured.
@@ -390,25 +391,32 @@ FocusScope {
 
       GarageStall {
         id: stall
+        objectName: "garageStall"
         anchors.fill: parent
         cornerRadius: Theme.cornerRadius
       }
 
-      KartSprite {
+      // PIECE C: the car on the turntable is a cell of its baked sheet -- the
+      // stall camera, yaw 0, the 1.0 row at a whole-number upscale -- stood
+      // on the dais by its contact point. The upscale follows the width the
+      // dais was sized for (`stall.kartWidth`, which also sizes the plinth):
+      // three times at 1920x1080, twice at 1366x768, so the car stays on the
+      // turntable rather than over the bay. The same sheet draws the roster
+      // row below, the countdown and the race, so the car the child builds
+      // here is the car everywhere else, not a resemblance of it.
+      CarSprite {
         id: heroKart
-        // Sized so the whole kart stands on the plinth. At 536 the nose's
-        // lower corner fell outside the dais ellipse and crossed the amber
-        // rim; the fit is checked against the ellipse, not by eye.
-        // ROUND-6: the number lives in GarageStall, which derives the
-        // turntable's size from it, so the plinth and the kart on it cannot
-        // be scaled apart.
-        width: stall.vs(stall.kartWidth)
-        height: width * vbH / vbW
-        x: stall.vx(stall.daisX) - width / 2
-        y: stall.vy(stall.daisY) - height * groundFraction
+        objectName: "heroCar"
+        readonly property var fit: CarMeta.fit(stall.vs(stall.kartWidth))
+        x: Math.round(stall.vx(stall.daisX))
+        y: Math.round(stall.vy(stall.daisY))
         body: garage.bodyIndex
-        paint: Theme.paint(garage.paintIndex)
+        paint: garage.paintIndex
         number: garage.kartNumber
+        camera: "stall"
+        yaw: 0
+        sheetScale: 1.0
+        pixelScale: fit.pixelScale
       }
 
       // The body selector. It has its own opaque card in the bottom-left
@@ -679,6 +687,7 @@ FocusScope {
       readonly property int slotGap: garage.px(10)
 
       RosterSlot {
+        objectName: "rosterYou"
         width: parent.width
         height: roster.slotH
         y: 0

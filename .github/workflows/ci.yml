@@ -51,6 +51,14 @@ jobs:
       - name: Committed bundle is not stale
         run: npm run check:bundle
 
+      # The car sprite sheets under assets/karts/ are baked on the Mac by
+      # Blender (npm run sprites) and committed with a SHA-256 manifest. This
+      # verifies every sheet and meta file against that manifest and never
+      # rebakes: a model change cannot land without its sheets, and an edited
+      # sheet cannot land at all.
+      - name: Committed car sheets match their manifest
+        run: npm run check:sprites
+
       # Asserts the four safety invariants -- no network code, no process or
       # shell execution, no free-text entry or name field, no stored dates --
       # against every file in the repository except a printed allow-list, and

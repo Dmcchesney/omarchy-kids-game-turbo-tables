@@ -1,5 +1,6 @@
 import QtQuick
 import "../"
+import "CarMeta.js" as CarMeta
 
 // The stall: the garage bay the kart stands in. Drawn in a 1200 x 560 view
 // box and scaled to the panel it is given, so the same scene composes at
@@ -46,17 +47,19 @@ Item {
   // because the turntable's size is derived from it below: the plinth and
   // the thing on it are one scale, set once.
   readonly property real kartWidth: 486
-  // View-box units per model unit of the kart's own space. KartSprite draws
-  // into a 132-unit-wide view box, so a sprite `kartWidth` units wide puts
-  // this many stall units on one kart model unit.
+  // View-box units per model unit of the kart's own space. The v1 live
+  // sprite drew into a 132-unit-wide view box, and the dais below is still
+  // derived from that model space so the plinth's size and pitch are what
+  // the critic measured and accepted; the car standing on it is now a sheet
+  // cell (CarSprite), placed by its contact point at `daisX`, `daisY`.
   readonly property real kartToStall: kartWidth / 132
 
   // ------------------------------------------------- ONE CAMERA, ROUND SIX
   //
   // There is no ellipse constant here. `daisGroundR` is the only art choice
   // on this plinth -- how many model units of floor the turntable covers --
-  // and its projection comes from Theme.groundEllipse, the same camera
-  // KartSprite projects every face through. (The history of why is in the
+  // and its projection comes from Theme.groundEllipse, the camera the v1
+  // live sprite projected every face through. (The history of why is in the
   // round-six notes on Theme.groundEllipse.)
   //
   // `daisCy` is the projected ellipse's CENTRE, which is not the kart's
@@ -722,16 +725,22 @@ Item {
     }
   }
 
-  KartSprite {
-    x: stall.vx(256)
-    y: stall.vy(98)
-    width: stall.vs(144)
-    height: stall.vs(70)
+  // The poster's car: a sheet cell, red, at whichever whole-number size is
+  // nearest 96 view-box units wide -- two thirds of the poster, which keeps
+  // the cell (a cell is two thirds as tall as it is wide) above the caption
+  // at 176 -- with its cell's top on the poster's top edge, whatever the
+  // bake's contact point.
+  CarSprite {
+    readonly property var fit: CarMeta.fit(stall.vs(96))
+    x: Math.round(stall.vx(256 + 76) - drawnWidth / 2 + anchorDx)
+    y: Math.round(stall.vy(94) + anchorDy)
     body: 2
-    paint: "#c8492f"
+    paint: 0
+    camera: "stall"
+    yaw: 0
+    sheetScale: fit.sheetScale
+    pixelScale: fit.pixelScale
     showNumber: false
-    shadow: false
-    dim: 0.92
   }
 
   Column {

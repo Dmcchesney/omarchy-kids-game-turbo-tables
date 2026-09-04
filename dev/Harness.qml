@@ -32,6 +32,9 @@ import "../ui/parts"
 //   --print-focus       print every focus stop's screen-reader name and quit.
 //   --settings k=v,k=v  seed the in-memory save file before the screen loads,
 //                       e.g. --settings kartBody=3,kartPaint=5,kartNumber=42
+//   --measure <ms>      run the screen for that long and print the frame rate.
+//   --sheets <url>      car sheets from another directory (see the rig below).
+//   --kart ...          show one car-sheet cell instead of a screen (below).
 Window {
   id: harness
 
@@ -123,8 +126,14 @@ Window {
 
   Component.onCompleted: {
     applyTheme()
+    if (harness.sheetsArg.length > 0)
+      Theme.carSheetRoot = harness.sheetsArg
     seedSettings(harness.settingsArg)
     Store.backend = memory
+    // Only now may the screen load: the theme, the sheets and the seeded
+    // save file are all in place, so nothing binds to a default and then
+    // rebinds a frame later.
+    harness.ready = true
     console.log("harness: screen=" + screenName + " seed=" + seed
                 + " size=" + wantWidth + "x" + wantHeight
                 + " font=" + Theme.mono
@@ -136,67 +145,61 @@ Window {
 
   // ------------------------------------------------------- the sprite rig
   //
-  // ROUND-5. `--kart` renders KartSprite alone on a TRANSPARENT background
-  // instead of loading a screen, and it exists for one reason: it is the only
-  // way to get the kart's own alpha channel out of the renderer.
+  // PIECE C. `--kart` shows ONE CELL of a baked car sheet on a TRANSPARENT
+  // background instead of loading a screen, so a critic can shoot any cell
+  // headless and read its alpha. There is no live renderer left to rig: the
+  // cell is the art, and this is a viewer for it.
   //
-  // Round four's report said it "could not build a pixel test that separates
-  // 'ends in mid-air' from 'room seen through an opening'", and the round-four
-  // verdict answered that a flood fill for backdrop colour inside the
-  // silhouette settles it -- and found 18 px of garage door enclosed by
-  // bodywork. It does settle it, but a colour flood on the composited frame
-  // has a tolerance in it, and a tolerance wide enough to catch the backdrop
-  // also catches dark teal shadow on the dais. On the sprite's own alpha
-  // there is no tolerance and no colour: a pixel is either bodywork or it is
-  // not, and a hole is an alpha-zero component that the silhouette encloses.
-  // That is the metric this round uses, and it is exact.
-  //
-  //   --kart <n>        n = 0..5 one body, n = -1 all six on one sheet
-  //   --kart-size <px>  sprite width; the height follows the camera
-  //   --kart-paint <n>  paint index, default 0
-  //   --kart-grain off  turn the grain pass off, leaving the shading model
-  //   --kart-shadow on  draw the ground shadow into the sprite's own alpha.
-  //                     ROUND-6: this is how the cast shadow is measured. On
-  //                     a transparent background the shadow IS the alpha
-  //                     outside the kart's opaque silhouette, so its shape,
-  //                     its offset and its asymmetry can be read off one
-  //                     channel with no dais and no kart in the way. Off by
-  //                     default, so the six-body sheet is unchanged.
+  //   --kart <n>                body 0..5
+  //   --kart-paint <n>          paint index, default 0
+  //   --kart-yaw <n>            column 0..7, default 0
+  //   --kart-camera stall|road  row group, default stall
+  //   --kart-scale 1|0.5|0.25   row within the group, default 1
+  //   --kart-pixels <n>         whole-number upscale 1..3, default 3
+  //   --kart-number <n>         the number to overlay, default 7
+  //   --kart-glow <0..1>        tail-lamp glow (road camera), default 0
+  //   --sheets <dir-url>        read sheets from here instead of assets/karts/
+  //                             (a file: URL ending in a slash). Applies to
+  //                             every car on every screen, not only the rig.
   readonly property string kartArg: argument("kart", "")
   readonly property bool kartMode: kartArg.length > 0
   readonly property int kartIndex: parseInt(kartArg.length > 0 ? kartArg : "0", 10)
-  readonly property int kartSize: parseInt(argument("kart-size", "500"), 10)
   readonly property int kartPaint: parseInt(argument("kart-paint", "0"), 10)
-  readonly property bool kartGrain: argument("kart-grain", "on") !== "off"
-  readonly property bool kartShadow: argument("kart-shadow", "off") === "on"
+  readonly property int kartYaw: parseInt(argument("kart-yaw", "0"), 10)
+  readonly property string kartCamera: argument("kart-camera", "stall")
+  readonly property real kartScale: parseFloat(argument("kart-scale", "1"))
+  readonly property int kartPixels: parseInt(argument("kart-pixels", "3"), 10)
+  readonly property int kartNumber: parseInt(argument("kart-number", "7"), 10)
+  readonly property real kartGlow: parseFloat(argument("kart-glow", "0"))
+  readonly property string sheetsArg: argument("sheets", "")
 
-  Item {
+  // A Loader, and one that waits for `ready`, so the cell is only ever asked
+  // for after `--sheets` has been applied and never from a screen run.
+  Loader {
     id: kartRig
-    visible: harness.kartMode
+    active: harness.kartMode && harness.ready
     anchors.fill: parent
 
-    Repeater {
-      model: harness.kartMode ? (harness.kartIndex < 0 ? 6 : 1) : 0
-      KartSprite {
-        width: harness.kartSize
-        height: width * vbH / vbW
-        x: harness.kartIndex < 0 ? (index % 3) * harness.kartSize
-                                 : (harness.width - width) / 2
-        y: harness.kartIndex < 0 ? Math.floor(index / 3) * height
-                                 : (harness.height - height) / 2
-        body: harness.kartIndex < 0 ? index : harness.kartIndex
-        paint: Theme.paint(harness.kartPaint)
-        number: 7
-        grain: harness.kartGrain
-        shadow: harness.kartShadow
-      }
+    sourceComponent: CarSprite {
+      x: Math.round(kartRig.width / 2 - drawnWidth / 2 + anchorDx)
+      y: Math.round(kartRig.height / 2 - drawnHeight / 2 + anchorDy)
+      body: harness.kartIndex
+      paint: harness.kartPaint
+      number: harness.kartNumber
+      camera: harness.kartCamera
+      yaw: harness.kartYaw
+      sheetScale: harness.kartScale
+      pixelScale: harness.kartPixels
+      lampGlow: harness.kartGlow
     }
   }
 
   // --------------------------------------------------------------- screen
+  property bool ready: false
+
   Loader {
     id: screenLoader
-    active: !harness.kartMode
+    active: !harness.kartMode && harness.ready
     anchors.fill: parent
     focus: true
     source: Qt.resolvedUrl("../ui/" + harness.screenName + ".qml")
@@ -211,8 +214,13 @@ Window {
     }
 
     onStatusChanged: {
-      if (status === Loader.Error)
+      if (status === Loader.Error) {
         console.log("harness: could not load " + source)
+        // A shot or a measurement that was asked to exit must not hang on a
+        // screen that failed to load: exit with a code a script can read.
+        if (harness.quitAfter || harness.measureMs > 0)
+          Qt.exit(3)
+      }
     }
   }
 
@@ -321,6 +329,49 @@ Window {
       }
       if (harness.shotPath.length > 0)
         settle.start()
+      else if (harness.measureMs > 0)
+        measure.start()
+    }
+  }
+
+  // ------------------------------------------------------ frame-rate run
+  // `--measure <ms>` runs the loaded screen for that long after the settle
+  // delay, counting rendered frames with a FrameAnimation of its own, then
+  // prints the mean frame rate and quits. It is the number the plan asks for
+  // -- "frame rate on the track unchanged or better" -- taken the same way
+  // before and after a change, on the same renderer, so it is comparable.
+  readonly property int measureMs: parseInt(argument("measure", "0"), 10)
+  property int measuredFrames: 0
+
+  FrameAnimation {
+    id: counter
+    running: false
+    onTriggered: harness.measuredFrames += 1
+  }
+
+  Timer {
+    id: measure
+    interval: harness.settleMs
+    onTriggered: {
+      harness.measuredFrames = 0
+      counter.start()
+      measureEnd.start()
+    }
+  }
+
+  Timer {
+    id: measureEnd
+    interval: harness.measureMs
+    onTriggered: {
+      counter.stop()
+      var seconds = harness.measureMs / 1000
+      console.log("harness: measured " + harness.measuredFrames + " frames in "
+                  + harness.measureMs + " ms = "
+                  + (harness.measuredFrames / seconds).toFixed(1) + " fps ("
+                  + (1000 * seconds / Math.max(1, harness.measuredFrames)).toFixed(2)
+                  + " ms/frame) at " + harness.width + "x" + harness.height
+                  + " screen=" + harness.screenName)
+      Qt.exit(0)
     }
   }
 

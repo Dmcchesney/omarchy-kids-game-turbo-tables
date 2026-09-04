@@ -670,13 +670,37 @@ for (const file of tree.files) {
   if (file.binary || !isQml(file.path) || !isPluginFile(file.path)) continue;
   const code = strip(file.text);
   const folded = fold(stripComments(file.text));
+  const codeLines = code.split("\n");
   for (const match of code.matchAll(/(?<![\w$.])source\s*:\s*([^\n]*)/g)) {
     const line = code.slice(0, match.index).split("\n").length;
     const value = match[1]!.trim();
-    if (/^(['"`])/.test(value)) continue; // a literal path
-    if (/^Qt\.resolvedUrl\s*\(\s*['"`]/.test(value)) continue; // a literal, resolved
+    // `strip()` has blanked every string body, so a literal is now an empty
+    // quoted pair. The WHOLE value has to be that one pair: `"" + expr + ""`
+    // begins with a quote and was previously waved through as "a literal
+    // path", which let `Loader { source: "ui/" + (cond ? "a" : "b") + ".qml" }`
+    // past this rule unchallenged. Found while narrowing the rule for piece C.
+    const oneLiteral = /^(['"`])\1\s*$/;
+    const oneResolvedLiteral = /^Qt\.resolvedUrl\s*\(\s*(['"`])\1\s*\)\s*$/;
+    if (oneLiteral.test(value)) continue; // a literal path
+    if (oneResolvedLiteral.test(value)) continue; // a literal, resolved
     const foldedLine = folded.split(/\r?\n/)[line - 1] ?? "";
-    if (/source\s*:\s*(?:Qt\.resolvedUrl\s*\(\s*)?['"`]/.test(foldedLine)) continue; // folds to a literal
+    const foldedValue = (foldedLine.match(/source\s*:\s*(.*)$/)?.[1] ?? "").trim();
+    if (/^(['"`])[^'"`\n]*\1\s*$/.test(foldedValue) || /^Qt\.resolvedUrl\s*\(\s*(['"`])[^'"`\n]*\1\s*\)\s*$/.test(foldedValue)) continue; // folds to one literal
+    // An Image's source is pixels, not code: whatever path it spells is decoded
+    // by the image loader and never run, and the binary-content rule in
+    // check:boundary governs what may sit under assets/. Piece C chooses one of
+    // 48 sprite sheets by body x paint, which cannot be a literal. So the
+    // innermost enclosing element is found by walking back to the nearest
+    // `Name {` opener, and image elements are exempt. A Loader, a Component,
+    // an Animation source or anything else stays held to the literal rule.
+    // Limit, stated in README's "does not check": an Image source can still
+    // name a file outside the plugin; it can display it, not execute it.
+    let element = "";
+    for (let back = line - 1; back >= 0 && back > line - 80; back--) {
+      const opener = codeLines[back]?.match(/^\s*([A-Z][\w.]*)\s*\{/);
+      if (opener) { element = opener[1]!; break; }
+    }
+    if (/^(Image|AnimatedImage|BorderImage)$/.test(element)) continue;
     fail(
       "runtime name assembly in a plugin file",
       `${file.path}:${line}: a \`source\` bound to an expression this gate cannot resolve to a string literal. Whatever it names is loaded and run; name it literally.\n    ${(file.text.split(/\r?\n/)[line - 1] ?? "").trim().slice(0, 120)}`,

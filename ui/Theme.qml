@@ -91,6 +91,30 @@ QtObject {
   readonly property var bodyNames: ["SPRINTER", "WEDGE", "STOCKCAR",
                                     "BUGGY", "HAULER", "PROTOTYPE"]
 
+  // ---------------------------------------------------- the car sheets
+  // PIECE C. Every car on every screen is a cell of a baked sprite sheet,
+  // `assets/karts/<body>/<paint>.png`, and these two lists are the piece C
+  // contract's file names in the order of the two indices above: body 0 is
+  // `coupe`, paint 7 is `white`. The display names are untouched -- the
+  // stall caption still reads SPRINTER and the swatch grid still reads
+  // SILVER -- so nothing a child sees changes with a file name.
+  readonly property var bodySheetNames: ["coupe", "hatch", "wedge",
+                                         "saloon", "buggy", "pickup"]
+  readonly property var paintSheetNames: ["red", "orange", "yellow", "green",
+                                          "blue", "purple", "pink", "white"]
+  // Where the sheets live. A plain writable property so the development
+  // harness can point every CarSprite at a stand-in set of sheets with one
+  // assignment; the plugin never writes it.
+  property url carSheetRoot: Qt.resolvedUrl("../assets/karts/")
+
+  function bodySheetName(index) {
+    return bodySheetNames[((index % bodySheetNames.length) + bodySheetNames.length) % bodySheetNames.length]
+  }
+
+  function paintSheetName(index) {
+    return paintSheetNames[((index % paintSheetNames.length) + paintSheetNames.length) % paintSheetNames.length]
+  }
+
   // ------------------------------------------------------- the one camera
   // ROUND-6. The kart and the floor it stands on are drawn by two different
   // files, and until now they were drawn by two different cameras. A critic
@@ -101,12 +125,13 @@ QtObject {
   // fit residual. Two cameras in one picture is why the kart read as
   // composited onto the dais rather than standing on it.
   //
-  // These four numbers are now the ONLY camera in the garage. KartSprite
-  // takes its projection from them and GarageStall derives the turntable
-  // from them, so the two cannot drift apart again by anyone editing a
-  // constant in one file. Nothing here is a colour or a theme value; it
-  // lives in Theme because Theme is the one module both files already
-  // import.
+  // These four numbers are now the ONLY camera in the garage. The v1 live
+  // sprite took its projection from them and GarageStall still derives the
+  // turntable from them, so the plinth is the one a critic measured. The
+  // car on it is now a baked sheet cell (piece C); the sheet's own stall
+  // camera is fixed by the bake, and these numbers describe the dais.
+  // Nothing here is a colour or a theme value; it lives in Theme because
+  // Theme is the one module both files already import.
   readonly property real kartYawDeg: 22
   readonly property real kartPitchDeg: 25
   // Distance to the picture plane, in model units, and the height of the

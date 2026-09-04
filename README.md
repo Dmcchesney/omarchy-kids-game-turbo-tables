@@ -250,6 +250,16 @@ reproduce.
   forbidden object by a route nobody has named here, and then indexes it with a plain variable, is
   not caught by shape. What stands behind it there is the token search plus `check:boundary`, both of
   which read concatenated, array-assembled and constant-folded strings.
+- **An `Image`'s `source` may be an expression; a `Loader`'s may not.** The runtime-assembly rule
+  holds every `source:` to a single string literal, or to one the file's own constants fold to, with
+  one exemption: the innermost enclosing element is `Image`, `AnimatedImage` or `BorderImage`. The car
+  sprite chooses one of 48 sheets by body and paint, which cannot be a literal, and what an image
+  loader decodes is pixels — it cannot be run. The limit is that such a source can still name a file
+  outside the plugin and display it. `check:boundary`'s content rule governs what may sit under
+  `assets/`; nothing governs what a computed `Image` path points at, so that is a fact only a reader
+  of `ui/parts/CarSprite.qml` can confirm. Found while adding this exemption: the rule also used to
+  accept any value that *began* with a quote, so `"ui/" + expr + ".qml"` on a `Loader` passed. It
+  now requires the whole value to be one literal.
 - **Only three file types are held to those shape rules: `.qml`, `.js` and `.mjs`** — the languages
   Qt can load off disk. The TypeScript under `src/engine/` is not, because Qt cannot run it; its output
   `engine/engine.mjs` is, with three exemptions it needs honestly (`join`, `concat` and

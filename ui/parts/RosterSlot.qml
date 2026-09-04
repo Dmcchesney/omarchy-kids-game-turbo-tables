@@ -117,23 +117,27 @@ Item {
   }
 
   // ----------------------------------------------------------- kart preview
-  KartSprite {
+  // PIECE C: the same sheet cell the turntable shows, at the 0.5 row, so the
+  // car in the child's row is the car on the dais and not a second drawing
+  // of it. One pixel per sheet pixel at the design's base size; two once
+  // the row is tall enough to hold them. The number is left to CarSprite's
+  // own legibility floor: at this size the roundel is a few pixels and the
+  // row's own badge already carries the number legibly.
+  CarSprite {
     id: preview
-    anchors.verticalCenter: parent.verticalCenter
-    x: lamp.x - width - slot.u(10)
-    width: slot.u(162)
-    height: slot.u(80)
+    objectName: "carPreview"
+    // The cell centred in the row; the anchor is the contact point, so the
+    // cell's own centre is half a cell up and along from it.
+    x: lamp.x - slot.u(10) - drawnWidth + anchorDx
+    y: Math.round(slot.height / 2 - drawnHeight / 2 + anchorDy)
     body: slot.bodyIndex
-    paint: slot.paintColor
+    paint: slot.paintIndex
     number: slot.number
-    // No plate on a 162-unit thumbnail. At this size the digits render about
-    // 6 px tall and a critic could not read them at 1:1 -- and does not need
-    // to: the row's own number badge is 34 px and sits at the left of the
-    // same row, so the plate was repeating an already-legible fact
-    // illegibly. The kart keeps its colour and its body, which are the two
-    // things the thumbnail is for.
-    showNumber: false
-    dim: slot.ready ? 1.0 : 0.86
+    camera: "stall"
+    yaw: 0
+    sheetScale: 0.5
+    pixelScale: slot.scaleUnit >= 1.5 ? 2 : 1
+    opacity: slot.ready ? 1.0 : 0.86
   }
 
   // ------------------------------------------------------------- ready lamp
