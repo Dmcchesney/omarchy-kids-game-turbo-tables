@@ -48,11 +48,16 @@ Item {
   readonly property bool lit: ready && inRace
 
   readonly property color paintColor: Theme.paint(paintIndex)
-  // The paint, lifted for type. Purple measures 4.01:1 against this row at
-  // full strength and blue 4.59:1; lifting the value by a quarter puts the
-  // worst of the eight at 5.47:1, so no choice of paint can make a racer's
-  // own name the least readable thing in their row.
-  readonly property color inkColor: Qt.lighter(paintColor, 1.25)
+  // The paint, lifted for type: a racer's own name is drawn in their own
+  // colour, and no choice of paint may make it the least readable thing in
+  // their row. ROUND-8: 1.45, not 1.25. The row is a brighter card this round
+  // (`duskSurfaceRaised` went from #3c1228 to #632043), and at 1.25 the worst
+  // of the eight -- purple, as #bd72ff -- measured 3.86:1 on it. Qt's
+  // lighter() spends the overflow past value 255 on saturation, so a bigger
+  // factor is a paler, brighter tint of the SAME hue: at 1.45 the worst of
+  // the eight is red at 5.35:1. The kart preview and the badge border still
+  // carry the paint itself, unlifted.
+  readonly property color inkColor: Qt.lighter(paintColor, 1.45)
   readonly property bool isChild: level < 0
 
   function u(v) { return Math.round(v * scaleUnit) }
@@ -93,6 +98,30 @@ Item {
     y: 1
     height: 1
     color: Theme.duskEdgeWarm
+  }
+
+  // ROUND-8. The bay is to the LEFT of this column, so the row's left edge is
+  // the one facing the opening: a warm rim on it and a wash falling off across
+  // the first third of the row, the same treatment every crate on the bay's
+  // shelf already gets. A slab with a hairline along the top was a card that
+  // had been tinted; this is a card that is lit.
+  Rectangle {
+    x: 0
+    y: Theme.cornerRadius
+    width: 2
+    height: parent.height - Theme.cornerRadius * 2
+    color: Theme.duskLitEdge
+  }
+  Rectangle {
+    x: 2
+    y: 1
+    width: Math.round(parent.width * 0.34)
+    height: parent.height - 2
+    gradient: Gradient {
+      orientation: Gradient.Horizontal
+      GradientStop { position: 0.0; color: Qt.rgba(Theme.duskRim.r, Theme.duskRim.g, Theme.duskRim.b, 0.07) }
+      GradientStop { position: 1.0; color: Qt.rgba(Theme.duskRim.r, Theme.duskRim.g, Theme.duskRim.b, 0.0) }
+    }
   }
 
   // ---------------------------------------------------------- number badge
@@ -158,7 +187,9 @@ Item {
     x: slot.isChild ? badge.x : levelMeter.x + levelMeter.width + slot.u(9)
     y: badge.y + badge.height + slot.u(11)
     text: slot.isChild ? slot.statusText : Theme.levelNames[Math.max(0, Math.min(2, slot.level))]
-    color: slot.isChild ? Theme.textLabel : Theme.amber
+    // ROUND-8: full strength, not the shared 0.80-alpha role. The v3
+    // surfaces are brighter this round and 0.80 measures 3.75:1 on them.
+    color: slot.isChild ? Theme.text : Theme.amber
     font.family: Theme.mono
     font.bold: !slot.isChild
     font.pixelSize: slot.u(15)
@@ -203,7 +234,16 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     anchors.right: parent.right
     anchors.rightMargin: slot.u(14)
-    width: slot.u(102)
+    // ROUND-8: 122, not 102. `SITTING OUT` is eleven characters at pixelSize
+    // u(15) with u(1) of letter spacing -- 110 units -- so it was 8 units
+    // WIDER than the pill it is centred in and overflowed 4 units onto the
+    // row card at each end. That never showed as a defect while the card was
+    // near-black: round seven measured that word at 5.70:1 against #4d2b44.
+    // Raising the surfaces this round took the same overhang to 4.22:1 on
+    // #6e375a -- the only string on any of the six frames that the value
+    // range cost, and it was a latent layout bug rather than a colour choice.
+    // 122 is the longest label plus six units of clearance at each end.
+    width: slot.u(122)
     height: slot.u(74)
     radius: Theme.cornerRadiusSmall
     color: slot.sunkenSurface
@@ -219,7 +259,9 @@ Item {
       // Full strength, not `textLabel`. This word IS the row's state, and at
       // 0.80 alpha over the lamp's lit-side bevel it measured 4.23:1 on the
       // shipped Practice frame -- under the design's floor.
-      color: slot.lit ? Theme.lime : Theme.text
+      // ROUND-8: amber, not lime. The lamp is the design's own amber, which
+      // its Visual style already gives to lap lamps.
+      color: slot.lit ? Theme.amberGlow : Theme.text
       font.family: Theme.mono
       font.bold: true
       font.pixelSize: slot.u(15)
@@ -232,10 +274,10 @@ Item {
       width: slot.u(26)
       height: width
       radius: width / 2
-      color: slot.lit ? Theme.lime : "#1c0a18"
+      color: slot.lit ? Theme.amber : "#1c0a18"
       border.width: Math.max(1, slot.u(2))
       border.color: slot.lit
-                    ? Qt.lighter(Theme.lime, 1.3)
+                    ? Qt.lighter(Theme.amber, 1.3)
                     : Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.3)
 
       Rectangle {
@@ -244,7 +286,7 @@ Item {
         width: parent.width * 0.42
         height: width
         radius: width / 2
-        color: "#e8ffdd"
+        color: "#fff2d6"
       }
     }
   }

@@ -36,19 +36,38 @@ Item {
   // The "sign" variant's fill. Defaults to what it has always been; the
   // garage sets it to the v3 dusk surface so the sign belongs to its column.
   property color surface: Theme.panelSunken
+  // The "go" fill. Defaults to Theme.lime, which is what Results and Settings
+  // still get; the garage passes the design's amber, because a lime slab is
+  // the largest single block of a colour the bar does not contain.
+  property color goTone: Theme.lime
+  // Supporting text on this control. Defaults to the shared 0.80-alpha role;
+  // the garage passes a full-strength one, because 0.80 does not clear 4.5:1
+  // on the v3 surfaces this round raises.
+  property color mutedColor: Theme.textLabel
+  // The "off" tone, for the sign variant. Same reason as `mutedColor`.
+  property color offTone: Theme.textDisabled
 
   signal activated()
 
-  readonly property color toneColor: tone === "go" ? Theme.lime
+  readonly property color toneColor: tone === "go" ? button.goTone
                                                    : tone === "quit" ? Theme.urgent
-                                                                     : Theme.textDisabled
+                                                                     : button.offTone
   readonly property bool primary: variant === "primary"
   readonly property bool sign: variant === "sign"
   // Dark ink on a filled block; the theme's own rule for what stays legible
   // on a saturated fill.
   readonly property color inkColor: Theme.ink(button.toneColor)
 
-  activeFocusOnTab: button.focusable
+  // ROUND-8: NOT in Qt's implicit tab chain, and that is what makes the
+  // screen's own Tab handler reachable. Qt Quick delivers a key to the focused
+  // item first; when that item has `activeFocusOnTab` set and ignores Tab, the
+  // delivery agent runs focus-chain navigation and CONSUMES the event there,
+  // so a screen's Keys.onPressed never sees Tab at all. Two rounds of Tab code
+  // in Garage.qml were dead for exactly that reason, and two mutations of it
+  // left twenty tests green. Focus on these controls is moved by the screen
+  // that owns them, through its published `stops` list. `Accessible.focusable`
+  // is unchanged, so a screen reader still sees a focusable control.
+  activeFocusOnTab: false
 
   Accessible.role: button.sign ? Accessible.StaticText : Accessible.Button
   Accessible.name: label
@@ -185,7 +204,7 @@ Item {
         text: button.sublabel
         color: button.primary
                ? Qt.rgba(button.inkColor.r, button.inkColor.g, button.inkColor.b, 0.82)
-               : Theme.textLabel
+               : button.mutedColor
         font.family: Theme.mono
         font.bold: button.primary
         font.pixelSize: button.sublabelSize
@@ -229,7 +248,7 @@ Item {
       anchors.right: parent.right
       textFormat: Text.PlainText
       text: button.sublabel
-      color: Theme.textLabel
+      color: button.mutedColor
       font.family: Theme.mono
       font.pixelSize: button.sublabelSize
       font.letterSpacing: 0.5

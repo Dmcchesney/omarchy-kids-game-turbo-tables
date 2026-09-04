@@ -358,6 +358,42 @@ Item {
         return o
     }
 
+    // ROUND-8. THE INVARIANT THAT MAKES EVERY TEST ABOVE ABLE TO BITE.
+    //
+    // For two rounds the garage's Tab handler was unreachable and nobody could
+    // tell, because Qt's implicit focus chain was quietly doing the same job.
+    // Qt Quick delivers a key to the focused item; if that item has
+    // `activeFocusOnTab` set and ignores Tab, the delivery agent runs its own
+    // focus navigation and CONSUMES the event there, so the screen's own
+    // Keys.onPressed never sees Tab at all. Instrumenting the handler at
+    // 1833634 counted zero entries in this whole file -- while the handler
+    // itself ran 55 times and saw Key_Shift twelve of them, so it was alive
+    // and simply never delivered a Tab. With the stops out of the chain the
+    // same count is 63.
+    //
+    // That is why two separate mutations of the Tab code -- making the branch
+    // unreachable, and `var back = false` -- both left twenty tests green: they
+    // were mutations of dead code, and no assertion about Tab's EFFECT can kill
+    // dead code while something else produces the same effect. This is the
+    // assertion about the MECHANISM, and it is the one that would have caught
+    // it: if any stop rejoins Qt's chain, the screen's Tab code goes dead again
+    // and this test fails while every other test in the file still passes.
+    function test_19_no_stop_sits_in_qts_implicit_tab_chain() {
+      for (var i = 0; i < garage.stops.length; i++) {
+        var item = garage.stops[i]
+        verify(item !== null, "stop " + i + " is null")
+        compare(item.activeFocusOnTab, false,
+                "stop " + i + " (" + garage.focusName(i) + ") is in Qt's implicit "
+                + "tab chain, which swallows Tab before the garage can act on it")
+      }
+      // And the screen still owns the key: one real press, one stop.
+      garage.focusStop(0)
+      keyClick(Qt.Key_Tab)
+      compare(garage.stopIndex(), 1)
+      keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+      compare(garage.stopIndex(), 0)
+    }
+
     // The walkthrough. Tab from the first stop to the last, recording the
     // screen-reader name reached at every stop.
     function test_13_keyboard_walkthrough() {

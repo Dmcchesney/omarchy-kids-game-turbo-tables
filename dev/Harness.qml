@@ -457,13 +457,29 @@ Window {
 
   // ------------------------------------------------- non-interactive shots
   //
-  // Focus is advanced through nextItemInFocusChain(), which is the function
-  // Qt's own Tab handler calls -- so --focus 5 lands where five Tab presses
-  // land. tests/qml/tst_garage_keyboard.qml presses the real key and asserts
-  // the order matches, which is what makes that claim checkable rather than
-  // asserted.
+  // ROUND-8. This used to advance focus with nextItemInFocusChain() and claim
+  // that was "the function Qt's own Tab handler calls", so --focus 5 landed
+  // where five Tab presses land. A critic's note against that was fair even
+  // then -- it measured the mechanism rather than the affordance -- and it is
+  // now simply wrong for the garage: the stops are deliberately OUT of Qt's
+  // implicit chain (see the note in ui/Garage.qml), so nextItemInFocusChain()
+  // finds nothing there at all.
+  //
+  // A screen that publishes moveFocus() is now advanced through it, which is
+  // the exact function its Tab handler calls: one call short of the key
+  // itself. That is as close as a QML process can get without QtTest, and it
+  // is stated here rather than implied, because ONLY
+  // tests/qml/tst_garage_keyboard.qml presses a real key. No screenshot in any
+  // evidence pack proves a key was pressed; the test file does.
   function tabForward(times) {
+    var screen = screenLoader.item
+    var owned = screen && typeof screen.moveFocus === "function"
+                && typeof screen.stopIndex === "function"
     for (var i = 0; i < times; i++) {
+      if (owned) {
+        screen.moveFocus(1)
+        continue
+      }
       var current = harness.activeFocusItem
       if (!current)
         return

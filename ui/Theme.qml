@@ -96,13 +96,46 @@ QtObject {
   // deliberately does not move with the child's theme. The chrome ON these
   // surfaces -- the accent, the focus ring, the text roles, the hairlines --
   // is still the theme's and is unchanged.
-  readonly property color duskPage: "#1e0816"
-  readonly property color duskSurface: "#2e0f21"
-  readonly property color duskSurfaceRaised: "#3c1228"
-  readonly property color duskSurfaceSunken: "#170510"
+  // ROUND-8, AND THE WHOLE OF THE ROUND. Round seven set this stack at
+  // #1e0816 / #2e0f21 / #3c1228 / #170510: warm, and still near-black. The
+  // frame that came out of it measured mean HSV value 0.273 and mean WCAG
+  // luminance 0.0701 against the bar's 0.575 and 0.1540, with 42.8% of the
+  // picture below luminance 0.01 -- chrome TINTED toward the sunset rather
+  // than LIT by it. Every one of those four is raised here, and the design's
+  // own ground `#3c1228` is now the SUNKEN step rather than the brightest,
+  // so the darkest surface on the screen is the colour the design names as
+  // the game's ground instead of two steps under it.
+  //
+  // The ceiling is arithmetic, not taste. The theme's foreground `#a9b1d6`
+  // has relative luminance 0.447, so a background may reach luminance 0.0604
+  // before full-strength theme text drops under 4.5:1, and 0.0155 -- the
+  // design's own `#3c1228` -- before text at the v1 roles' 0.72 alpha does.
+  // Raising the surfaces past that point therefore costs the alpha hierarchy,
+  // not the contrast floor: the garage's muted text goes to full strength and
+  // takes its hierarchy from size, weight and hue instead. `duskTextQuiet`
+  // below is the one step that is still an alpha, and it is measured.
+  readonly property color duskPage: "#4a1734"
+  readonly property color duskSurface: "#5a1d3e"
+  readonly property color duskSurfaceRaised: "#632043"
+  readonly property color duskSurfaceSunken: "#3c1228"
   // A hairline and a rule that belong to the room rather than to the desktop:
   // warm, low-alpha, and used only where an edge is catching the sun.
   readonly property color duskEdgeWarm: Qt.rgba(duskRim.r, duskRim.g, duskRim.b, 0.22)
+  // The sun on a panel's door-side edge. The room's key does not stop at the
+  // bay's frame: every card on this screen is an object in the same room, so
+  // the edge that faces the opening catches the same `#f0b07a` the crates and
+  // the dais rim catch, and the edge that faces away carries the purple.
+  readonly property color duskLitEdge: Qt.rgba(duskRim.r, duskRim.g, duskRim.b, 0.55)
+  readonly property color duskDarkEdge: Qt.rgba(0.10, 0.02, 0.09, 0.55)
+  // The room's own light on a chrome surface: what a panel's fill runs to on
+  // the side that faces the door.
+  readonly property color duskSurfaceLit: "#7a2a52"
+  // Supporting text on these surfaces. Not `textLabel`/`textDisabled`: those
+  // are 0.80 and 0.72 alpha and are shared with four screens this round does
+  // not touch, so they keep the values that made them measure 5.69:1 and
+  // 4.86:1 there. 0.92 is what clears 4.5:1 on `duskSurface`, and it is the
+  // only alpha step the garage still uses for text.
+  readonly property color duskTextQuiet: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.92)
 
   // Eight paints, in the order the swatch grid reads them: two rows of four.
   readonly property var paints: ["#e0483a", "#ee8b3a", "#f2c93c", "#6dc94a",

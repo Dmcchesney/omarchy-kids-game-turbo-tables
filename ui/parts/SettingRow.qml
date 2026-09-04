@@ -27,6 +27,12 @@ Item {
   // How a screen reader should say this row's name. The visible label is set
   // in capitals for the gauge look; a reader should not have to shout it.
   property string spokenName: ""
+  // The label and the non-affordance's own colours. Defaults are the shared
+  // 0.80 and 0.72 alpha roles, so Settings renders exactly as it did; the
+  // garage passes full-strength text, because on the brighter v3 surfaces
+  // this round introduces 0.80 measures 4.30:1 and 0.72 measures 3.32:1.
+  property color labelColor: Theme.textLabel
+  property color fixedColor: Theme.textDisabled
   property int labelSize: 16
   property int valueSize: 24
   property int labelWidth: 190
@@ -64,7 +70,7 @@ Item {
     x: icon.x + icon.width + Math.round(row.valueSize * 0.7)
     width: row.labelWidth
     text: row.label
-    color: Theme.textLabel
+    color: row.labelColor
     font.family: Theme.mono
     font.pixelSize: row.labelSize
     font.letterSpacing: 1.4
@@ -92,7 +98,10 @@ Item {
     anchors.right: parent.right
     width: Math.round(row.valueSize * 4.4)
     height: Math.round(row.valueSize * 1.5)
-    activeFocusOnTab: row.changeable
+    // See ActionButton: a stop in Qt's implicit tab chain swallows Tab before
+    // the screen that owns it can act on it. `Accessible.focusable` below is
+    // still driven by `changeable`.
+    activeFocusOnTab: false
 
     Accessible.role: Accessible.Button
     readonly property string spoken: row.spokenName.length > 0 ? row.spokenName : row.label
@@ -145,7 +154,7 @@ Item {
       text: row.changeable ? "CHANGE" : row.fixedLabel
       // A row that cannot change still has to say why, and be read while it
       // says it: disabled means "not actionable", not "invisible".
-      color: row.changeable ? Theme.text : Theme.textDisabled
+      color: row.changeable ? Theme.text : row.fixedColor
       font.family: Theme.mono
       font.bold: true
       font.pixelSize: Math.round(row.labelSize * 0.92)

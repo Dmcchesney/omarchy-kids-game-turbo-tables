@@ -26,7 +26,16 @@ Item {
 
   signal stepped(int delta)
 
-  activeFocusOnTab: true
+  // ROUND-8: NOT in Qt's implicit tab chain, and that is what makes the
+  // screen's own Tab handler reachable. Qt Quick delivers a key to the focused
+  // item first; when that item has `activeFocusOnTab` set and ignores Tab, the
+  // delivery agent runs focus-chain navigation and CONSUMES the event there,
+  // so a screen's Keys.onPressed never sees Tab at all. Two rounds of Tab code
+  // in Garage.qml were dead for exactly that reason, and two mutations of it
+  // left twenty tests green. Focus on these controls is moved by the screen
+  // that owns them, through its published `stops` list. `Accessible.focusable`
+  // is unchanged, so a screen reader still sees a focusable control.
+  activeFocusOnTab: false
 
   Accessible.role: Accessible.SpinBox
   Accessible.name: stepper.name + ", " + stepper.value

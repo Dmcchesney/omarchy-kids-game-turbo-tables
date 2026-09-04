@@ -130,32 +130,35 @@ FocusScope {
   Accessible.name: "Garage"
   Accessible.description: "Set up your kart and the race, then ready up. Tab moves, arrows change, Enter chooses, Escape leaves."
 
-  // Escape backs out; Tab, Backtab, Up and Down all walk `stops`. Each only
-  // runs when the focused control has not already used the key, because key
-  // events reach an ancestor only after the focused item ignores them.
+  // Escape backs out; Tab, Backtab, Up and Down all walk `stops`.
   //
-  // ROUND-6: TAB IS HANDLED HERE, and it was not before.
+  // ROUND-8: AND UNTIL THIS ROUND THIS BLOCK WAS UNREACHABLE.
   //
-  // Until this round the screen left Tab to Qt's implicit focus chain and
-  // asserted the result -- and `tests/qml/tst_garage_keyboard.qml` had been
-  // FAILING on exactly that for two rounds: test_02 and test_03, red at
-  // e17e9bb, red before my first edit this round, and reported as "18 passed,
-  // 0 failed" in the round-5 self-report, which is the one line of that
-  // report's check table that was not true. Pressing Tab moved focus
-  // NOWHERE: `garage.stopIndex()` stayed 0 through eight presses. A bare
-  // three-Rectangle probe with `activeFocusOnTab: true` on every one of them
-  // behaves the same way in this Qt build, so it is not something about this
-  // screen -- but the design's own policy rail reads "TAB MOVE" and the
-  // screen was not doing it.
+  // Round six added the Tab branch below and round seven reported, honestly,
+  // that making it unreachable (`false &&`) still left all twenty keyboard
+  // tests passing. A critic then found a second mutation of the same class --
+  // `var back = false`, Shift+Tab always forward -- also leaving twenty
+  // green, and called it a user-visible regression the suite could not see.
   //
-  // The reason the last round did not see it: its eight focus frames were
-  // produced by the harness, which advances focus by calling
-  // nextItemInFocusChain() directly. That function works. The KEY did not,
-  // and only the test pressed the key. Measuring the mechanism instead of
-  // the affordance is how a headline control goes two rounds dead.
+  // It is neither a test weakness nor a regression. Instrumenting this
+  // handler shows it is entered ZERO times in the whole twenty-test run:
+  // Qt Quick delivers a key to the focused item, and when that item has
+  // `activeFocusOnTab` set and ignores Tab, the delivery agent runs its own
+  // focus-chain navigation and consumes the event THERE -- before it can
+  // bubble to this ancestor. Key_Shift, which is not a navigation key, does
+  // arrive here; Key_Tab never does. So both mutations were mutations of dead
+  // code, no test could kill them, and Tab was in fact being walked by Qt's
+  // implicit chain, which happened to agree with `stops` because the
+  // declaration order happened to match the layout order.
   //
-  // Handling it here also makes Tab walk `stops` BY CONSTRUCTION rather than
-  // by agreeing with a chain the layout could reorder underneath it.
+  // The fix is in the product, not in the tests. Every stop now carries
+  // `activeFocusOnTab: false`, so nothing swallows Tab on the way up and this
+  // handler is the ONE thing that moves focus on this screen -- 63 entries in
+  // the same run, counted the same way. With that, `false &&` fails four tests
+  // and `var back = false` fails three.
+  // `tests/qml/tst_garage_keyboard.qml` also asserts the
+  // invariant directly, so a stop that quietly rejoins Qt's chain -- and
+  // silently kills this code again -- fails a test rather than passing one.
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_Escape) {
       garage.leaveRequested()
@@ -186,9 +189,77 @@ FocusScope {
   // stack Theme adds for v3; the chrome ON them -- the accent, the focus
   // ring, the four text roles, the hairlines, the type -- is the theme's and
   // is untouched.
+  // ROUND-8. The page is no longer a flat fill. Round seven changed WHICH
+  // near-black the screen was painted in; the frame still measured mean value
+  // 0.273 against the bar's 0.575 because a warm near-black is still a
+  // near-black. What follows is the room's own light, on the page: the key is
+  // the DOOR OPENING's centre, 36% across and 41% down the frame (the sun's
+  // own disc sits right of that, at 43% across -- the light comes through the
+  // whole opening, not out of the disc), and everything on this screen is
+  // inside the same bay, so the glow that falls on the far wall falls on the
+  // page too, and the magenta bounce off the floor reaches the bottom edge.
+  // It is one Canvas, painted on resize.
+  //
+  // Measured: it touches 32.2% of the frame -- the rest is under opaque cards
+  // -- and over exactly those pixels its lift falls monotonically away from
+  // the opening, 1.58x at a tenth of the frame's diagonal to 1.21x at half of
+  // it. That is the direction the round is about. The honest half of the
+  // sentence is that it is the SMALLER half of the change: the frame's mean
+  // value is 0.4193 with it and 0.4019 without, and most of the movement from
+  // round seven's 0.273 came from raising the four surfaces in Theme.
   Rectangle {
     anchors.fill: parent
     color: Theme.duskPage
+
+    Canvas {
+      id: pageLight
+      anchors.fill: parent
+      renderStrategy: Canvas.Immediate
+      renderTarget: Canvas.Image
+      onWidthChanged: requestPaint()
+      onHeightChanged: requestPaint()
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        ctx.clearRect(0, 0, width, height)
+        function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
+
+        // The key, through the opening.
+        var kx = width * 0.363, ky = height * 0.410
+        var reach = Math.max(width, height) * 0.92
+        var key = ctx.createRadialGradient(kx, ky, 0, kx, ky, reach)
+        key.addColorStop(0.00, tint(Theme.duskSkyHot, 0.62))
+        key.addColorStop(0.22, tint(Theme.duskSkyHot, 0.34))
+        key.addColorStop(0.55, tint(Theme.duskSkyMid, 0.16))
+        key.addColorStop(1.00, tint(Theme.duskSkyTop, 0.0))
+        ctx.fillStyle = key
+        ctx.fillRect(0, 0, width, height)
+
+        // The bounce off the floor of the bay, along the bottom of the frame.
+        var bounce = ctx.createLinearGradient(0, height * 0.62, 0, height)
+        bounce.addColorStop(0.0, tint(Theme.duskSkyMid, 0.0))
+        bounce.addColorStop(1.0, tint(Theme.duskSkyMid, 0.20))
+        ctx.fillStyle = bounce
+        ctx.fillRect(0, height * 0.62, width, height * 0.38)
+
+        // No ceiling wash. A first pass put one here and it lifted the
+        // top-left corner -- the corner FURTHEST from the opening -- to
+        // luminance 0.0447, where the theme accent on TURBO TABLES // GARAGE
+        // measured 4.30:1. One key means the far corner is the dim one, and
+        // this is that corner falling away: the same radial as the key, run
+        // backwards from the corner the light never reaches. It is also what
+        // buys the title its contrast back -- the theme accent is the one
+        // text colour on this screen that cannot be brightened, because it
+        // belongs to the child's Omarchy and not to the game.
+        var far = ctx.createRadialGradient(0, 0, 0, 0, 0,
+                                           Math.max(width, height) * 0.62)
+        far.addColorStop(0.00, tint(Theme.duskSurfaceSunken, 0.70))
+        far.addColorStop(0.50, tint(Theme.duskSurfaceSunken, 0.27))
+        far.addColorStop(1.00, tint(Theme.duskSurfaceSunken, 0.0))
+        ctx.fillStyle = far
+        ctx.fillRect(0, 0, width, height)
+      }
+    }
   }
 
   // The page: one card with everything on it, exactly as the mock frames it.
@@ -196,7 +267,9 @@ FocusScope {
     id: page
     anchors.fill: parent
     anchors.margins: garage.px(16)
-    color: Qt.rgba(Theme.duskSurface.r, Theme.duskSurface.g, Theme.duskSurface.b, 0.55)
+    // Thinner than round seven's 0.55: the page light beneath is the room,
+    // and a card at 0.55 put it back under a film.
+    color: Qt.rgba(Theme.duskSurface.r, Theme.duskSurface.g, Theme.duskSurface.b, 0.30)
     border.color: Theme.lineStrong
 
     readonly property int pad: garage.px(22)
@@ -233,7 +306,7 @@ FocusScope {
           // 0.6 alpha measured 3.44:1 on the shipped frame -- the only string
           // on the screen under 4.5:1. It is decorative, but a floor that has
           // an exception is not a floor.
-          color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.85)
+          color: Theme.accent
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: garage.fs(34)
@@ -265,7 +338,10 @@ FocusScope {
         width: garage.px(148)
         height: garage.px(44)
         value: "OFFLINE"
-        valueColor: Theme.lime
+        // ROUND-8: was Theme.lime. Design v3's Visual style names amber,
+        // cream, the rim and the purples; it names no green at all, and the
+        // bar has 0.039% of its pixels in the green band against our 5.6%.
+        valueColor: Theme.amber
         valueSize: garage.fs(20)
         valueSpacing: garage.px(2)
         rivetInset: garage.px(5)
@@ -292,7 +368,7 @@ FocusScope {
 
         Repeater {
           model: [
-            { art: Glyphs.lock, tone: Theme.lime, label: "SOLO GARAGE" },
+            { art: Glyphs.lock, tone: Theme.cream, label: "SOLO GARAGE" },
             { art: Glyphs.preset, tone: Theme.amber, label: "PRESET SIGNALS" },
             { art: Glyphs.monitor, tone: Theme.accent, label: "THIS COMPUTER ONLY" }
           ]
@@ -370,7 +446,7 @@ FocusScope {
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
               text: modelData.what
-              color: Theme.textLabel
+              color: Theme.text
               font.family: Theme.mono
               font.pixelSize: garage.fs(15)
               font.letterSpacing: garage.px(1)
@@ -460,7 +536,7 @@ FocusScope {
           Text {
             textFormat: Text.PlainText
             text: "KART BODY   " + (garage.bodyIndex + 1) + " / 6"
-            color: Theme.textLabel
+            color: Theme.text
             font.family: Theme.mono
             font.bold: true
             font.pixelSize: garage.fs(15)
@@ -683,7 +759,7 @@ FocusScope {
             width: parent.width
             wrapMode: Text.WordWrap
             text: "Colors and numbers are visible to all racers."
-            color: Theme.textLabel
+            color: Theme.text
             font.family: Theme.mono
             font.pixelSize: garage.fs(15)
             lineHeight: 1.25
@@ -752,6 +828,8 @@ FocusScope {
         tone: "off"
         variant: "sign"
         surface: Theme.duskSurfaceSunken
+        offTone: Theme.text
+        mutedColor: Theme.text
         focusable: false
         label: "RACE A FRIEND"
         sublabel: "Ask a parent to install Kids Play"
@@ -775,6 +853,8 @@ FocusScope {
       width: page.settingsW
       height: page.bottomH
       color: Theme.duskSurface
+      // The bay is above this band, so the sun lands on its top edge.
+      litSide: "top"
 
       // Five rows, written out rather than repeated over a model: the values
       // change as the child cycles them, and a model that changes rebuilds
@@ -803,12 +883,15 @@ FocusScope {
           labelSize: parent.labelPx
           valueSize: parent.valuePx
           labelWidth: parent.labelW
+          labelColor: Theme.text
+          fixedColor: Theme.duskTextQuiet
         }
         SettingRow {
           id: modeRow
           width: parent.width
           height: parent.rowH
           separator: true
+          labelColor: Theme.text
           art: Glyphs.clock
           label: "RACE MODE"
           spokenName: "Race mode"
@@ -823,6 +906,7 @@ FocusScope {
           width: parent.width
           height: parent.rowH
           separator: true
+          labelColor: Theme.text
           art: Glyphs.times
           label: "MATH SET"
           spokenName: "Math set"
@@ -837,6 +921,7 @@ FocusScope {
           width: parent.width
           height: parent.rowH
           separator: true
+          labelColor: Theme.text
           art: Glyphs.wheel
           label: "RIVALS"
           spokenName: "Rivals"
@@ -855,6 +940,8 @@ FocusScope {
           spokenName: "Goal"
           value: "FINISH ALL " + garage.setLaps[garage.mathSet] + " LAPS"
           changeable: false
+          labelColor: Theme.text
+          fixedColor: Theme.duskTextQuiet
           labelSize: parent.labelPx
           valueSize: parent.valuePx
           labelWidth: parent.labelW
@@ -870,6 +957,7 @@ FocusScope {
       width: page.signalsW
       height: page.bottomH
       color: Theme.duskSurface
+      litSide: "top"
       pad: garage.px(22)
       title: "PRESET SIGNALS"
       titleColor: Theme.amber
@@ -893,7 +981,10 @@ FocusScope {
           art: Glyphs.thumbUp
           caption: "NICE RUN"
           surface: Theme.duskSurfaceSunken
-          tone: Theme.lime
+          // ROUND-8: the four tones are now four hues of the room -- cream,
+          // amber, the deep amber and the sky's own neon pink. Lime and the
+          // theme accent were the two off-bar colours in the set.
+          tone: Theme.cream
           captionSize: garage.fs(15)
         }
         SignalTile {
@@ -923,7 +1014,7 @@ FocusScope {
           art: Glyphs.hand
           caption: "GOOD GAME"
           surface: Theme.duskSurfaceSunken
-          tone: Theme.accent
+          tone: Theme.duskNeon
           captionSize: garage.fs(15)
         }
       }
@@ -939,7 +1030,7 @@ FocusScope {
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         text: "These are the only signals in a race. The rivals send them too."
-        color: Theme.textLabel
+        color: Theme.text
         font.family: Theme.mono
         font.pixelSize: garage.fs(15)
         lineHeight: 1.25
@@ -970,6 +1061,14 @@ FocusScope {
         height: garage.px(170)
         art: Glyphs.flag
         tone: "go"
+        // ROUND-8. The lime slab was 98,267 green pixels -- 4.74% of the
+        // frame, nearly twice the area of all the sky, in a picture whose bar
+        // has 780 green pixels in 2,073,600. `goTone` is a new property on
+        // ActionButton that defaults to Theme.lime, so Results and Settings
+        // are byte-identical; only this control takes the design's own amber,
+        // which its Visual style already gives to the streak charge and the
+        // boosts -- the game's existing "go".
+        goTone: Theme.amber
         variant: "primary"
         label: "READY UP"
         sublabel: garage.rivalsRace ? "STARTS THE COUNTDOWN AGAINST THREE RIVALS"
@@ -991,6 +1090,7 @@ FocusScope {
         art: Glyphs.exit
         tone: "quit"
         variant: "secondary"
+        mutedColor: Theme.text
         label: "LEAVE"
         sublabel: "ESCAPE DOES IT TOO"
         labelSize: garage.fs(27)
