@@ -49,6 +49,10 @@ export const NOT_WALKED: Exemption[] = [
     match: ".DS_Store",
     why: "macOS Finder metadata; git-ignored, never committed, and never cloned onto a child's machine -- listed since round 5, when check:boundary started reading every file's bytes and found three of them",
   },
+  {
+    match: "__pycache__/",
+    why: "CPython bytecode that src/tools/*.py write beside themselves whenever the sprite tools run; git-ignored, never committed, and not the plugin. It is listed here rather than allowed as a binary type: the three-type allowance is by content, and a .pyc genuinely is a binary that has no business being cloned onto a child's machine -- so the answer is that this directory is not walked, not that its contents are tolerated",
+  },
 ];
 
 const NOT_WALKED_NAMES = new Set(NOT_WALKED.map((entry) => entry.match.replace(/\/$/, "")));
