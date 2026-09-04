@@ -59,6 +59,16 @@ QtObject {
   readonly property color limeDeep: "#1d3a18"
   readonly property color cream: "#f2e6c4"
   readonly property color hazard: "#d8a12a"
+  // ROUND-9, PIECE 3. The amber's own deep ember: the same hue, four stops of
+  // value down. It exists because a FILLED control in `amber` at the size the
+  // primary action needs carries a quarter of the frame's light -- measured,
+  // 23.8 % of the luminous mass on 4.8 % of the area, against a sun disc at
+  // 3.5 % -- and a picture with one key light cannot have its brightest object
+  // be a button. The amber stays on the border, the glyph and the focus state,
+  // where the same hue costs a few thousand pixels instead of a hundred
+  // thousand. WCAG relative luminance 0.087 against `amber`'s 0.464; cream on
+  // it measures 6.2:1.
+  readonly property color emberDeep: "#8f3d15"
 
   // PROTOTYPE: "Golden Hour at the Pit". The palette sampled off the Omarchy
   // Quattro wallpaper -- one low sun behind-right of the subject, a magenta

@@ -140,7 +140,18 @@ FocusScope {
   // `var back = false`, Shift+Tab always forward -- also leaving twenty
   // green, and called it a user-visible regression the suite could not see.
   //
-  // It is neither a test weakness nor a regression. Instrumenting this
+  // ROUND-9 CORRECTION. Round eight wrote here that this was "neither a test
+  // weakness nor a regression", and both halves of that were too strong. The
+  // code was dead AND `test_03_shift_tab_walks_it_backwards` could not tell
+  // the product from the environment: those are one fact seen from two sides,
+  // not a refutation of one by the other. And "not a regression" held only
+  // while every stop stayed in Qt's implicit chain -- the moment anything took
+  // them out, which is exactly what round eight then did, `var back = false`
+  // became a live user-visible regression that round seven's suite still could
+  // not have seen. The round-seven critic's sentence and the round-eight
+  // diagnosis are both true.
+  //
+  // The diagnosis itself stands. Instrumenting this
   // handler shows it is entered ZERO times in the whole twenty-test run:
   // Qt Quick delivers a key to the focused item, and when that item has
   // `activeFocusOnTab` set and ignores Tab, the delivery agent runs its own
@@ -180,97 +191,38 @@ FocusScope {
     }
   }
 
-  // ROUND-7, THE PALETTE. The page was `Theme.ground` -- the child's theme
-  // background driven to 34%, which on stock Omarchy is the cold neutral
-  // #090911. The design's Visual style names the ground "near-black purple
-  // #3c1228", and a 1920x1080 frame of this screen beside
-  // docs/golden-hour-reference.png was a dark desktop panel with a small lit
-  // window cut in it. Every surface on this screen now comes from the dusk
-  // stack Theme adds for v3; the chrome ON them -- the accent, the focus
-  // ring, the four text roles, the hairlines, the type -- is the theme's and
-  // is untouched.
-  // ROUND-8. The page is no longer a flat fill. Round seven changed WHICH
-  // near-black the screen was painted in; the frame still measured mean value
-  // 0.273 against the bar's 0.575 because a warm near-black is still a
-  // near-black. What follows is the room's own light, on the page: the key is
-  // the DOOR OPENING's centre, 36% across and 41% down the frame (the sun's
-  // own disc sits right of that, at 43% across -- the light comes through the
-  // whole opening, not out of the disc), and everything on this screen is
-  // inside the same bay, so the glow that falls on the far wall falls on the
-  // page too, and the magenta bounce off the floor reaches the bottom edge.
-  // It is one Canvas, painted on resize.
+  // ROUND-9: THE ROOM IS THE PAGE.
   //
-  // Measured: it touches 32.2% of the frame -- the rest is under opaque cards
-  // -- and over exactly those pixels its lift falls monotonically away from
-  // the opening, 1.58x at a tenth of the frame's diagonal to 1.21x at half of
-  // it. That is the direction the round is about. The honest half of the
-  // sentence is that it is the SMALLER half of the change: the frame's mean
-  // value is 0.4193 with it and 0.4019 without, and most of the movement from
-  // round seven's 0.273 came from raising the four surfaces in Theme.
-  Rectangle {
-    anchors.fill: parent
-    color: Theme.duskPage
-
-    Canvas {
-      id: pageLight
-      anchors.fill: parent
-      renderStrategy: Canvas.Immediate
-      renderTarget: Canvas.Image
-      onWidthChanged: requestPaint()
-      onHeightChanged: requestPaint()
-      onPaint: {
-        var ctx = getContext("2d")
-        ctx.reset()
-        ctx.clearRect(0, 0, width, height)
-        function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
-
-        // The key, through the opening.
-        var kx = width * 0.363, ky = height * 0.410
-        var reach = Math.max(width, height) * 0.92
-        var key = ctx.createRadialGradient(kx, ky, 0, kx, ky, reach)
-        key.addColorStop(0.00, tint(Theme.duskSkyHot, 0.62))
-        key.addColorStop(0.22, tint(Theme.duskSkyHot, 0.34))
-        key.addColorStop(0.55, tint(Theme.duskSkyMid, 0.16))
-        key.addColorStop(1.00, tint(Theme.duskSkyTop, 0.0))
-        ctx.fillStyle = key
-        ctx.fillRect(0, 0, width, height)
-
-        // The bounce off the floor of the bay, along the bottom of the frame.
-        var bounce = ctx.createLinearGradient(0, height * 0.62, 0, height)
-        bounce.addColorStop(0.0, tint(Theme.duskSkyMid, 0.0))
-        bounce.addColorStop(1.0, tint(Theme.duskSkyMid, 0.20))
-        ctx.fillStyle = bounce
-        ctx.fillRect(0, height * 0.62, width, height * 0.38)
-
-        // No ceiling wash. A first pass put one here and it lifted the
-        // top-left corner -- the corner FURTHEST from the opening -- to
-        // luminance 0.0447, where the theme accent on TURBO TABLES // GARAGE
-        // measured 4.30:1. One key means the far corner is the dim one, and
-        // this is that corner falling away: the same radial as the key, run
-        // backwards from the corner the light never reaches. It is also what
-        // buys the title its contrast back -- the theme accent is the one
-        // text colour on this screen that cannot be brightened, because it
-        // belongs to the child's Omarchy and not to the game.
-        var far = ctx.createRadialGradient(0, 0, 0, 0, 0,
-                                           Math.max(width, height) * 0.62)
-        far.addColorStop(0.00, tint(Theme.duskSurfaceSunken, 0.70))
-        far.addColorStop(0.50, tint(Theme.duskSurfaceSunken, 0.27))
-        far.addColorStop(1.00, tint(Theme.duskSurfaceSunken, 0.0))
-        ctx.fillStyle = far
-        ctx.fillRect(0, 0, width, height)
-      }
-    }
-  }
-
-  // The page: one card with everything on it, exactly as the mock frames it.
+  // Round seven painted this page a warm near-black and round eight put a
+  // Canvas on it that FAKED the room's light -- a radial keyed on the door
+  // opening's centre, a floor bounce along the bottom edge, a corner falling
+  // away. It measured well (32.2 % of the frame, 1.58x at the opening falling
+  // to 1.21x across it) and it was still a gradient standing in for a room,
+  // because the room itself was a 1226 x 530 picture in the top-left quadrant
+  // with a 400 x 290 door cut in it.
+  //
+  // The stall is now the page. `GarageStall` fills this card, the sunset is
+  // the backdrop of the whole screen, and every panel here -- the title, the
+  // rail, the kart card, the roster, the three boards along the bottom -- is
+  // an object standing in that room. The faked light is deleted: what falls on
+  // this page is the room's own sky, hills, threshold and floor, drawn once.
+  //
+  // The card itself is therefore transparent. A 0.30 film of `duskSurface`
+  // over the sunset is the same mistake the page light was, one layer up.
   Panel {
     id: page
     anchors.fill: parent
     anchors.margins: garage.px(16)
-    // Thinner than round seven's 0.55: the page light beneath is the room,
-    // and a card at 0.55 put it back under a film.
-    color: Qt.rgba(Theme.duskSurface.r, Theme.duskSurface.g, Theme.duskSurface.b, 0.30)
+    color: "transparent"
     border.color: Theme.lineStrong
+    clip: true
+
+    GarageStall {
+      id: stall
+      objectName: "garageStall"
+      anchors.fill: parent
+      cornerRadius: Theme.cornerRadius
+    }
 
     readonly property int pad: garage.px(22)
     readonly property int contentX: pad
@@ -458,320 +410,194 @@ FocusScope {
 
     // =====================================================  main row
     readonly property int mainY: rail.y + rail.height + garage.px(16)
-    readonly property int bottomH: garage.px(292)
+    // ROUND-9: 292 becomes 268. The three boards along the bottom now stand ON
+    // the bay floor with the turntable running behind them, so every pixel
+    // taken off this band is a pixel of plinth the child can see. The rows
+    // inside it come down from 50 to 44 to pay for it.
+    readonly property int bottomH: garage.px(268)
     readonly property int bottomY: height - pad - bottomH
     readonly property int mainH: bottomY - garage.px(16) - mainY
     readonly property int rosterW: garage.px(602)
-    readonly property int stallW: contentW - rosterW - garage.px(16)
 
-    // ------------------------------------------------- the kart stall
+    // ------------------------------------------------- the kart on the dais
+    // PIECE C: the car on the turntable is a cell of its baked sheet -- the
+    // stall camera, yaw 0, the 1.0 row at a whole-number upscale -- stood on
+    // the dais by its contact point. The same sheet draws the roster row
+    // below, the countdown and the race, so the car the child builds here is
+    // the car everywhere else, not a resemblance of it.
+    //
+    // ROUND-9, AND IT IS A CAP, NOT A CHOICE. The plan's Composition line
+    // wants the hero "low-centre, large" and the bar has it at 48 % x 41 % of
+    // the frame; ours is 411 x 195 px, 21 % x 18 %, and it was 21 % x 18 % in
+    // round seven and round eight too. That is not this piece declining to
+    // grow it. `CarMeta.fit` clamps the whole-number upscale to 3
+    // (`ui/parts/CarMeta.js`), `CarSprite` clamps it again to 3
+    // (`ui/parts/CarSprite.qml`), and the 1.0 row's cell is 192 px wide -- so
+    // 576 px of cell, of which the coupe at yaw 6 inks 411, is the largest a
+    // car can be drawn ANYWHERE in this game at any screen size. Both files
+    // are piece C's, both are outside piece 3's scope, and
+    // `tests/qml/tst_carsprite.qml` asserts `pixelScale === 3` on this very
+    // item. What piece 3 CAN do is put the hero low and centre, against the
+    // glow, with a plinth sized to it -- and that is what the room around it
+    // now does. The width is piece C's to give.
+    CarSprite {
+      id: heroKart
+      objectName: "heroCar"
+      readonly property var fit: CarMeta.fit(stall.vs(stall.kartWidth))
+      x: Math.round(stall.vx(stall.daisX))
+      y: Math.round(stall.vy(stall.daisY))
+      body: garage.bodyIndex
+      paint: garage.paintIndex
+      number: garage.kartNumber
+      camera: "stall"
+      // Not the rear. Column 0 is the car's back to the lens, which on the
+      // dais showed the deck and the tail and almost none of the car. Column 6
+      // is the same baked cell budget seen from the front-left quarter, where
+      // the glasshouse, the door panel and a lit headlamp are all in view, and
+      // the number lands on the door.
+      yaw: 6
+      sheetScale: 1.0
+      pixelScale: fit.pixelScale
+    }
+
+    // ------------------------------------------------------ the kart card
+    // ROUND-9: ONE CARD, NOT TWO PANELS IN TWO CORNERS.
+    //
+    // Body was a card in the bay's bottom-left corner and colour and number
+    // were a translucent scrim over its bottom-right, and between them they
+    // held the middle of the picture. Two defects came straight out of that
+    // arrangement and both are gone with it: the room's hazard stripe ran
+    // through the NUMBER heading (the scrim was genuinely translucent, which
+    // was the previous round's fix for a different complaint), and the number
+    // stepper's arrows were near-invisible outlines with the floor grid
+    // showing through them.
+    //
+    // The three stall controls are one opaque board leaning against the one
+    // wall the room has left, in the reading order the Tab chain already used:
+    // body and number down the left of it, the eight paints down the right.
+    // It is the width of the settings board under it, it clears the turntable,
+    // and it takes 5,900 px out of the sky instead of 43,000.
     Panel {
-      id: stallPanel
+      id: kartCard
       x: page.contentX
-      y: page.mainY
-      width: page.stallW
-      height: page.mainH
-      color: Theme.duskPage
-      clip: true
+      width: garage.px(500)
+      height: kartColumn.height + garage.px(40)
+      y: page.bottomY - garage.px(16) - height
+      color: Theme.duskSurface
+      // The opening is above and right of this board, so the sun lands on its
+      // top edge.
+      litSide: "top"
 
-      GarageStall {
-        id: stall
-        objectName: "garageStall"
-        anchors.fill: parent
-        cornerRadius: Theme.cornerRadius
-      }
+      Column {
+        id: kartColumn
+        x: garage.px(20)
+        y: garage.px(20)
+        width: parent.width - garage.px(40)
+        spacing: garage.px(12)
 
-      // PIECE C: the car on the turntable is a cell of its baked sheet -- the
-      // stall camera, yaw 0, the 1.0 row at a whole-number upscale -- stood
-      // on the dais by its contact point. The upscale follows the width the
-      // dais was sized for (`stall.kartWidth`, which also sizes the plinth):
-      // three times at 1920x1080, twice at 1366x768, so the car stays on the
-      // turntable rather than over the bay. The same sheet draws the roster
-      // row below, the countdown and the race, so the car the child builds
-      // here is the car everywhere else, not a resemblance of it.
-      CarSprite {
-        id: heroKart
-        objectName: "heroCar"
-        readonly property var fit: CarMeta.fit(stall.vs(stall.kartWidth))
-        x: Math.round(stall.vx(stall.daisX))
-        y: Math.round(stall.vy(stall.daisY))
-        body: garage.bodyIndex
-        paint: garage.paintIndex
-        number: garage.kartNumber
-        camera: "stall"
-        // Not the rear. Column 0 is the car's back to the lens, which on the
-        // dais showed the deck and the tail and almost none of the car: a
-        // critic reading this screen called the picture under the label COUPE
-        // a flatbed hot rod. Column 6 is the same baked cell budget seen from
-        // the front-left quarter, where the glasshouse, the door panel and a
-        // lit headlamp are all in view, and the number lands on the door.
-        yaw: 6
-        sheetScale: 1.0
-        pixelScale: fit.pixelScale
-      }
+        Row {
+          id: kartRow
+          spacing: garage.px(16)
+          readonly property int colW: Math.floor((kartColumn.width - garage.px(16)) / 2)
 
-      // The body selector. It has its own opaque card in the bottom-left
-      // corner of the bay, on bare floor: round one dropped the bare control
-      // on top of the turntable and the dais stroke reappeared four pixels
-      // from its edge. The turntable was moved right and taken in to make
-      // this corner empty rather than to make the collision smaller.
-      Rectangle {
-        id: bodyCard
-        x: garage.px(22)
-        y: parent.height - height - garage.px(22)
-        width: garage.px(304)
-        height: bodyColumn.height + garage.px(34)
-        radius: Theme.cornerRadius
-        color: Theme.duskSurface
-        border.width: 1
-        border.color: Theme.lineStrong
+          Column {
+            width: kartRow.colW
+            spacing: garage.px(9)
 
-        Column {
-          id: bodyColumn
-          x: garage.px(17)
-          y: garage.px(17)
-          width: parent.width - garage.px(34)
-          spacing: garage.px(9)
+            Text {
+              textFormat: Text.PlainText
+              text: "KART BODY   " + (garage.bodyIndex + 1) + " / 6"
+              color: Theme.cream
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: garage.fs(15)
+              font.letterSpacing: garage.px(2)
+            }
 
-          Text {
-            textFormat: Text.PlainText
-            text: "KART BODY   " + (garage.bodyIndex + 1) + " / 6"
-            color: Theme.text
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: garage.fs(15)
-            font.letterSpacing: garage.px(2)
+            Stepper {
+              id: bodyStepper
+              width: parent.width
+              height: garage.px(56)
+              arrowWidth: garage.px(48)
+              valueSize: garage.fs(22)
+              valueSpacing: garage.px(2)
+              faceColor: Theme.duskSurfaceSunken
+              value: Theme.bodyName(garage.bodyIndex)
+              name: "Kart body"
+              hint: "Six bodies. Left and right change it."
+              onStepped: function (delta) { garage.cycle("kartBody", delta, 6) }
+            }
+
+            Item { width: 1; height: garage.px(4) }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "NUMBER"
+              color: Theme.cream
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: garage.fs(15)
+              font.letterSpacing: garage.px(3)
+            }
+
+            Stepper {
+              id: numberStepper
+              width: parent.width
+              height: garage.px(56)
+              arrowWidth: garage.px(48)
+              valueSize: garage.fs(26)
+              valueSpacing: garage.px(3)
+              faceColor: Theme.duskSurfaceSunken
+              value: String(garage.kartNumber)
+              name: "Kart number"
+              hint: "One to ninety-nine. Left and right change it."
+              onStepped: function (delta) { garage.stepNumber(delta) }
+            }
           }
 
-          Stepper {
-            id: bodyStepper
-            width: parent.width
-            height: garage.px(58)
-            arrowWidth: garage.px(52)
-            valueSize: garage.fs(23)
-            valueSpacing: garage.px(2)
-            faceColor: Theme.duskSurfaceSunken
-            value: Theme.bodyName(garage.bodyIndex)
-            name: "Kart body"
-            hint: "Six bodies. Left and right change it."
-            onStepped: function (delta) { garage.cycle("kartBody", delta, 6) }
-          }
-        }
-      }
+          Column {
+            width: kartRow.colW
+            spacing: garage.px(9)
 
-      // Paint and number, over the right of the bay, as in the mock.
-      //
-      // ROUND-5 REBUILD. Round four faded the panel's TOP edge and reported
-      // the defect fixed. The defect was on the LEFT edge, and the round-5
-      // verdict measured it still there: a one-pixel drop of dY 0.0385 at
-      // y = 400 where the panel meets the lit wall, and a largest step of
-      // 0.10969 at (932,546) where the cut slices a hazard chevron mid-stroke.
-      // It also found that the panel was not a scrim at all -- at y = 560 the
-      // hazard stripe reads Y 0.0188-0.0543 outside it and a flat 0.0058
-      // inside: the stripe simply stopped.
-      //
-      // Both are fixed here, and the mechanism is different from round four's.
-      //
-      //   * The scrim is drawn on a Canvas with a TWO-AXIS alpha field: the
-      //     vertical fade at the top, and a horizontal fade over `fadeW` px at
-      //     the left, painted as a `destination-out` pass so the two ramps
-      //     multiply. A QML `Gradient` runs in one direction only, which is
-      //     why round four could only fade one edge.
-      //   * The panel is genuinely translucent now: its peak is 0.74, not
-      //     0.90, and the room measurably continues through it -- see the
-      //     evidence, which samples the hazard stripe inside the panel and
-      //     finds it varying rather than flat.
-      //   * It is an object in the room, not a cut in the image: a soft cast
-      //     shadow falls on the wall to its left and a lit bevel runs down
-      //     its own left edge.
-      //
-      // The panel is `fadeW` px WIDER than round four's and its column is
-      // inset by the same amount, so every control stands exactly where it
-      // stood and on full scrim -- the contrast floor is unaffected.
-      Item {
-        id: paintPanel
-        readonly property int fadeH: garage.px(64)
-        readonly property int fadeW: garage.px(34)
-        width: garage.px(296) + fadeW
-        height: paintColumn.height + garage.px(36) + fadeH
-        x: parent.width - width - garage.px(22)
-        y: parent.height - height - garage.px(22)
+            Text {
+              textFormat: Text.PlainText
+              text: "COLOR"
+              color: Theme.cream
+              font.family: Theme.mono
+              font.bold: true
+              font.pixelSize: garage.fs(15)
+              font.letterSpacing: garage.px(3)
+            }
 
-        // The shadow the panel throws on the wall behind and left of it.
-        Rectangle {
-          x: -garage.px(26)
-          y: paintPanel.fadeH * 0.5
-          width: garage.px(30)
-          height: paintPanel.height - y
-          gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.0) }
-            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.34) }
+            PaintGrid {
+              id: paintGrid
+              width: parent.width
+              height: garage.px(118)
+              gap: garage.px(8)
+              selected: garage.paintIndex
+              onPicked: function (index) { Store.setSetting("kartPaint", index) }
+            }
           }
         }
 
-        Canvas {
-          id: scrim
-          anchors.fill: parent
-          renderStrategy: Canvas.Immediate
-          renderTarget: Canvas.Image
-          readonly property color tint: Theme.duskSurface
-          readonly property int radius: Theme.cornerRadius
-          onTintChanged: requestPaint()
-          onWidthChanged: requestPaint()
-          onHeightChanged: requestPaint()
-          onPaint: {
-            var ctx = getContext("2d")
-            ctx.reset()
-            ctx.clearRect(0, 0, width, height)
-            var r = scrim.radius
-            var w = width, h = height
-            ctx.beginPath()
-            ctx.moveTo(r, 0)
-            ctx.lineTo(w - r, 0)
-            ctx.quadraticCurveTo(w, 0, w, r)
-            ctx.lineTo(w, h - r)
-            ctx.quadraticCurveTo(w, h, w - r, h)
-            ctx.lineTo(r, h)
-            ctx.quadraticCurveTo(0, h, 0, h - r)
-            ctx.lineTo(0, r)
-            ctx.quadraticCurveTo(0, 0, r, 0)
-            ctx.closePath()
-            ctx.clip()
-
-            var t = scrim.tint
-            function fill(a) { return Qt.rgba(t.r, t.g, t.b, a) }
-            var fh = paintPanel.fadeH
-            var v = ctx.createLinearGradient(0, 0, 0, h)
-            v.addColorStop(0.0, fill(0.0))
-            v.addColorStop(fh / h * 0.34, fill(0.18))
-            v.addColorStop(fh / h * 0.70, fill(0.60))
-            v.addColorStop(fh / h, fill(0.71))
-            v.addColorStop(1.0, fill(0.74))
-            ctx.fillStyle = v
-            ctx.fillRect(0, 0, w, h)
-
-            // The left ramp, taken out of what was just laid down, so the two
-            // ramps multiply instead of one painting over the other.
-            var fw = paintPanel.fadeW
-            var cut = ctx.createLinearGradient(0, 0, fw, 0)
-            cut.addColorStop(0.0, Qt.rgba(0, 0, 0, 1.0))
-            cut.addColorStop(0.34, Qt.rgba(0, 0, 0, 0.62))
-            cut.addColorStop(0.70, Qt.rgba(0, 0, 0, 0.20))
-            cut.addColorStop(1.0, Qt.rgba(0, 0, 0, 0.0))
-            ctx.globalCompositeOperation = "destination-out"
-            ctx.fillStyle = cut
-            ctx.fillRect(0, 0, fw, h)
-            ctx.globalCompositeOperation = "source-over"
-          }
-        }
-
-        // The bevel: the panel's own left edge, catching the bay's light. It
-        // starts where the scrim is already most of the way up, so it does
-        // not draw a bright line across the fade.
-        Rectangle {
-          x: paintPanel.fadeW
-          y: paintPanel.fadeH * 0.55
-          width: 1
-          height: paintPanel.height - y - Theme.cornerRadius
-          gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
-            GradientStop { position: 0.35; color: Theme.line }
-            GradientStop { position: 1.0; color: Theme.line }
-          }
-        }
-        // The right edge, which meets the bay's own frame and is a real edge.
-        Rectangle {
-          x: paintPanel.width - 1
-          y: paintPanel.fadeH * 0.36
-          width: 1
-          height: paintPanel.height - y - Theme.cornerRadius
-          gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.0) }
-            GradientStop { position: 0.30; color: Theme.lineStrong }
-            GradientStop { position: 1.0; color: Theme.lineStrong }
-          }
-        }
-        Rectangle {
-          x: paintPanel.fadeW + Theme.cornerRadius
-          y: paintPanel.height - 1
-          width: paintPanel.width - paintPanel.fadeW - Theme.cornerRadius * 2
-          height: 1
-          color: Theme.lineStrong
-        }
-
-        Column {
-          id: paintColumn
-          x: garage.px(18) + paintPanel.fadeW
-          y: garage.px(18) + paintPanel.fadeH
-          width: parent.width - garage.px(36) - paintPanel.fadeW
-          spacing: garage.px(9)
-
-          Text {
-            textFormat: Text.PlainText
-            text: "COLOR"
-            color: Theme.cream
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: garage.fs(17)
-            font.letterSpacing: garage.px(3)
-          }
-
-          PaintGrid {
-            id: paintGrid
-            width: parent.width
-            height: garage.px(112)
-            gap: garage.px(8)
-            selected: garage.paintIndex
-            onPicked: function (index) { Store.setSetting("kartPaint", index) }
-          }
-
-          Item { width: 1; height: garage.px(7) }
-
-          Text {
-            textFormat: Text.PlainText
-            text: "NUMBER"
-            color: Theme.cream
-            font.family: Theme.mono
-            font.bold: true
-            font.pixelSize: garage.fs(17)
-            font.letterSpacing: garage.px(3)
-          }
-
-          Stepper {
-            id: numberStepper
-            width: parent.width
-            height: garage.px(58)
-            arrowWidth: garage.px(52)
-            valueSize: garage.fs(27)
-            valueSpacing: garage.px(3)
-            faceColor: Theme.duskSurfaceSunken
-            value: String(garage.kartNumber)
-            name: "Kart number"
-            hint: "One to ninety-nine. Left and right change it."
-            onStepped: function (delta) { garage.stepNumber(delta) }
-          }
-
-          Item { width: 1; height: garage.px(3) }
-
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width
-            wrapMode: Text.WordWrap
-            text: "Colors and numbers are visible to all racers."
-            color: Theme.text
-            font.family: Theme.mono
-            font.pixelSize: garage.fs(15)
-            lineHeight: 1.25
-          }
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          text: "Colors and numbers are visible to all racers."
+          color: Theme.text
+          font.family: Theme.mono
+          font.pixelSize: garage.fs(15)
+          lineHeight: 1.25
         }
       }
     }
 
+
     // ------------------------------------------------------- the roster
     Item {
       id: roster
-      x: page.contentX + page.stallW + garage.px(16)
+      x: page.contentX + page.contentW - page.rosterW
       y: page.mainY
       width: page.rosterW
       height: page.mainH
@@ -862,11 +688,11 @@ FocusScope {
       // focus on. Explicit rows keep focus where the child put it.
       Column {
         x: garage.px(24)
-        y: garage.px(22)
+        y: garage.px(18)
         width: parent.width - garage.px(48)
         spacing: 0
 
-        readonly property int rowH: garage.px(50)
+        readonly property int rowH: garage.px(44)
         readonly property int labelPx: garage.fs(15)
         readonly property int valuePx: garage.fs(23)
         readonly property int labelW: garage.px(180)
@@ -967,9 +793,9 @@ FocusScope {
       Row {
         id: signalRow
         x: garage.px(22)
-        y: garage.px(60)
+        y: garage.px(54)
         width: parent.width - garage.px(44)
-        height: garage.px(160)
+        height: garage.px(138)
         spacing: garage.px(12)
 
         readonly property real tileW: (width - spacing * 3) / 4
@@ -980,7 +806,12 @@ FocusScope {
           height: parent.height
           art: Glyphs.thumbUp
           caption: "NICE RUN"
-          surface: Theme.duskSurfaceSunken
+          surface: Theme.duskSurfaceRaised
+          // ROUND-9: OFF the sunken step. Four near-black cards in a row along the
+          // bottom edge were, after round eight raised everything else, the
+          // darkest large areas left in a frame with no other dark -- so they
+          // read MORE like holes at the new value than they did at the old
+          // one. A legend is not a hole; the tiles now sit on the raised step.
           // ROUND-8: the four tones are now four hues of the room -- cream,
           // amber, the deep amber and the sky's own neon pink. Lime and the
           // theme accent were the two off-bar colours in the set.
@@ -993,7 +824,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.flag
           caption: "READY"
-          surface: Theme.duskSurfaceSunken
+          surface: Theme.duskSurfaceRaised
           tone: Theme.amber
           captionSize: garage.fs(15)
         }
@@ -1003,7 +834,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.rematch
           caption: "REMATCH?"
-          surface: Theme.duskSurfaceSunken
+          surface: Theme.duskSurfaceRaised
           tone: "#ee8b3a"
           captionSize: garage.fs(15)
         }
@@ -1013,7 +844,7 @@ FocusScope {
           height: parent.height
           art: Glyphs.hand
           caption: "GOOD GAME"
-          surface: Theme.duskSurfaceSunken
+          surface: Theme.duskSurfaceRaised
           tone: Theme.duskNeon
           captionSize: garage.fs(15)
         }
@@ -1050,32 +881,42 @@ FocusScope {
       // title. Round one gave the two the same outline, the same layout and
       // nearly the same footprint, so a child scanning this column saw two
       // equal buttons one of which quits.
-      // ROUND-4: 170 px, not 190, and it starts 14 px down rather than at the
-      // top of the column. Round three's was "an over-tall green slab" with a
-      // 70 px empty band along its bottom; the content is the same size and
-      // the button is closer to it, which is the whole of the fix.
+      //
+      // ROUND-9: STILL THE LOUDEST CONTROL, NO LONGER THE BRIGHTEST OBJECT IN
+      // THE PICTURE.
+      //
+      // Round seven's charge was a lime slab bigger than the sky. Round eight
+      // recoloured it to the design's amber, which moved the green metric 23x
+      // and the composition not at all: at `#f5a524` it carried 23.8 % of the
+      // frame's luminous mass on 4.8 % of its area -- twice the whole sky and
+      // 6.8x the sun disc -- so a control out-shone the light source this
+      // whole direction is built on, in the sun's own hue family.
+      //
+      // The fix is value, not hue, and not making it hard to find. The FILL
+      // drops to the amber's own deep ember; the amber itself stays, on the
+      // border, on the flag and in the focus state, where it costs a few
+      // thousand pixels instead of a hundred thousand; and the label goes to
+      // cream, which on the ember measures HIGHER than the dark ink measured
+      // on the amber. Focus still brightens the fill and thickens the border,
+      // never pales it. `goFill` and `goInk` default to the old behaviour, so
+      // Results and Settings are byte-identical.
       ActionButton {
         id: readyButton
         width: parent.width
-        y: garage.px(14)
-        height: garage.px(170)
+        y: garage.px(12)
+        height: garage.px(148)
         art: Glyphs.flag
         tone: "go"
-        // ROUND-8. The lime slab was 98,267 green pixels -- 4.74% of the
-        // frame, nearly twice the area of all the sky, in a picture whose bar
-        // has 780 green pixels in 2,073,600. `goTone` is a new property on
-        // ActionButton that defaults to Theme.lime, so Results and Settings
-        // are byte-identical; only this control takes the design's own amber,
-        // which its Visual style already gives to the streak charge and the
-        // boosts -- the game's existing "go".
         goTone: Theme.amber
+        goFill: Theme.emberDeep
+        goInk: Theme.cream
         variant: "primary"
         label: "READY UP"
         sublabel: garage.rivalsRace ? "STARTS THE COUNTDOWN AGAINST THREE RIVALS"
                                     : "STARTS THE COUNTDOWN"
         labelSize: garage.fs(46)
         sublabelSize: garage.fs(17)
-        iconSize: garage.px(54)
+        iconSize: garage.px(46)
         Accessible.name: "Ready up"
         Accessible.description: "Starts the countdown. " + garage.modeNames[garage.raceMode]
                                 + ", " + garage.setNames[garage.mathSet] + "."
@@ -1085,7 +926,7 @@ FocusScope {
       ActionButton {
         id: leaveButton
         width: parent.width
-        height: garage.px(76)
+        height: garage.px(72)
         y: parent.height - height
         art: Glyphs.exit
         tone: "quit"

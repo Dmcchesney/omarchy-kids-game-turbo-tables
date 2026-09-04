@@ -40,6 +40,13 @@ Item {
   // still get; the garage passes the design's amber, because a lime slab is
   // the largest single block of a colour the bar does not contain.
   property color goTone: Theme.lime
+  // ROUND-9. The "go" fill and the "go" ink, split off from `goTone` so a
+  // filled primary control can be a DARK block with a bright rim instead of a
+  // bright block. Both default to what they have always been -- the tone
+  // itself, and the theme's own rule for what stays legible on a saturated
+  // fill -- so Results, Settings and every other caller renders identically.
+  property color goFill: button.goTone
+  property color goInk: Theme.ink(button.fillColor)
   // Supporting text on this control. Defaults to the shared 0.80-alpha role;
   // the garage passes a full-strength one, because 0.80 does not clear 4.5:1
   // on the v3 surfaces this round raises.
@@ -54,9 +61,20 @@ Item {
                                                                      : button.offTone
   readonly property bool primary: variant === "primary"
   readonly property bool sign: variant === "sign"
-  // Dark ink on a filled block; the theme's own rule for what stays legible
-  // on a saturated fill.
-  readonly property color inkColor: Theme.ink(button.toneColor)
+  // What the filled block is painted in, and what is legible on it. For every
+  // tone but "go" these are the tone and the theme's ink rule, exactly as
+  // before; "go" may separate them.
+  readonly property color fillColor: tone === "go" ? button.goFill : button.toneColor
+  readonly property color inkColor: tone === "go" ? button.goInk
+                                                  : Theme.ink(button.toneColor)
+  // The glyph. On a filled block whose fill is its own tone it takes the ink,
+  // as it always did; where the fill has been dropped away from the tone, the
+  // glyph keeps the TONE, so the accent colour is still on the control and is
+  // on a few hundred pixels of it rather than a hundred thousand.
+  readonly property color artColor: button.primary
+                                    ? (Qt.colorEqual(button.fillColor, button.toneColor)
+                                       ? button.inkColor : button.toneColor)
+                                    : button.toneColor
 
   // ROUND-8: NOT in Qt's implicit tab chain, and that is what makes the
   // screen's own Tab handler reachable. Qt Quick delivers a key to the focused
@@ -91,10 +109,10 @@ Item {
     color: button.sign
            ? Qt.rgba(button.surface.r, button.surface.g, button.surface.b, 0.85)
            : button.primary
-             ? (button.activeFocus ? Qt.lighter(button.toneColor, 1.16) : button.toneColor)
+             ? (button.activeFocus ? Qt.lighter(button.fillColor, 1.22) : button.fillColor)
              : Qt.rgba(button.toneColor.r * 0.20, button.toneColor.g * 0.20,
                        button.toneColor.b * 0.20, 0.75)
-    border.width: button.sign ? 0 : (button.primary ? (button.activeFocus ? 4 : 2) : 1)
+    border.width: button.sign ? 0 : (button.primary ? (button.activeFocus ? 4 : 3) : 1)
     border.color: button.primary
                   ? (button.activeFocus ? Theme.focusRing
                                         : Qt.lighter(button.toneColor, 1.25))
@@ -144,49 +162,43 @@ Item {
   }
 
   // Primary and sign stack their two lines; secondary is one row.
-  Row {
+  //
+  // ROUND-9: THE GLYPH IS IN THE HEADING'S OWN ROW.
+  //
+  // It used to sit beside the two-line BLOCK, and the block is as wide as its
+  // widest line -- the 40-character sub-line. With a 9-character heading
+  // centred in it, that left about 120 px of empty fill between the flag and
+  // the word READY at 1920, inside the loudest control on the screen. The
+  // glyph and the heading are now one centred row and the sub-line is centred
+  // under both, so the gap is the row's own spacing at every size and string.
+  Column {
+    id: stack
     anchors.centerIn: parent
     visible: !button.oneLine
-    spacing: Math.round(button.iconSize * 0.5)
+    spacing: Math.round(button.sublabelSize * 0.28)
 
-    // The icon aligns to the middle of the heading, not to the middle of the
-    // two-line block. Centred on the block it landed in the gap between the
-    // heading and its sub-line -- 16 px low on RACE A FRIEND -- so it belonged
-    // to neither line.
-    Item {
-      visible: button.art.length > 0
-      anchors.verticalCenter: parent.verticalCenter
-      width: button.iconSize
-      height: stack.height
+    Row {
+      id: headRow
+      anchors.horizontalCenter: parent.horizontalCenter
+      spacing: Math.round(button.iconSize * 0.5)
 
-      PixelIcon {
+      Item {
+        visible: button.art.length > 0
         width: button.iconSize
-        height: button.iconSize
-        y: Math.round(headline.y + headline.height / 2 - height / 2)
-        art: button.art
-        color: button.primary ? button.inkColor : button.toneColor
-        inks: ({ "A": button.primary ? button.inkColor : button.toneColor,
-                 "B": "transparent" })
-      }
-    }
+        height: headline.height
 
-    // ROUND-4: the two lines are centred on each other. Left-aligned, a
-    // 9-character heading over a 40-character sub-line left a block of dead
-    // fill to the right of the heading -- measured at (1660-1885, 780-830) on
-    // round three's READY UP, which is 225 x 50 px of nothing inside the
-    // loudest object on the screen.
-    Column {
-      id: stack
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Math.round(button.sublabelSize * 0.28)
-      // Explicit, from the two implicit widths: a child bound to its parent's
-      // width while the parent sizes to its children is a binding loop.
-      width: Math.max(headline.implicitWidth, subline.implicitWidth)
+        PixelIcon {
+          width: button.iconSize
+          height: button.iconSize
+          y: Math.round((parent.height - height) / 2)
+          art: button.art
+          color: button.artColor
+          inks: ({ "A": button.artColor, "B": "transparent" })
+        }
+      }
 
       Text {
         id: headline
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
         textFormat: Text.PlainText
         text: button.label
         color: button.primary ? button.inkColor : button.toneColor
@@ -195,21 +207,21 @@ Item {
         font.pixelSize: button.labelSize
         font.letterSpacing: Math.max(1, button.labelSize * 0.06)
       }
-      Text {
-        id: subline
-        visible: button.sublabel.length > 0
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
-        textFormat: Text.PlainText
-        text: button.sublabel
-        color: button.primary
-               ? Qt.rgba(button.inkColor.r, button.inkColor.g, button.inkColor.b, 0.82)
-               : button.mutedColor
-        font.family: Theme.mono
-        font.bold: button.primary
-        font.pixelSize: button.sublabelSize
-        font.letterSpacing: 0.5
-      }
+    }
+
+    Text {
+      id: subline
+      anchors.horizontalCenter: parent.horizontalCenter
+      visible: button.sublabel.length > 0
+      textFormat: Text.PlainText
+      text: button.sublabel
+      color: button.primary
+             ? Qt.rgba(button.inkColor.r, button.inkColor.g, button.inkColor.b, 0.88)
+             : button.mutedColor
+      font.family: Theme.mono
+      font.bold: button.primary
+      font.pixelSize: button.sublabelSize
+      font.letterSpacing: 0.5
     }
   }
 
