@@ -14,9 +14,10 @@ import "CarMeta.js" as CarMeta
 // four cars in it is four textured quads and no drawing at all.
 //
 // THE SHEET, from the piece C contract: six rows by eight columns. Rows are
-// the `stall` camera (above and off the rear-right shoulder: the garage,
-// roster and countdown view) at 1.0, 0.5 and 0.25 scale, then the `road`
-// camera (directly behind, slightly above: the track) at the same three.
+// the `stall` camera (off the rear-right shoulder at a little above hub
+// height, the bar's eye level: the garage, roster and countdown view) at
+// 1.0, 0.5 and 0.25 scale, then the `road` camera (directly behind, a little
+// above the roof line: the track) at the same three.
 // Columns are yaws, the car turned `column x 45` degrees, column 0 its rear
 // square to the camera. Cells are 192x128, 96x64 and 48x32, and the car
 // stands on the bottom edge of its cell, centred.

@@ -368,7 +368,7 @@ SHADOW_TONE = hex2rgb("5f255e")    # the design's purple shadow, never grey
 OUTLINE_TONE = hex2rgb("280e27")   # dusk ink
 
 
-def bake_sheet(render_dir, out_path, paint_hex, dither=0.25, px=4):
+def bake_sheet(render_dir, out_path, paint_hex, dither=0.15, px=4):
     sheet_palette(paint_hex)
     sheet = bytearray(SHEET_W * SHEET_H * 4)
     for ci, cam in enumerate(CAMERAS):
@@ -397,7 +397,7 @@ def main():
     if mode == "bake":
         render_dir, out = sys.argv[2], sys.argv[3]
         paint = arg("--paint", "e0483a").lstrip("#")
-        bake_sheet(render_dir, out, paint, dither=float(arg("--dither", "0.25")), px=int(arg("--px", "4")))
+        bake_sheet(render_dir, out, paint, dither=float(arg("--dither", "0.15")), px=int(arg("--px", "4")))
         print(f"bake: {render_dir} -> {out} {SHEET_W}x{SHEET_H}, paint {paint}, palette {len(PALETTE)}")
     elif mode in ("sprite", "scene"):
         src, base = sys.argv[2], sys.argv[3]
