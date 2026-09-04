@@ -246,6 +246,121 @@ FocusScope {
   // the same near-black purple, thrown down and left, the way the kart's is.
   readonly property color inkShadow: Qt.rgba(0.235, 0.07, 0.157, 0.82)
 
+  // ============================================ TYPE THAT SURVIVES THE SUN
+  //
+  // ROUND 6. The cast shadow above was the ONLY thing keeping the GO beat's
+  // fact off the sun, and it is thrown down and to the LEFT -- which is where
+  // a sun low and behind-right puts a shadow, and therefore the one direction
+  // that does no work at all on the edge nearest the disc. Measured on the
+  // shipped 1920 x 1080 GO frame: 89 cream pixels touched the sun's own
+  // `#efcb72` directly, at 1.26:1. Readable in the frame a builder shot, one
+  // palette change from not being readable at all.
+  //
+  // So a big word here is now built the way the plan's light rule builds every
+  // other object in this scene -- "one key, the sun, low and behind-right of
+  // the subject. Every object has a warm rim on its sun side and a cool purple
+  // body; shadows run long toward the camera":
+  //
+  //   the cast shadow   near-black purple, down and left, long -- unchanged;
+  //   the body contour  the same purple, opaque, all the way round, so no
+  //                     cream pixel ever borders the sun. 14.3:1 against the
+  //                     cream it holds and 11.4:1 against the disc it sits on;
+  //   the sun-side rim  `#f0b07a`, the palette's rim light, up and to the
+  //                     right, inside the contour, so the word is lit from
+  //                     where everything else in the frame is lit from.
+  //
+  // The contour is what fixes the contrast; the rim is what makes the word
+  // belong to the light. Both are in `LitWord` below, once, because the
+  // numeral and the fact were two copies of the same two Texts and the round
+  // that gave them a third and a fourth would have made four.
+  readonly property color inkBody: "#280e27"
+  readonly property color inkRim: "#f0b07a"
+  // At 1920 x 1080 this is 6 px of contour around a numeral whose ink is over
+  // 400 px tall: a keyline, not an outline drawing.
+  readonly property int inkContour: Math.max(2, countdown.px(6))
+  readonly property int inkRimOffset: Math.max(1, Math.round(countdown.inkContour * 0.55))
+
+  // One big word in this light: cast shadow, contour, rim, face. `drop` is the
+  // cast shadow's throw and `contour` the keyline's width, both already in
+  // frame pixels; the caller owns them because the caller is what fits the
+  // word to the board.
+  component LitWord: Item {
+    id: word
+    property string words: ""
+    property int size: 10
+    property int spacing: 0
+    property int drop: 0
+    property int contour: 0
+    property int rimOffset: 0
+    property color faceTone: "#f2e6c4"
+    property color shadowTone: "#000000"
+    property color bodyTone: "#000000"
+    property color rimTone: "#f0b07a"
+
+    width: wordFace.implicitWidth
+    height: wordFace.implicitHeight
+
+    // The cast shadow: long, down and toward the camera, away from the sun.
+    Text {
+      textFormat: Text.PlainText
+      text: word.words
+      color: word.shadowTone
+      font: wordFace.font
+      x: -word.drop
+      y: word.drop
+    }
+    // The body contour: the same word, opaque, offset one keyline out around a
+    // CIRCLE. This is the pair the contrast figure is measured on.
+    //
+    // The circle is the whole point and the first draft did not have it. Eight
+    // copies at the four axes and the four corners is a square dilation: the
+    // diagonal copies land 1.41 keylines out, so every convex corner of a glyph
+    // grows a square step, and on a diagonal stroke -- the `x` of `6 x 12`, at
+    // 1920 x 1080 -- the ring stairsteps visibly against the sky. Sixteen
+    // copies on a circle of one keyline put the diagonals where they belong and
+    // the edge reads as a drawn line instead of a staircase.
+    readonly property var contourRing: {
+      var ring = []
+      for (var i = 0; i < 16; i++) {
+        var a = i * Math.PI / 8
+        ring.push([Math.round(Math.cos(a) * word.contour),
+                   Math.round(Math.sin(a) * word.contour)])
+      }
+      return ring
+    }
+    Repeater {
+      model: word.contourRing
+      Text {
+        required property var modelData
+        textFormat: Text.PlainText
+        text: word.words
+        color: word.bodyTone
+        font: wordFace.font
+        x: modelData[0]
+        y: modelData[1]
+      }
+    }
+    // The warm rim, on the sun side: up and to the right, inside the contour.
+    Text {
+      textFormat: Text.PlainText
+      text: word.words
+      color: word.rimTone
+      font: wordFace.font
+      x: word.rimOffset
+      y: -word.rimOffset
+    }
+    Text {
+      id: wordFace
+      textFormat: Text.PlainText
+      text: word.words
+      color: word.faceTone
+      font.family: Theme.mono
+      font.bold: true
+      font.pixelSize: word.size
+      font.letterSpacing: word.spacing
+    }
+  }
+
   // ============================================ TYPE THAT CLEARS THE BOARD
   //
   // ROUND 5. The one thing the prototype left on this screen: "the numeral
@@ -269,9 +384,22 @@ FocusScope {
   // So the type is placed by its INK, measured with `tightBoundingRect` in the
   // face the shell actually handed down; the floor it may not cross is bound to
   // `scene.boardTopY`, which is the line the painter draws the board at; and
-  // the fit subtracts the pulse's own overshoot before it chooses a size. The
-  // numeral is still enormous -- 43% of the frame height in ink at 1920 x 1080,
-  // against 43% before, so this costs the picture nothing.
+  // the fit subtracts the pulse's own overshoot before it chooses a size, and
+  // (round 6) the contour's keyline as well.
+  //
+  // ROUND 6 CORRECTS THE NUMBER THAT STOOD HERE. It read "the numeral is still
+  // enormous -- 43% of the frame height in ink at 1920 x 1080, against 43%
+  // before, so this costs the picture nothing", and it was wrong in the
+  // direction that flattered the change. Measured off the shipped PNGs: 43.9%
+  // before round 5, 40.0% after -- which is what round 5's own report said in
+  // its section 1.2 while this comment beside the code said otherwise. Round 6
+  // takes the contour out of the same band, and the shipped 1920 x 1080 PNGs
+  // now read 39.5% on beat 3, 39.4% on beat 2 and 39.1% on beat 1 (39.5% on
+  // beat 3 at 1366 x 768 and at 2560 x 1440 as well). Clearing the board and
+  // lifting the type off the sun cost the numeral about a tenth of its ink,
+  // 43.9% to 39.5%. It is still by far the largest thing in the frame, and the
+  // cost is real; the comment that said it was nothing was the round's own
+  // evidence contradicted at the line it was written on.
   FontMetrics {
     id: typeProbe
     font.family: Theme.mono
@@ -310,6 +438,13 @@ FocusScope {
   readonly property int beatShadowDrop: countdown.px(countdown.go ? 8 : 16)
   readonly property int factShadowDrop: countdown.px(8)
 
+  // The lowest dark pixel a word can put on the frame, below its own ink: the
+  // cast shadow's throw, and the contour's keyline under that. Both the fit and
+  // the spec use this, so the contour cannot quietly eat the clearance the
+  // round-5 work bought.
+  readonly property int beatFootDrop: countdown.beatShadowDrop + countdown.inkContour
+  readonly property int factFootDrop: countdown.factShadowDrop + countdown.inkContour
+
   // The counted beats fill the band; GO is the size the prototype had, because
   // the fact has to fit under it.
   //
@@ -324,7 +459,7 @@ FocusScope {
   readonly property int beatPixelSize: countdown.go
       ? Math.round(countdown.height * 0.24)
       : Math.max(8, Math.floor((countdown.typeFloorY - countdown.typeCeilingY
-                                - countdown.beatShadowDrop)
+                                - countdown.beatFootDrop)
                                / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)))
   // Place by the ink: the item's top is as far above the ceiling as the ink is
   // below the item's top.
@@ -336,16 +471,37 @@ FocusScope {
   // the same floor the numeral respects, so on GO the fact sits above the board
   // rather than across it.
   readonly property int factPixelSize: Math.round(countdown.height * 0.19)
-  readonly property int factY: Math.round(countdown.typeFloorY - countdown.factShadowDrop
+  readonly property int factY: Math.round(countdown.typeFloorY - countdown.factFootDrop
                                           - (countdown.factInk.top + countdown.factInk.height)
                                             * countdown.factPixelSize)
 
   // What the spec reads back: the line the board is painted at, and where this
   // screen's ink actually landed against it. `tests/qml/tst_countdown_board.qml`
-  // asserts the relation at three window sizes and on all four beats, and
-  // `evidence/piece5-r5` checks the same thing again in the shipped PNG, by
-  // counting cream pixels inside the board's own band.
+  // asserts the relation at three window sizes and on all four beats -- AND,
+  // since round 6, reads the same thing back off the rendered pixels with
+  // `grabImage`, because every property below is this file's own arithmetic and
+  // a spec built only on them cannot catch an error in the arithmetic.
   readonly property real gantryBoardTopY: scene.boardTopY
+  readonly property real gantryBoardBottomY: scene.boardBottomY
+  readonly property real gantryBoardLeftX: scene.boardLeftX
+  readonly property real gantryBoardRightX: scene.boardRightX
+  readonly property color gantryBoardInk: scene.boardInk
+  readonly property color gantryBoardFill: scene.boardFill
+  readonly property real sunCentreX: scene.sunCentreX
+  readonly property real sunCentreY: scene.sunCentreY
+  readonly property real sunRadiusX: scene.sunRadiusX
+  readonly property real sunRadiusY: scene.sunRadiusY
+  readonly property real sunTopY: scene.sunTopY
+  readonly property real sunSkylineY: scene.skylineY
+  readonly property int sunCutsAboveSkyline: scene.sunCutsAboveSkyline
+  // The disc is a gradient, not one colour: `sunCoreTone` out to 72% of the
+  // radius and `sunEdgeTone` at the rim. BOTH are named here because the type
+  // has to clear both -- cream is 1.26:1 on the core and 1.83:1 on the edge,
+  // and a guard that knew only about the core let a mutation through. The spec
+  // asserts each tone is actually on the screen before it counts contacts, so
+  // a palette that moved cannot make the guard vacuous.
+  readonly property color sunCoreTone: scene.sunCore
+  readonly property color sunEdgeTone: scene.sunEdge
   readonly property real beatInkTopY: beatGlyph.inkTopY
   readonly property real beatInkBottomY: beatGlyph.inkBottomY
   readonly property real beatInkBottomAtPulse: beatGlyph.inkBottomAtPulse
@@ -358,8 +514,8 @@ FocusScope {
     id: beatGlyph
     anchors.horizontalCenter: parent.horizontalCenter
     y: countdown.beatY
-    width: beatFace.implicitWidth
-    height: beatFace.implicitHeight
+    width: beatFace.width
+    height: beatFace.height
     z: 4
 
     // What a critic can read back without measuring pixels: where this glyph's
@@ -373,23 +529,18 @@ FocusScope {
     readonly property real inkBottomAtPulse: beatGlyph.inkBottomY
                                              + countdown.beatSwing * countdown.beatPixelSize
 
-    Text {
-      textFormat: Text.PlainText
-      text: countdown.beatWord
-      color: countdown.inkShadow
-      font: beatFace.font
-      x: -countdown.beatShadowDrop
-      y: countdown.beatShadowDrop
-    }
-    Text {
+    LitWord {
       id: beatFace
-      textFormat: Text.PlainText
-      text: countdown.beatWord
-      color: Theme.cream
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: countdown.beatPixelSize
-      font.letterSpacing: countdown.go ? countdown.px(20) : 0
+      words: countdown.beatWord
+      size: countdown.beatPixelSize
+      spacing: countdown.go ? countdown.px(20) : 0
+      drop: countdown.beatShadowDrop
+      contour: countdown.inkContour
+      rimOffset: countdown.inkRimOffset
+      faceTone: Theme.cream
+      shadowTone: countdown.inkShadow
+      bodyTone: countdown.inkBody
+      rimTone: countdown.inkRim
     }
 
     // One pulse per beat, and nothing at all under reduced motion, which the
@@ -418,8 +569,8 @@ FocusScope {
     id: factGlyph
     anchors.horizontalCenter: parent.horizontalCenter
     y: countdown.factY
-    width: factFace.implicitWidth
-    height: factFace.implicitHeight
+    width: factFace.width
+    height: factFace.height
     z: 3
 
     readonly property real inkTopY: factGlyph.y
@@ -432,23 +583,18 @@ FocusScope {
       NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
     }
 
-    Text {
-      textFormat: Text.PlainText
-      text: countdown.factText
-      color: countdown.inkShadow
-      font: factFace.font
-      x: -countdown.factShadowDrop
-      y: countdown.factShadowDrop
-    }
-    Text {
+    LitWord {
       id: factFace
-      textFormat: Text.PlainText
-      text: countdown.factText
-      color: Theme.cream
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: countdown.factPixelSize
-      font.letterSpacing: countdown.px(8)
+      words: countdown.factText
+      size: countdown.factPixelSize
+      spacing: countdown.px(8)
+      drop: countdown.factShadowDrop
+      contour: countdown.inkContour
+      rimOffset: countdown.inkRimOffset
+      faceTone: Theme.cream
+      shadowTone: countdown.inkShadow
+      bodyTone: countdown.inkBody
+      rimTone: countdown.inkRim
     }
   }
 
