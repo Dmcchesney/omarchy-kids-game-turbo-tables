@@ -131,7 +131,7 @@ Six low-poly rally cars, one model each, in `ui/parts/CarSprite.qml`, baked to `
 
 **The bar** is `docs/golden-hour-car.png`, judged on three things, in this order:
 
-1. **Silhouette.** Recognisable as a car — and as *that* car — as a black cut-out at 40 px and at 400 px. Low, wide, flared arches, a roof line, a spoiler that belongs to the body. From behind (the race view), a rear that reads: wide tail-light bar, rear window band, bumper, big rear tyres.
+1. **Silhouette.** Recognisable as a car — and as *that* car — as a black cut-out at 40 px and at 400 px. **The cut-out is the test, literally:** the bake has a `--silhouette` mode that renders every material black on transparent, and both builder and critic look at that render before anything else. The first round's coupe was a bean by this test — no arches cut, no daylight under the sills, wheels dissolved into the outline — while its shaded render looked passable, which is exactly why the shaded render is not the test. Low, wide, flared arches, a roof line, a spoiler that belongs to the body. From behind (the race view), a rear that reads: wide tail-light bar, rear window band, bumper, big rear tyres.
 2. **Identity.** A cream livery panel with a stripe; the number on a door roundel and a rear plate; two lit headlights (warm, with a small glow) and a red tail-light bar that is the single most legible cue for a rival ahead; the eight paints as flat base tones that stay their hue.
 3. **Grounding and light.** A flat purple contact shadow the shape of the car; a long soft shadow toward the camera; the warm rim on the sun side, caught by **chamfered edges** — flat boxes give a rim nothing to land on, which the prototype proved.
 
