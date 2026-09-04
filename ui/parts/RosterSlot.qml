@@ -134,7 +134,11 @@ Item {
     paint: slot.paintIndex
     number: slot.number
     camera: "stall"
-    yaw: 0
+    // The quarter view, not the rear: this is the screen where a child picks
+    // a car, and from behind the coupe and the saloon were 12.4 % apart as
+    // cut-outs. From column 6 the greenhouse, the pillars and the door panel
+    // are all visible, which is what tells two cars apart at 96 px.
+    yaw: 6
     sheetScale: 0.5
     pixelScale: slot.scaleUnit >= 1.5 ? 2 : 1
     opacity: slot.ready ? 1.0 : 0.86

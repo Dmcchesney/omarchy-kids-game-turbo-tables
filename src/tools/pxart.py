@@ -171,14 +171,77 @@ def mix(a, b, t):
     return tuple(int(round(a[i] * (1 - t) + b[i] * t)) for i in range(3))
 
 
+def rgb2hsv(c):
+    r, g, b = (v / 255 for v in c)
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    if d == 0:
+        h = 0.0
+    elif mx == r:
+        h = (60 * ((g - b) / d)) % 360
+    elif mx == g:
+        h = 60 * ((b - r) / d) + 120
+    else:
+        h = 60 * ((r - g) / d) + 240
+    return h, (0.0 if mx == 0 else d / mx), mx
+
+
+def hsv2rgb(h, s, v):
+    h = h % 360
+    c = v * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = v - c
+    r, g, b = [(c, x, 0), (x, c, 0), (0, c, x), (0, x, c), (x, 0, c), (c, 0, x)][int(h // 60)]
+    return tuple(int(round((v + m) * 255)) for v in (r, g, b))
+
+
+def _hold_hue(base, c, max_deg):
+    """Rotate `c` back toward `base`'s hue until it is within `max_deg`.
+
+    The design's Visual style row says the paint keeps its own hue under this
+    light. Mixing a dark step toward the ground purple does not respect that
+    equally at every hue: yellow's deep step drifted 11.9 degrees and landed
+    nearer the ORANGE swatch than the yellow one, on all six bodies, which is
+    a yellow car whose shadows are an orange car's. Saturation and value are
+    left exactly where the mix put them; only the hue is held."""
+    hb, _sb, _vb = rgb2hsv(base)
+    h, s, v = rgb2hsv(c)
+    if s == 0:
+        return c
+    d = (h - hb + 180) % 360 - 180
+    if abs(d) <= max_deg:
+        return c
+    return hsv2rgb(hb + (max_deg if d > 0 else -max_deg), s, v)
+
+
+def _hold_sat(base, c, floor):
+    """Keep the highlight step at least `floor` of the swatch's saturation.
+
+    Mixing toward cream desaturates hardest on the cool half -- purple 0.60 to
+    0.33, blue 0.72 to 0.39 -- so the highlight went chalky where a low sun
+    should make it hotter. The bar's brightest pixels are MORE saturated than
+    its mid-tones, not less."""
+    _hb, sb, _vb = rgb2hsv(base)
+    h, s, v = rgb2hsv(c)
+    return c if s >= sb * floor else hsv2rgb(h, sb * floor, v)
+
+
+DEEP_HUE_HOLD = 6.0     # degrees the deep and shade steps may drift from the swatch
+HIGH_SAT_FLOOR = 0.72   # of the swatch's saturation
+
+
 def paint_ramp(hexcolour):
     """Four steps around one swatch: deep shadow toward the ground purple,
     shadow cooler and darker, the swatch itself, a highlight toward warm
-    cream. The swatch is the middle so the dominant tone IS the paint."""
+    cream. The swatch is the middle so the dominant tone IS the paint.
+
+    Both dark steps hold the swatch's hue to within DEEP_HUE_HOLD degrees and
+    the highlight holds HIGH_SAT_FLOOR of its saturation, so no step of any
+    ramp classifies as a different paint and no highlight goes chalky."""
     base = hex2rgb(hexcolour)
-    deep = mix(tuple(int(c * 0.42) for c in base), hex2rgb("3c1228"), 0.30)
-    shade = mix(tuple(int(c * 0.68) for c in base), hex2rgb("5f255e"), 0.16)
-    high = mix(base, hex2rgb("fff0d0"), 0.36)
+    deep = _hold_hue(base, mix(tuple(int(c * 0.42) for c in base), hex2rgb("3c1228"), 0.30), DEEP_HUE_HOLD)
+    shade = _hold_hue(base, mix(tuple(int(c * 0.68) for c in base), hex2rgb("5f255e"), 0.16), DEEP_HUE_HOLD)
+    high = _hold_sat(base, mix(base, hex2rgb("fff0d0"), 0.36), HIGH_SAT_FLOOR)
     return [deep, shade, base, high]
 
 
@@ -192,6 +255,14 @@ SHEET_FIXED_HEX = [
     "ffd489",                                                     # headlamp
     "f01a1a", "ffb3a0",                                           # tail bar, its glow strip
     "280e27",                                                     # ink / outline
+    # Glass. It needs a tone of its own: rounds 1-3 painted the windows
+    # 2a1030, which is three units from the outline ink 280e27, so the
+    # quantiser sent every window pixel to the outline colour and the
+    # greenhouse became a hole under a floating lid -- 34 to 50 % of the top
+    # third of the coupe, hatch and saloon was the outline tone. Luma 51,
+    # between the ink at 21 and a paint base around 100, so glass is darker
+    # than paint and lighter than the line that draws the car.
+    "343a52", "4d5573",                                           # glass, lit glass
 ]
 def sheet_palette(hexcolour):
     global PALETTE
@@ -297,19 +368,44 @@ def quantise(w, h, px, dither=0.5, alpha_cut=160, shadow_lo=24, shadow=SHADOW, s
             out[i], out[i+1], out[i+2], out[i+3] = c[0], c[1], c[2], 255
     return out
 
-def outline(w, h, px, colour=(11, 12, 18)):
+def outline(w, h, px, colour=(11, 12, 18), rim=None, sun=None, rim_min=0.34):
     """A one-pixel line around the fully opaque body. The half-alpha shadow is
-    neither outlined nor overwritten, so it stays a flat shape under the kart."""
+    neither outlined nor overwritten, so it stays a flat shape under the kart.
+
+    Golden hour is an edge, not a facet. With `rim` and `sun` given, the ring
+    is not uniform: an edge pixel whose outward direction faces the sun takes
+    the paint's highlight step instead of the ink, so the line breaks on the
+    sun side and the car is lit from behind-right rather than drawn in one
+    colour all the way round. `sun` is (dx, dy) in image pixels with y DOWN;
+    `rim_min` is the cosine below which an edge is not sunward -- 0.34 is
+    about 70 degrees either side of the sun, a little over a third of the
+    perimeter, which is what a low sun actually lights.
+
+    The ring's geometry is unchanged: the same pixels are painted, in the same
+    order, so the silhouette and every cut-out measurement are untouched. Only
+    the colour of the sunward third differs."""
     out = bytearray(px)
     for y in range(h):
         for x in range(w):
             i = (y * w + x) * 4
             if px[i+3] == 255: continue
-            for dx, dy in ((1,0), (-1,0), (0,1), (0,-1)):
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < w and 0 <= ny < h and px[(ny*w+nx)*4+3] == 255:
-                    out[i], out[i+1], out[i+2], out[i+3] = colour[0], colour[1], colour[2], 255
-                    break
+            touches = False
+            ox = oy = 0.0
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0: continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h and px[(ny*w+nx)*4+3] == 255:
+                        # the outward direction points AWAY from the body
+                        ox -= dx; oy -= dy
+                        if abs(dx) + abs(dy) == 1: touches = True
+            if not touches: continue
+            c = colour
+            if rim is not None and sun is not None:
+                n = (ox*ox + oy*oy) ** 0.5
+                if n > 0 and (ox/n) * sun[0] + (oy/n) * sun[1] >= rim_min:
+                    c = rim
+            out[i], out[i+1], out[i+2], out[i+3] = c[0], c[1], c[2], 255
     return out
 
 def despeckle(w, h, px):
@@ -367,9 +463,38 @@ SHEET_H = 448
 SHADOW_TONE = hex2rgb("5f255e")    # the design's purple shadow, never grey
 OUTLINE_TONE = hex2rgb("280e27")   # dusk ink
 
+# Where the low sun is ON SCREEN, per camera, as a unit (dx, dy) in image
+# pixels with y DOWN. Not chosen by eye and not written down twice:
+# bake-cars.py's RIM_DIR is a world vector, each camera's screen basis is
+# right = normalize(view x Z) and up = right x view, and the camera positions
+# are bake-cars.py's CAMERAS. src/tools/carstats.py imports SUN_SCREEN from
+# here, so the sprite and the metric cannot drift apart.
+RIM_DIR = (0.55, 0.45, 0.70)
+CAMERA_EYE = {"stall": (5.6, -6.4, 2.0), "road": (0.0, -9.4, 1.8)}
+CAMERA_AIM_Z = {"stall": 0.72, "road": 0.66}
+
+
+def screen_sun(camera):
+    ex, ey, ez = CAMERA_EYE[camera]
+    d = (-ex, -ey, CAMERA_AIM_Z[camera] - ez)
+    n = sum(c * c for c in d) ** 0.5
+    d = tuple(c / n for c in d)
+    right = (d[1], -d[0], 0.0)
+    n = (right[0] ** 2 + right[1] ** 2) ** 0.5 or 1.0
+    right = (right[0] / n, right[1] / n, 0.0)
+    up = (right[1] * d[2] - right[2] * d[1], right[2] * d[0] - right[0] * d[2], right[0] * d[1] - right[1] * d[0])
+    sx = sum(RIM_DIR[i] * right[i] for i in range(3))
+    sy = sum(RIM_DIR[i] * up[i] for i in range(3))
+    n = (sx * sx + sy * sy) ** 0.5 or 1.0
+    return (sx / n, -sy / n)      # y down
+
+
+SUN_SCREEN = {c: screen_sun(c) for c in CAMERAS}
+
 
 def bake_sheet(render_dir, out_path, paint_hex, dither=0.15, px=4):
     sheet_palette(paint_hex)
+    rim_tone = tuple(paint_ramp(paint_hex)[3])
     sheet = bytearray(SHEET_W * SHEET_H * 4)
     for ci, cam in enumerate(CAMERAS):
         for yaw in range(YAWS):
@@ -383,7 +508,7 @@ def bake_sheet(render_dir, out_path, paint_hex, dither=0.15, px=4):
                 # pixels that touch the body.
                 cell = quantise(cw, ch, cell, dither=dither, alpha_cut=200, shadow_lo=24, shadow=SHADOW_TONE, shadow_alpha=128)
                 cell = despeckle(cw, ch, cell)
-                cell = outline(cw, ch, cell, colour=OUTLINE_TONE)
+                cell = outline(cw, ch, cell, colour=OUTLINE_TONE, rim=rim_tone, sun=SUN_SCREEN[cam])
                 ox, oy = yaw * cw, ROW_Y[ci * 3 + si]
                 for y in range(ch):
                     d = ((oy + y) * SHEET_W + ox) * 4

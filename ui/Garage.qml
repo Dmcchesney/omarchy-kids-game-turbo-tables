@@ -414,7 +414,13 @@ FocusScope {
         paint: garage.paintIndex
         number: garage.kartNumber
         camera: "stall"
-        yaw: 0
+        // Not the rear. Column 0 is the car's back to the lens, which on the
+        // dais showed the deck and the tail and almost none of the car: a
+        // critic reading this screen called the picture under the label COUPE
+        // a flatbed hot rod. Column 6 is the same baked cell budget seen from
+        // the front-left quarter, where the glasshouse, the door panel and a
+        // lit headlamp are all in view, and the number lands on the door.
+        yaw: 6
         sheetScale: 1.0
         pixelScale: fit.pixelScale
       }

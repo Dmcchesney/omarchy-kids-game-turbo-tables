@@ -16,11 +16,26 @@ the slab, the flare, the sill and the livery band, with a dark well box behind
 it -- so a tyre sits IN an opening with air under the sills, not under a bump.
 Judge a body as a black cut-out (--silhouette) before judging its paint.
 
+Glasshouse, the thing a CAR is made of: every closed body has a window band
+with its own tone, pillars in body colour standing in it, and a dark beltline
+moulding under it. Rounds 1-3 had none of that. The windows were painted
+2a1030, three units from the outline ink 280e27, so the quantiser sent every
+window pixel to the outline colour: glass and outline were the same black, the
+roof floated as a lid over a hole, and 34 to 50 % of the top third of the
+coupe, the hatch and the saloon was the line that draws the car. The bar's own
+read at small size comes from its interior -- the black window band, the lamp
+pods, the arch flares -- not from its edge, which as a pure cut-out is one
+black block. So does ours now.
+
 Rim: the paint material carries a warm rim term, an emission of the ramp's
 highlight step on faces whose world normal points up-and-right (RIM_DIR), so
 the single-segment chamfers along the sun-side top edges land in the palette's
 highlight step instead of clipping back to the swatch. It is world-space, so
 it stays on the screen's upper-right at every yaw and never on the underside.
+That term lights facets. The EDGE is pxart.outline()'s job: it draws the
+sunward third of the ring in the highlight step instead of the ink, so the
+line around the car breaks where the sun is. Golden hour is an edge, not a
+facet, and a uniform ink ring is neither.
 
 Output, per run:
 
@@ -211,7 +226,21 @@ M = {
     "shade": mat("shade", PAINT_SHADE, 0.9),
     "livery": mat("livery", "f2e6c4", 0.9),
     "stripe": mat("stripe", "3c1228", 0.9),
-    "glass": mat("glass", "2a1030", 0.4),
+    # Glass is EMITTED, not lit. Rounds 1-3 gave the windows a base colour of
+    # 2a1030 and let the key light decide: a near-vertical window faces neither
+    # the sun nor the fill, so it came back at three units from the outline ink
+    # 280e27 and the quantiser sent it there. Glass and outline were the same
+    # black, so the roof floated as a lid over a hole. An emission at exactly
+    # the palette's glass tone under the Standard view transform renders as
+    # exactly that tone at every yaw, which is what a window band is in pixel
+    # art: a flat dark shape, not a shaded surface. `glass_lit` is the screens,
+    # one step up, because a windscreen catches the sky and a door window does
+    # not.
+    "glass": mat("glass", "000000", 1.0, "343a52", 1.0),
+    "glass_lit": mat("glass_lit", "000000", 1.0, "4d5573", 1.0),
+    # The beltline moulding under the glass: the hard line where the
+    # greenhouse stops and the body starts.
+    "belt": mat("belt", "1a1b26", 0.9),
     "tyre": mat("tyre", "1a1220", 1.0),
     "rim": mat("rim", "6b7291", 0.7),
     "trim": mat("trim", "2a2b3d", 0.8),
@@ -340,22 +369,69 @@ def cut_arches():
             b.object = c
 
 
-def livery(x_half, y0, length, z, height=0.24):
-    """A straight band the length of the flank with a dark stripe along its
-    lower edge, proud of the body by a few centimetres, cut by the arches
-    where it crosses them so it reads as paint on the panel."""
+def livery(x_half, y0, length, z, height=0.42):
+    """A cream door panel BETWEEN the arch openings, with a dark stripe along
+    its lower edge, proud of the flank by a few centimetres.
+
+    Rounds 1-3 ran this band the whole length of the flank and put it in the
+    arch cutters' way, at exactly wheel height. What survived the boolean was
+    two stubs, and the roundel's ring covered most of what was left: on a
+    chromatic 192 cell the entire cream count was 407 pixels, all of it plate
+    and roundel, and a critic recorded the livery as absent on all seven
+    chromatic paints. This panel is NOT cut. Each body passes the gap between
+    its own two openings, so nothing needs to be booleaned away, and the panel
+    fills the flank from the sill to the shoulder instead of being a stripe at
+    hub height."""
     for s in (-1, 1):
-        box("livery", (0.06, length, height), (s * x_half, y0, z), BAND, bevel=0.0, cut=True)
-        box("stripe", (0.06, length, 0.07), (s * (x_half + 0.004), y0, z - height / 2 - 0.035), BAND_STRIPE, bevel=0.0, cut=True)
+        box("livery", (0.06, length, height), (s * x_half, y0, z), BAND, bevel=0.0)
+        box("stripe", (0.06, length, 0.07), (s * (x_half + 0.004), y0, z - height / 2 + 0.05), BAND_STRIPE, bevel=0.0)
+
+
+def glasshouse(width, spans, z, height, pillars=(), tone="glass"):
+    """The side window band: one dark window per (y0, y1) span, with the
+    cabin's own paint standing between them as the pillars.
+
+    `width` is a little wider than the cabin, so the glass shows on both
+    flanks; a pillar box is wider again, so a pillar is never a recess that
+    the quantiser can fill in. `pillars` are (y, thickness) posts in body
+    colour. A pillar is 0.18 to 0.22 deep, which is 2 to 3 cell px at the 96
+    cell (the roster slot, where a child picks a car) and 5 to 6 at the 192
+    (the garage dais and the countdown).
+
+    Without this the greenhouse was one uninterrupted slot and the roof had
+    nothing holding it to the body."""
+    for y0, y1 in spans:
+        box("glass", (width, y1 - y0, height), (0, (y0 + y1) / 2, z), M[tone], bevel=0.02)
+    for y, thick in pillars:
+        box("pillar", (width + 0.06, thick, height + 0.02), (0, y, z), M["paint"], bevel=0.02)
+
+
+def beltline(width, y0, y1, z, height=0.06):
+    """The dark moulding along the bottom of the glass: the hard step where a
+    smaller box stops sitting on a bigger one."""
+    box("belt", (width, y1 - y0, height), (0, (y0 + y1) / 2, z), M["belt"], bevel=0.0)
 
 
 def roundels(x_half, y, z, r=0.30):
-    """Blank cream roundels, one per door, each on a dark ring so the disc
-    is a disc against a cream band and against white paint. Named for
-    meta.json."""
+    """Cream roundels, one per door. No dark ring any more: the door panel
+    under them is cream on the seven chromatic paints, so a ringed disc read
+    as a porthole punched in the door -- a critic called the round-3 version a
+    blank cream egg, and a ring only made the egg an outlined egg. Flush and
+    unringed, the roundel is simply the lighter part of a cream door and the
+    number lands on it, which is what the bar does. On the light paints the
+    panel is dark and the cream disc shows on its own. Named for
+    meta.json: this object IS the number panel at four of eight stall yaws and
+    six of eight road yaws, so its radius is a legibility constraint, not a
+    taste one -- under about 0.28 the projected rect drops below the two-digit
+    floor and the number disappears from those yaws. It is nearly flush with
+    the door panel now instead of standing 0.03 proud of it, so it is a
+    marking on a door rather than a boss on a flank."""
     for s, name in ((-1, "roundel_L"), (1, "roundel_R")):
-        cyl("ring", r + 0.06, 0.04, (s * (x_half + 0.012), y, z), M["stripe"], verts=20)
-        cyl(name, r, 0.04, (s * (x_half + 0.034), y, z), M["livery"], verts=20)
+        # Squashed to 0.80 of its height: a full circle of the radius the
+        # number needs is taller than the flank is deep, and the part that
+        # overhung read as a cream bump on the door's edge. The WIDTH -- the
+        # dimension the two digits actually need -- is untouched.
+        cyl(name, r, 0.04, (s * (x_half + 0.042), y, z), M["livery"], verts=20, scale=(0.80, 1, 1))
 
 
 def plate(y, z, w=0.90, h=0.30):
@@ -369,21 +445,24 @@ def lamps_front(y, z, spread, w=0.38, h=0.24):
     box("head_r", (w, 0.08, h), (spread, y, z), M["head"], bevel=0.0)
 
 
-def tail_bar(y, z, w=1.64, h=0.24):
+def tail_bar(y, z, w=1.64, h=0.26):
     """A wide red bar with a pale glow strip through it. On a red car the bar
-    itself vanishes into the paint; the strip is what still reads as a lamp."""
+    itself vanishes into the paint -- f01a1a is 109.8 from the red swatch,
+    the closest of the eight paints -- so the pale strip is the only thing
+    that still reads as a lamp, and it is half the bar's height rather than a
+    third so that it is at least one pixel at the 48 cell on every body."""
     box("tail", (w, 0.08, h), (0, y, z), M["tail"], bevel=0.0)
-    box("tail_glow", (w * 0.86, 0.10, h * 0.34), (0, y - 0.005, z), M["glow"], bevel=0.0)
+    box("tail_glow", (w * 0.90, 0.10, h * 0.50), (0, y - 0.005, z), M["glow"], bevel=0.0)
 
 
 def tail_blocks(y, z, spread, w=0.36, h=0.36):
     """Two square lamp blocks, one each side of the plate: the hatch's tail."""
     for s, name in ((-1, "tail_l"), (1, "tail_r")):
         box(name, (w, 0.08, h), (s * spread, y, z), M["tail"], bevel=0.0)
-        box("tail_glow", (w * 0.6, 0.10, h * 0.3), (s * spread, y - 0.005, z), M["glow"], bevel=0.0)
+        box("tail_glow", (w * 0.66, 0.10, h * 0.46), (s * spread, y - 0.005, z), M["glow"], bevel=0.0)
 
 
-def tail_wrap(y, z, x_half, w=1.84, h=0.20, depth=0.32):
+def tail_wrap(y, z, x_half, w=1.84, h=0.24, depth=0.32):
     """A thin full-width bar that turns the corner onto both quarters: the
     coupe's tail."""
     tail_bar(y, z, w=w, h=h)
@@ -413,29 +492,42 @@ def body_coupe():
     a lip spoiler, a thin wraparound tail bar. Wheelbase 2.6, ride 0.44,
     tyre 0.42."""
     ride, r = 0.52, 0.47
-    chamfered("body", (1.96, 4.10, 0.44), (0, 0.0, ride + 0.22), M["paint"], cut=True)
-    chamfered("nose", (1.90, 1.20, 0.26), (0, 1.50, ride + 0.55), M["paint"], cut=True)
-    chamfered("deck", (1.90, 1.10, 0.26), (0, -1.50, ride + 0.55), M["paint"])
-    chamfered("cabin", (1.46, 1.86, 0.52), (0, -0.20, ride + 0.88), M["paint"], bevel=0.14)
-    box("glass", (1.50, 1.62, 0.24), (0, -0.20, ride + 0.92), M["glass"], bevel=0.02)
-    box("glass_f", (1.22, 0.26, 0.24), (0, 0.76, ride + 0.90), M["glass"], bevel=0.0, rot=(math.radians(-50), 0, 0))
-    box("glass_r", (1.24, 0.30, 0.22), (0, -1.16, ride + 0.88), M["glass"], bevel=0.0, rot=(math.radians(50), 0, 0))
+    # The flank is 0.60 deep, not 0.44: the arch flares were already 0.62 and
+    # the slab they blister out of was shallower than they were, so the door
+    # roundel -- which has to stay big enough to hold two digits, it is the
+    # number panel at four of eight stall yaws -- had its top third hanging in
+    # air above the shoulder. That is what made it read as a bright cream egg
+    # rather than a decal. Now it sits on bodywork, on a cream door panel.
+    chamfered("body", (2.16, 4.10, 0.54), (0, 0.0, ride + 0.27), M["paint"], cut=True)
+    chamfered("nose", (2.10, 1.20, 0.26), (0, 1.50, ride + 0.60), M["paint"], cut=True)
+    chamfered("deck", (2.10, 1.10, 0.26), (0, -1.50, ride + 0.60), M["paint"])
+    # The cabin is 0.10 lower than it was and the body 0.20 wider: the handoff
+    # claimed "the coupe wider and lower against a narrower, taller saloon"
+    # and it was false on the stall camera, where the coupe measured 129x64
+    # against the saloon's 134x65. A Group B coupe is a wide car on a wide
+    # track under a low roof; this makes the sentence true where the game
+    # draws it.
+    chamfered("cabin", (1.46, 1.86, 0.54), (0, -0.20, ride + 0.86), M["paint"], bevel=0.14)
+    beltline(1.52, -1.13, 0.73, ride + 0.68)
+    glasshouse(1.50, [(-0.98, -0.36), (-0.14, 0.52)], ride + 0.84, 0.26, pillars=[(-0.25, 0.22)])
+    box("glass_f", (1.22, 0.26, 0.24), (0, 0.76, ride + 0.82), M["glass_lit"], bevel=0.0, rot=(math.radians(-50), 0, 0))
+    box("glass_r", (1.24, 0.30, 0.22), (0, -1.16, ride + 0.80), M["glass"], bevel=0.0, rot=(math.radians(50), 0, 0))
     for x in (-1.0, 1.0):
-        chamfered("arch_f", (0.30, 1.30, 0.62), (x * 0.99, 1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
-        chamfered("arch_r", (0.30, 1.30, 0.62), (x * 0.99, -1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
-        box("sill", (0.12, 2.20, 0.12), (x * 1.00, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
-    livery(1.005, 0.0, 3.90, ride + 0.30)
-    box("wing", (1.92, 0.30, 0.09), (0, -2.00, ride + 0.74), M["paint"], bevel=0.02)
-    box("bumper_f", (1.98, 0.20, 0.22), (0, 2.08, ride + 0.11), M["trim"], bevel=0.04)
-    box("bumper_r", (1.76, 0.20, 0.22), (0, -2.08, ride + 0.11), M["trim"], bevel=0.04)
+        chamfered("arch_f", (0.30, 1.30, 0.62), (x * 1.09, 1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
+        chamfered("arch_r", (0.30, 1.30, 0.62), (x * 1.09, -1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
+        box("sill", (0.12, 2.20, 0.12), (x * 1.10, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+    livery(1.105, 0.0, 1.28, ride + 0.27, height=0.50)
+    box("wing", (2.12, 0.30, 0.09), (0, -2.00, ride + 0.74), M["paint"], bevel=0.02)
+    box("bumper_f", (2.18, 0.20, 0.22), (0, 2.08, ride + 0.11), M["trim"], bevel=0.04)
+    box("bumper_r", (1.96, 0.20, 0.22), (0, -2.08, ride + 0.11), M["trim"], bevel=0.04)
     box("grille", (1.10, 0.05, 0.18), (0, 2.09, ride + 0.36), M["ink"], bevel=0.0)
-    lamps_front(2.11, ride + 0.36, 0.64)
-    tail_wrap(-2.09, ride + 0.58, 0.97)
+    lamps_front(2.11, ride + 0.36, 0.70)
+    tail_wrap(-2.09, ride + 0.58, 1.07, h=0.30)
     plate(-2.10, ride + 0.38)
-    roundels(1.025, -0.15, ride + 0.32, r=0.31)
-    arches((-1.14, 1.14), (1.30, -1.30), r, ride)
-    wheels((-1.14, 1.14), (1.30, -1.30), r, w=0.36)
-    contact_shadow(1.30, 2.25)
+    roundels(1.105, -0.10, ride + 0.27, r=0.31)
+    arches((-1.24, 1.24), (1.30, -1.30), r, ride)
+    wheels((-1.24, 1.24), (1.30, -1.30), r, w=0.36)
+    contact_shadow(1.40, 2.25)
 
 
 def body_hatch():
@@ -443,26 +535,27 @@ def body_hatch():
     rear window, a roof spoiler and two square tail blocks. Wheelbase 2.2,
     ride 0.44, tyre 0.40."""
     ride, r = 0.52, 0.45
-    chamfered("body", (1.84, 3.50, 0.44), (0, 0.0, ride + 0.22), M["paint"], cut=True)
-    chamfered("nose", (1.78, 0.90, 0.26), (0, 1.25, ride + 0.55), M["paint"], cut=True)
+    chamfered("body", (1.84, 3.50, 0.60), (0, 0.0, ride + 0.30), M["paint"], cut=True)
+    chamfered("nose", (1.78, 0.90, 0.26), (0, 1.25, ride + 0.62), M["paint"], cut=True)
     chamfered("cabin", (1.50, 2.30, 0.60), (0, -0.45, ride + 0.90), M["paint"], bevel=0.12)
     chamfered("tailgate", (1.64, 0.22, 0.78), (0, -1.66, ride + 0.66), M["paint"], bevel=0.06, rot=(math.radians(4), 0, 0))
-    box("glass", (1.54, 1.94, 0.24), (0, -0.45, ride + 0.98), M["glass"], bevel=0.02)
-    box("glass_f", (1.24, 0.36, 0.22), (0, 0.66, ride + 0.96), M["glass"], bevel=0.0, rot=(math.radians(-46), 0, 0))
+    beltline(1.56, -1.60, 1.15, ride + 0.83)
+    glasshouse(1.54, [(-1.42, -0.78), (-0.56, 0.52)], ride + 0.98, 0.24, pillars=[(-0.67, 0.22)])
+    box("glass_f", (1.24, 0.36, 0.22), (0, 0.66, ride + 0.96), M["glass_lit"], bevel=0.0, rot=(math.radians(-46), 0, 0))
     box("glass_r", (1.32, 0.08, 0.44), (0, -1.79, ride + 0.94), M["glass"], bevel=0.0, rot=(math.radians(4), 0, 0))
     box("spoiler", (1.58, 0.34, 0.07), (0, -1.66, ride + 1.26), M["paint"], bevel=0.02)
     for x in (-1.0, 1.0):
         chamfered("arch_f", (0.28, 1.20, 0.60), (x * 0.93, 1.10, ride + 0.30), M["paint"], bevel=0.12, cut=True)
         chamfered("arch_r", (0.28, 1.20, 0.60), (x * 0.93, -1.10, ride + 0.30), M["paint"], bevel=0.12, cut=True)
         box("sill", (0.12, 1.80, 0.12), (x * 0.95, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
-    livery(0.945, 0.0, 3.30, ride + 0.30)
+    livery(0.945, 0.0, 0.92, ride + 0.30, height=0.52)
     box("bumper_f", (1.90, 0.20, 0.22), (0, 1.72, ride + 0.11), M["trim"], bevel=0.04)
     box("bumper_r", (1.66, 0.20, 0.22), (0, -1.72, ride + 0.11), M["trim"], bevel=0.04)
     box("grille", (1.00, 0.05, 0.18), (0, 1.73, ride + 0.36), M["ink"], bevel=0.0)
     lamps_front(1.75, ride + 0.36, 0.58, w=0.34, h=0.26)
     tail_blocks(-1.82, ride + 0.62, 0.62)
     plate(-1.78, ride + 0.38, w=0.84)
-    roundels(0.965, -0.20, ride + 0.32, r=0.29)
+    roundels(0.945, -0.05, ride + 0.30, r=0.29)
     arches((-1.08, 1.08), (1.10, -1.10), r, ride)
     wheels((-1.08, 1.08), (1.10, -1.10), r, w=0.36)
     contact_shadow(1.24, 1.90)
@@ -472,11 +565,12 @@ def body_wedge():
     """Group B wedge: low splitter nose, mid cabin, huge rear wing on tall
     posts, bigger rear tyres. Wheelbase 2.55, ride 0.40, tyres 0.42/0.47."""
     ride = 0.50
-    chamfered("body", (1.96, 4.40, 0.42), (0, 0.0, ride + 0.21), M["paint"], cut=True)
+    chamfered("body", (1.96, 4.40, 0.58), (0, 0.0, ride + 0.29), M["paint"], cut=True)
     chamfered("nose", (1.88, 1.70, 0.30), (0, 1.35, 0.86), M["paint"], rot=(math.radians(10), 0, 0), cut=True)
     chamfered("cabin", (1.42, 1.60, 0.42), (0, -0.30, 1.06), M["paint"], bevel=0.12)
-    box("glass", (1.46, 1.36, 0.20), (0, -0.30, 1.14), M["glass"], bevel=0.02)
-    box("glass_f", (1.26, 0.56, 0.16), (0, 0.66, 1.08), M["glass"], bevel=0.0, rot=(math.radians(-58), 0, 0))
+    beltline(1.48, -1.10, 0.50, 1.00)
+    glasshouse(1.46, [(-0.98, -0.44), (-0.24, 0.38)], 1.14, 0.20, pillars=[(-0.34, 0.20)])
+    box("glass_f", (1.26, 0.56, 0.16), (0, 0.66, 1.08), M["glass_lit"], bevel=0.0, rot=(math.radians(-58), 0, 0))
     chamfered("deck", (1.90, 1.30, 0.28), (0, -1.55, 1.00), M["paint"], cut=True)
     box("wing", (2.16, 0.42, 0.07), (0, -2.05, 1.52), M["paint"], bevel=0.02)
     box("wing_lp", (0.10, 0.30, 0.56), (-0.82, -2.02, 1.22), M["trim"], bevel=0.0)
@@ -487,14 +581,14 @@ def body_wedge():
         chamfered("arch_f", (0.32, 1.24, 0.62), (x * 1.02, 1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
         chamfered("arch_r", (0.36, 1.38, 0.72), (x * 1.04, -1.25, ride + 0.36), M["paint"], bevel=0.12, cut=True)
         box("sill", (0.12, 2.10, 0.12), (x * 1.04, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
-    livery(1.03, 0.05, 4.10, ride + 0.24, height=0.22)
+    livery(1.03, 0.05, 1.24, ride + 0.29, height=0.52)
     box("splitter", (2.02, 0.34, 0.08), (0, 2.12, ride - 0.06), M["trim"], bevel=0.02)
     box("bumper_r", (1.76, 0.18, 0.22), (0, -2.22, ride + 0.11), M["trim"], bevel=0.04)
     box("grille", (0.90, 0.05, 0.14), (0, 2.18, 0.66), M["ink"], bevel=0.0, rot=(math.radians(10), 0, 0))
     lamps_front(2.19, 0.70, 0.62, w=0.42, h=0.18)
-    tail_bar(-2.23, 1.08, w=1.70, h=0.22)
+    tail_bar(-2.23, 1.08, w=1.70, h=0.32)
     plate(-2.24, 0.86, h=0.24)
-    roundels(1.06, -0.25, 0.72, r=0.29)
+    roundels(1.03, 0.00, ride + 0.29, r=0.29)
     arches((-1.16, 1.16), (1.30,), 0.46, ride)
     arches((-1.20, 1.20), (-1.25,), 0.51, ride)
     wheels((-1.16, 1.16), (1.30,), 0.46, w=0.36)
@@ -507,31 +601,35 @@ def body_saloon():
     a low wide rear window, a chrome bar over a wide low tail bar, the
     smallest arches. Wheelbase 2.85, ride 0.46, tyre 0.40."""
     ride, r = 0.54, 0.45
-    chamfered("body", (1.74, 4.70, 0.44), (0, 0.0, ride + 0.22), M["paint"], cut=True)
-    chamfered("bonnet", (1.68, 1.40, 0.26), (0, 1.55, ride + 0.55), M["paint"], cut=True)
-    chamfered("cabin", (1.38, 1.90, 0.56), (0, -0.05, ride + 0.88), M["paint"], bevel=0.12)
-    box("glass", (1.42, 1.66, 0.24), (0, -0.05, ride + 0.94), M["glass"], bevel=0.02)
-    box("glass_f", (1.18, 0.34, 0.22), (0, 0.95, ride + 0.90), M["glass"], bevel=0.0, rot=(math.radians(-40), 0, 0))
-    box("glass_r", (1.30, 0.36, 0.16), (0, -1.12, ride + 0.86), M["glass"], bevel=0.0, rot=(math.radians(54), 0, 0))
-    chamfered("boot", (1.66, 1.30, 0.44), (0, -1.70, ride + 0.62), M["paint"], cut=True)
-    box("lip", (1.30, 0.18, 0.05), (0, -2.30, ride + 0.86), M["paint"], bevel=0.0)
+    # 0.20 shorter and 0.04 narrower than it was, with a cabin 0.06 taller:
+    # the other half of making the coupe's "wider and lower" true on the stall
+    # camera, and the shape a three-box saloon actually has.
+    chamfered("body", (1.70, 4.50, 0.56), (0, 0.0, ride + 0.28), M["paint"], cut=True)
+    chamfered("bonnet", (1.64, 1.34, 0.26), (0, 1.45, ride + 0.62), M["paint"], cut=True)
+    chamfered("cabin", (1.38, 1.90, 0.62), (0, -0.05, ride + 0.89), M["paint"], bevel=0.12)
+    beltline(1.44, -1.00, 0.90, ride + 0.80)
+    glasshouse(1.42, [(-0.78, -0.22), (-0.02, 0.78)], ride + 0.95, 0.26, pillars=[(-0.12, 0.20)])
+    box("glass_f", (1.18, 0.34, 0.22), (0, 0.95, ride + 0.91), M["glass_lit"], bevel=0.0, rot=(math.radians(-40), 0, 0))
+    box("glass_r", (1.30, 0.36, 0.16), (0, -1.12, ride + 0.87), M["glass"], bevel=0.0, rot=(math.radians(54), 0, 0))
+    chamfered("boot", (1.62, 1.24, 0.44), (0, -1.60, ride + 0.62), M["paint"], cut=True)
+    box("lip", (1.30, 0.18, 0.05), (0, -2.18, ride + 0.86), M["paint"], bevel=0.0)
     for x in (-1.0, 1.0):
-        chamfered("arch_f", (0.26, 1.14, 0.56), (x * 0.88, 1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
-        chamfered("arch_r", (0.26, 1.14, 0.56), (x * 0.88, -1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
-        box("sill", (0.12, 2.50, 0.12), (x * 0.90, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
-        box("trimline", (0.04, 4.40, 0.05), (x * 0.885, 0.0, ride + 0.48), M["trim"], bevel=0.0, cut=True)
-    livery(0.895, 0.0, 4.50, ride + 0.30)
-    box("bumper_f", (1.80, 0.20, 0.22), (0, 2.38, ride + 0.11), M["trim"], bevel=0.04)
-    box("bumper_r", (1.60, 0.20, 0.22), (0, -2.38, ride + 0.11), M["trim"], bevel=0.04)
-    box("grille", (1.00, 0.05, 0.18), (0, 2.39, ride + 0.36), M["ink"], bevel=0.0)
-    lamps_front(2.41, ride + 0.36, 0.56, w=0.34, h=0.22)
-    box("chrome", (1.62, 0.07, 0.08), (0, -2.37, ride + 0.80), M["chrome"], bevel=0.0)
-    tail_bar(-2.38, ride + 0.62, w=1.54, h=0.24)
-    plate(-2.38, ride + 0.38)
-    roundels(0.915, -0.05, ride + 0.32, r=0.30)
-    arches((-1.02, 1.02), (1.42, -1.42), r, ride)
-    wheels((-1.02, 1.02), (1.42, -1.42), r, w=0.34)
-    contact_shadow(1.18, 2.55)
+        chamfered("arch_f", (0.26, 1.14, 0.56), (x * 0.86, 1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
+        chamfered("arch_r", (0.26, 1.14, 0.56), (x * 0.86, -1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
+        box("sill", (0.12, 2.50, 0.12), (x * 0.88, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+        box("trimline", (0.04, 4.20, 0.05), (x * 0.865, 0.0, ride + 0.48), M["trim"], bevel=0.0, cut=True)
+    livery(0.885, 0.0, 1.58, ride + 0.28, height=0.50)
+    box("bumper_f", (1.76, 0.20, 0.22), (0, 2.28, ride + 0.11), M["trim"], bevel=0.04)
+    box("bumper_r", (1.56, 0.20, 0.22), (0, -2.28, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (1.00, 0.05, 0.18), (0, 2.29, ride + 0.36), M["ink"], bevel=0.0)
+    lamps_front(2.31, ride + 0.36, 0.56, w=0.34, h=0.22)
+    box("chrome", (1.58, 0.07, 0.08), (0, -2.27, ride + 0.80), M["chrome"], bevel=0.0)
+    tail_bar(-2.28, ride + 0.62, w=1.50, h=0.26)
+    plate(-2.28, ride + 0.38)
+    roundels(0.885, -0.05, ride + 0.28, r=0.30)
+    arches((-1.00, 1.00), (1.42, -1.42), r, ride)
+    wheels((-1.00, 1.00), (1.42, -1.42), r, w=0.34)
+    contact_shadow(1.16, 2.45)
 
 
 def body_buggy():
@@ -546,7 +644,7 @@ def body_buggy():
     box("seat_l", (0.40, 0.50, 0.42), (-0.30, -0.30, 1.28), M["ink"], bevel=0.03)
     box("seat_r", (0.40, 0.50, 0.42), (0.30, -0.30, 1.28), M["ink"], bevel=0.03)
     box("dash", (1.20, 0.30, 0.20), (0, 0.55, 1.18), M["trim"], bevel=0.02)
-    box("screen", (1.10, 0.06, 0.36), (0, 0.80, 1.34), M["glass"], bevel=0.0, rot=(math.radians(-22), 0, 0))
+    box("screen", (1.10, 0.06, 0.36), (0, 0.80, 1.34), M["glass_lit"], bevel=0.0, rot=(math.radians(-22), 0, 0))
     # roll cage: four posts, two rails, two hoops
     for x in (-0.58, 0.58):
         box("post_r", (0.10, 0.10, 0.96), (x, -0.50, 1.56), M["paint"], bevel=0.0)
@@ -560,15 +658,15 @@ def body_buggy():
         for x in (-1, 1):
             box("arm", (0.60, 0.12, 0.08), (x * 0.72, y, 0.56), M["shade"], bevel=0.0)
             box("spring", (0.12, 0.12, 0.50), (x * 0.86, y, 0.84), M["rim"], bevel=0.0, rot=(0, math.radians(x * -22), 0))
-    livery(0.655, 0.05, 1.60, 0.90, height=0.22)
+    livery(0.675, 0.05, 1.60, 0.85, height=0.46)
     box("bumper_f", (1.60, 0.12, 0.12), (0, 2.02, 0.66), M["paint"], bevel=0.0)
     box("bumper_r", (1.60, 0.12, 0.12), (0, -1.60, 0.66), M["paint"], bevel=0.0)
     box("head_l", (0.30, 0.16, 0.30), (-0.38, 1.98, 1.02), M["head"], bevel=0.02)
     box("head_r", (0.30, 0.16, 0.30), (0.38, 1.98, 1.02), M["head"], bevel=0.02)
     box("rear_panel", (1.28, 0.10, 0.56), (0, -1.22, 0.92), M["paint"], bevel=0.03)
-    tail_bar(-1.28, 1.12, w=1.10, h=0.18)
+    tail_bar(-1.28, 1.12, w=1.10, h=0.28)
     plate(-1.29, 0.84, w=0.80, h=0.28)
-    roundels(0.675, -0.25, 0.94, r=0.26)
+    roundels(0.675, -0.25, 0.85, r=0.26)
     wheels((-1.00, 1.00), (1.20, -1.20), 0.55, w=0.40, knobbly=True)
     contact_shadow(1.40, 2.05)
 
@@ -577,11 +675,12 @@ def body_pickup():
     """Cab-forward pickup: short bonnet, open bed with a roll bar, high
     stance, the longest wheelbase. Wheelbase 2.9, ride 0.54, tyre 0.48."""
     ride, r = 0.58, 0.50
-    chamfered("chassis", (1.90, 4.60, 0.38), (0, -0.10, ride + 0.19), M["paint"], cut=True)
+    chamfered("chassis", (1.90, 4.60, 0.52), (0, -0.10, ride + 0.26), M["paint"], cut=True)
     chamfered("cab", (1.72, 1.60, 0.72), (0, 0.95, 1.28), M["paint"], bevel=0.12)
     chamfered("bonnet", (1.82, 0.60, 0.28), (0, 2.05, 1.06), M["paint"], cut=True)
-    box("glass", (1.76, 1.34, 0.24), (0, 0.95, 1.38), M["glass"], bevel=0.02)
-    box("glass_f", (1.40, 0.30, 0.24), (0, 1.74, 1.38), M["glass"], bevel=0.0, rot=(math.radians(-34), 0, 0))
+    beltline(1.78, 0.15, 1.75, 1.20)
+    glasshouse(1.76, [(0.30, 0.86), (1.06, 1.62)], 1.38, 0.24, pillars=[(0.96, 0.20)])
+    box("glass_f", (1.40, 0.30, 0.24), (0, 1.74, 1.38), M["glass_lit"], bevel=0.0, rot=(math.radians(-34), 0, 0))
     box("glass_r", (1.34, 0.10, 0.26), (0, 0.15, 1.40), M["glass"], bevel=0.0)
     box("bed_l", (0.12, 2.20, 0.44), (-0.89, -1.10, 1.18), M["paint"], bevel=0.03)
     box("bed_r", (0.12, 2.20, 0.44), (0.89, -1.10, 1.18), M["paint"], bevel=0.03)
@@ -594,14 +693,14 @@ def body_pickup():
         chamfered("arch_f", (0.30, 1.32, 0.64), (x * 0.98, 1.25, ride + 0.32), M["paint"], bevel=0.12, cut=True)
         chamfered("arch_r", (0.30, 1.32, 0.64), (x * 0.98, -1.65, ride + 0.32), M["paint"], bevel=0.12, cut=True)
         box("step", (0.14, 1.40, 0.10), (x * 0.98, -0.20, ride + 0.05), M["trim"], bevel=0.02, cut=True)
-    livery(0.965, -0.30, 3.90, 0.84, height=0.24)
+    livery(0.965, -0.20, 1.54, 0.84, height=0.48)
     box("bumper_f", (1.96, 0.22, 0.24), (0, 2.34, ride + 0.12), M["trim"], bevel=0.04)
     box("bumper_r", (1.66, 0.22, 0.24), (0, -2.34, ride + 0.11), M["trim"], bevel=0.04)
     box("grille", (1.10, 0.05, 0.22), (0, 2.36, 0.86), M["ink"], bevel=0.0)
     lamps_front(2.38, 0.90, 0.62, w=0.36, h=0.24)
-    tail_bar(-2.21, 0.91, w=1.66, h=0.20)
+    tail_bar(-2.21, 0.91, w=1.66, h=0.32)
     plate(-2.22, 1.16, h=0.28)
-    roundels(0.985, -0.55, 1.10, r=0.26)
+    roundels(0.965, -0.30, 0.84, r=0.26)
     arches((-1.14, 1.14), (1.25, -1.65), r, ride)
     wheels((-1.14, 1.14), (1.25, -1.65), r, w=0.38)
     contact_shadow(1.30, 2.50, y0=-0.15)
