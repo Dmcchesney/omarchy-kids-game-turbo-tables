@@ -10,11 +10,13 @@
 // and the fog are a handful of uniforms, so the road bends and rushes with no
 // vertex buffer to rebuild and nothing for the CPU to do but set numbers.
 //
-// GOLDEN-HOUR PROTOTYPE. Above the horizon this shader draws NOTHING: the sky
-// is ui/parts/SunsetSky.qml, an item behind this plane, and the plane blends
+// GOLDEN HOUR. Above the horizon this shader draws NOTHING: the sky is
+// ui/parts/SunsetSky.qml, an item behind this plane, and the plane blends
 // over it. Below the horizon the floor is near-black purple with a neon
-// magenta grid, fading with distance into a dusk fog, and the sun's foot
-// spills a warm elliptical glow across the far floor and the road.
+// magenta grid, fading with distance INTO THE HORIZON GLOW, and the sun's
+// foot spills a warm elliptical glow across the far floor and the road. The
+// tarmac fogs slower than the floor, so the road stays a legible ribbon out
+// to the vanishing point instead of dissolving into the ground at z = 30.
 //
 // The same inversion is written out in QML in TrackView.qml (`vAt`, `uAt`,
 // `sizeAt`) so the karts and the props land on the road this shader draws,
@@ -46,6 +48,7 @@ layout(std140, binding = 0) uniform buf {
     float stripe;       // length of one rumble band, world units
     float gridScale;    // spacing of the floor grid, world units
     float fogDensity;   // how fast the far end fades into the dusk
+    float surfaceFog;   // fraction of fogDensity the tarmac and kerbs take
     float glowAmount;   // strength of the sun's glow on the floor, 0..1
     float gridAlpha;    // how strongly the grid lines show over the ground
     float sunU;         // the sun's centre, 0..1 across the plane
@@ -161,9 +164,32 @@ void main()
     col = mix(col, road, onRoad);
     col = mix(col, laneColor.rgb, marks * onRoad * 0.88 * detail);
 
-    // Dusk. Quadratic in distance so the near floor stays crisp and the
-    // vanishing point dissolves rather than ending at a hard line.
-    float fog = exp(-fogDensity * z * z * 0.0011);
+    // Dusk, INTO THE GLOW, AND THE ROAD SURVIVES IT.
+    //
+    // Quadratic in distance so the near floor stays crisp and the vanishing
+    // point dissolves rather than ending at a hard line. Two things changed
+    // here in round four, and both are the same defect:
+    //
+    //   * `fogColor` is now the horizon glow rather than a purple darker than
+    //     the ground. The design says the floor is "the diagnostic grid in
+    //     neon over near-black purple, FADING INTO THE GLOW" -- the far floor
+    //     was fading into something darker than what it started from, so the
+    //     distance read as a hole rather than as a sunset.
+    //   * the tarmac and its kerbs fog at `surfaceFog` of the floor's rate.
+    //     With one density the road reached the fog's colour at the same
+    //     distance the floor did, so past about twenty world units the road
+    //     and the ground either side of it were the same number: measured on
+    //     the shipped frame, the road's luminance was within 7 of the floor's
+    //     from z = 30 outward, which is a child not being able to see where
+    //     the road goes. A slower fog on the surface keeps a dark ribbon with
+    //     bright kerbs all the way to where it leaves the frame.
+    //
+    // This is a picture rule, not physics, and it is the same rule the genre
+    // has always used: the road is the thing the eye must follow.
+    float surface = max(onRumble, onRoad);
+    float fogFloor = exp(-fogDensity * z * z * 0.0011);
+    float fogRoad = exp(-fogDensity * surfaceFog * z * z * 0.0011);
+    float fog = mix(fogFloor, fogRoad, surface);
     col = mix(fogColor.rgb, col, clamp(fog, 0.0, 1.0));
 
     // The sun's foot: a warm ellipse spilling down from the horizon under the

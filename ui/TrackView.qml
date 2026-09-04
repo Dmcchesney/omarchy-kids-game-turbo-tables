@@ -176,7 +176,18 @@ Item {
   // still is whatever `travel` starts at. Starting it a third of the way into
   // sector 3 means the reduced-motion picture is a road in a corner rather
   // than a ruler.
-  property real travel: 118
+  //
+  // AND IT IS A MULTIPLE OF `propSpacing`, WHICH IS THE OTHER HALF OF THAT.
+  //
+  // At 118 the nearest roadside prop sat at z = 3.25, and a 3.0-unit tyre wall
+  // at that depth is 1,340 px wide: in motion it is a wall whooshing past, but
+  // under reduced motion NOTHING EVER CALLS advance(), so the still a child
+  // with that setting on looks at for the whole race had a tyre wall filling
+  // the right half of the frame, over the sun. The prop loop is 8 units, so a
+  // travel that is a multiple of 8 puts the nearest prop exactly at the near
+  // cull -- z = 1.25, culled -- and the next at z = 9.25, which is a roadside
+  // rather than a wall. 120 is that, and is still inside sector 3's corner.
+  property real travel: 120
   // Derived, not assigned, so it is right on the first frame, right under
   // reduced motion, and cannot fall out of step with `travel`.
   readonly property real curve: curveAt(travel)
@@ -277,13 +288,26 @@ Item {
   // where all four are at exactly `playerZ` -- lanes 0.98 apart put PISTON
   // almost entirely behind the child's kart, number plate and all. Four karts
   // of 1.36 cannot be four abreast on a 3.80-unit road however they are
-  // arranged, so the pack still overlaps; these numbers are the widest that
-  // keep every kart's own number plate clear of its neighbour, and the outer
+  // arranged, so the pack still overlaps; these are the widest lanes that keep
+  // every kart's own number plate clear of its neighbour. The hero's drift
+  // with the corner is gentler for the same reason: at 13.0 it crossed into
+  // PISTON's lane on a hard left.
+  //
+  // ROUND FOUR: EVERY WHEEL IS ON THE TARMAC.
+  //
+  // Round three set the outer two to +-1.34 and its comment said "the outer
   // two ride the rumble strip at the start, which is what a four-wide first
-  // row looks like. The hero's drift with the corner is gentler for the same
-  // reason: at 13.0 it crossed into PISTON's lane on a hard left.
+  // row looks like." Two critics disagreed, and they were right: a kart is
+  // 1.36 world units wide, so a lane centre at 1.34 puts its outer wheels at
+  // 2.02 on a road whose edge is `roadHalf` = 1.90 -- 0.12 units, about
+  // twenty screen pixels at the start line, of wheel standing on the kerb.
+  // A racing game teaching a child that the leaders start half off the track
+  // is a picture defect, not a stylistic choice. `laneLimit` is derived from
+  // the road and the kart rather than typed, so it cannot fall out of step
+  // with either: half the road, less half a kart, less a hand's margin.
+  readonly property real laneLimit: roadHalf - kartWorldWidth / 2 - 0.04
   readonly property real heroLane: 0.30 - curve * 8.0
-  readonly property var lanes: [0.0, -1.34, 1.34, -0.60]
+  readonly property var lanes: [0.0, -laneLimit, laneLimit, -0.58]
   function laneOf(seat) {
     var s = ((seat % 4) + 4) % 4
     return s === 0 ? heroLane : lanes[s]
@@ -474,18 +498,35 @@ Item {
     shake = Math.min(1, shake + strength * 0.80)
   }
 
-  // GOLDEN-HOUR PROTOTYPE PALETTE. Sampled off the bar (see DIRECTION.md):
-  // near-black purple ground, neon magenta grid, purple-tinted tarmac, a
-  // dusk fog and the sun's pink-orange spill. Held here rather than in the
+  // GOLDEN-HOUR PALETTE. Sampled off the bar (plan v2, "Visual direction v3"):
+  // near-black purple ground, neon magenta grid, purple-tinted tarmac, the
+  // horizon glow and the sun's pink-orange spill. Held here rather than in the
   // shader so both renderers read one set of numbers. The design's themed
-  // ground (`Theme.ground`) is not used by the floor in this prototype.
+  // ground (`Theme.ground`) is not used by the floor.
   readonly property color groundTone: "#3c1228"
   readonly property color gridTone: "#ff4fa3"
-  readonly property color fogTone: "#3a1032"
+  // THE DISTANCE IS THE GLOW, NOT A DEEPER DARK.
+  //
+  // This was `#3a1032` -- a purple DARKER than the ground it was supposed to
+  // be fading the ground into. Design, The view: "The floor is the diagnostic
+  // grid in neon over near-black purple, fading into the glow"; plan v2's
+  // palette table: "grid lines #ff4fa3 at ~0.35 alpha fading into the glow".
+  // The far floor was fading into a hole instead, which is most of why the
+  // vanishing point read as nothing at all. `#d75d6b` is the palette table's
+  // own horizon-glow stop and is the colour SunsetSky puts on the horizon
+  // line, so the floor and the sky now meet in one tone.
+  readonly property color fogTone: "#d75d6b"
   readonly property color roadTone: "#221420"
   readonly property color roadToneAlt: "#2c1a2a"
   readonly property color laneTone: Theme.cream
   readonly property color sunTone: "#f0956e"
+  // What fraction of the floor's fog density the tarmac and its kerbs take.
+  // At 1.0 -- which is what shipped -- the road reached the fog's colour at
+  // the same distance the floor did and the two became one number: measured
+  // on the shipped 1920x1080 frame, |road - floor| luminance was under 7 from
+  // z = 30 outward. At 0.30 the road holds a dark ribbon with bright kerbs
+  // out past where the curve carries it off the side of the frame.
+  readonly property real surfaceFog: 0.30
   readonly property real sunU: 0.68
   readonly property real gridAlpha: 0.35
   // The road's far-centre offset in plane pixels, for the hills' parallax:
@@ -576,6 +617,7 @@ Item {
       property real stripe: view.stripe
       property real gridScale: view.gridScale
       property real fogDensity: 1.0
+      property real surfaceFog: view.surfaceFog
       property real glowAmount: 1.0
       property real gridAlpha: view.gridAlpha
       property real sunU: view.sunU
@@ -614,6 +656,7 @@ Item {
       drawDistance: view.drawDistance
       nearDistance: view.nearDistance
 
+      surfaceFog: view.surfaceFog
       glowAmount: 1.0
       gridAlpha: view.gridAlpha
       sunU: view.sunU
@@ -710,6 +753,48 @@ Item {
                                          "timingBoard", "rollerDoor", "banner", "tireWall"]
   readonly property var sectorFiller: ["cone", "banner", "drum", "tireWall",
                                        "banner", "cone"]
+
+  // ARCHES AND THE FACT: THE ONE PROP THAT HAS TO GIVE WAY.
+  //
+  // Plan v2, Risks: "Arches vs. the fixed answer field | M4': props that span
+  // the road cross under the field's line or the field yields for the frame."
+  // The first of those is not available, and the arithmetic says so rather
+  // than an opinion. An arch stands on the road and spans it, so its top is
+  //
+  //     yTop(z) = vAt(z) * H - sizeAt(archHeight, z)
+  //
+  // and with the shipped numbers -- a 9.4-unit span on a 320x200 sheet, so
+  // 5.875 units tall, focal 1.20, camHeight 2.20, H = 1080 -- that is
+  // 436.6 - 2381/z px. It is above the answer field's bottom edge (y = 415 at
+  // 1920x1080) for every z below 110 world units, which is the entire draw
+  // distance at any size an arch is legible. There is no depth at which a
+  // road-spanning arch passes UNDER a field that sits above the horizon.
+  //
+  // So the arch yields, and it yields where it would otherwise be drawn behind
+  // the FACT -- the pillar the design will not trade: "the fact is the largest
+  // thing on screen at every moment of a race." `factFloorY` is the lowest row
+  // the question block's ink reaches, handed down by Race.qml from the block's
+  // own measured geometry rather than assumed here, and an arch dissolves over
+  // the depth range in which its crossbar crosses that line. A bare TrackView
+  // in the harness gets 0 and no arch ever fades.
+  //
+  // What this costs is stated in the evidence and not hidden: a child sees the
+  // gantry and the roller door approach and dissolve, and never passes under
+  // one. The alternative was a checkered band and the word TURBO drawn across
+  // `2 x 1`, which is what the shipped build did.
+  property real factFloorY: 0
+  readonly property real archFadeBand: Math.max(24, height * 0.09)
+  // The arch sheet is 320 x 200, so an arch is 0.625 of its span tall.
+  readonly property real archAspect: 200 / 320
+  function archTopAt(worldWidth, z) {
+    return vAt(z) * height - sizeAt(worldWidth * archAspect, z)
+  }
+  function archOpacity(worldWidth, z) {
+    if (factFloorY <= 0)
+      return 1
+    var t = (archTopAt(worldWidth, z) - factFloorY) / archFadeBand
+    return Math.max(0, Math.min(1, t))
+  }
   readonly property var bannerLabels: ["TURBO", "PIT", "BOLT", "PISTON", "GASKET"]
   // Eight units, not twelve: at twelve the roadside read as two thin rows of
   // specks. About twenty-four are visible at once; each is one textured quad.
@@ -752,8 +837,10 @@ Item {
       width: 0
       height: 0
       z: 1000 - zed
+      opacity: arch ? view.archOpacity(worldWidth, zed) : 1
       visible: zed > view.nearDistance + 0.2 && zed < view.drawDistance
                && sc > 0.010 && x > -view.width * 0.7 && x < view.width * 1.7
+               && opacity > 0.004
 
       PropSprite {
         id: furniture
@@ -894,6 +981,30 @@ Item {
   // engine ranks by, so a plate can never disagree with the place readout.
   function kartSpriteH(z) { return kartSheetPixels(z) * 128 / 192 }
 
+  // A PLATE THAT IS NOT ATTACHED TO A CAR IS A LABEL FLOATING ON THE ROAD.
+  //
+  // Two critics said the plates "float under or over far cars", and the
+  // measurement behind that is the size ratio: at the far floor a rival's
+  // sprite is 51 px of sheet wide and its plate reads `PISTON +8` at the
+  // 13 px type floor, which is 86 px -- the label is 1.7 times the width of
+  // the thing it names, and two of them stack under a pair of cars eight
+  // pixels apart. Shrinking the type is not available; 13 px is already the
+  // floor for a child at 1080p.
+  //
+  // So each plate now carries a leader: a one-pixel line in the rival's own
+  // paint from the car's contact point on the road down to the top of its
+  // plate. It costs one quad, it is drawn in the same pass as the plate so
+  // nothing on the roadside can cover it, and it says which car a name
+  // belongs to when three of them are converging on the vanishing point.
+  //
+  // The plate's own ground is the floor's near-black purple at 0.86 rather
+  // than pure black, for the same reason everything else in the game layer is
+  // purple: the light rule says shadow is purple, never grey. A plate on the
+  // road is game layer, not the chrome the plan exempts (Results, Settings,
+  // the picker and the HUD panels, which keep the theme's colours).
+  readonly property color plateGround: Qt.rgba(groundTone.r, groundTone.g,
+                                               groundTone.b, 0.86)
+
   Repeater {
     model: kartModel
 
@@ -949,12 +1060,25 @@ Item {
       // on the same line and read as `PISTONOLT`. Ranking by distance makes the
       // offsets and the depths pull the same way, so the vertical gap between
       // two plates is at least one row however the field is spread.
-      y: view.vAt(zed) * view.height + view.shakeY + 3 + plateRow * (height + 3)
+      readonly property real leader: 3 + plateRow * (height + 3)
+      y: view.vAt(zed) * view.height + view.shakeY + leader
+
+      // The leader: from the car's contact point on the road down to this
+      // plate. `badge.x` is the car's own projected centre less half the
+      // plate's width, so `width / 2` is exactly under the car.
+      Rectangle {
+        x: Math.round(badge.width / 2)
+        y: -badge.leader
+        width: 1
+        height: badge.leader
+        antialiasing: false
+        color: Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.85)
+      }
 
       Rectangle {
         anchors.fill: parent
         radius: 3
-        color: Qt.rgba(0, 0, 0, 0.80)
+        color: view.plateGround
         border.width: 1
         border.color: Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95)
       }
@@ -1066,7 +1190,7 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 3
-        color: Qt.rgba(0, 0, 0, 0.80)
+        color: view.plateGround
         // Two pixels of border when the rival is within one question: the
         // child is about to be passed and the plate says so without a word.
         border.width: (view.haveExact && chaser.gapQuestions >= -1) ? 2 : 1

@@ -1078,20 +1078,44 @@ FocusScope {
     id: track
     anchors.fill: parent
     reducedMotion: race.reducedMotion
+    // The lowest row the fact's ink reaches, plus a hand's margin, so a
+    // road-spanning arch gets out of the way of the one thing the design will
+    // not trade. Measured off the glyphs on screen rather than typed: see
+    // `factInkRect` below and the note on `factFloorY` in TrackView.qml.
+    factFloorY: race.factInkRect.y + race.factInkRect.height + race.px(12)
   }
 
-  // A vignette, so the HUD sits on something and the road falls away at the
-  // edges the way a headlight beam does.
+  // THE SKY IS NEVER BLACK, AND THIS USED TO MAKE IT BLACK.
+  //
+  // What stood here was a full-frame gradient with `rgba(0, 0, 0, 0.55)` at
+  // the top, described as "a vignette, so the HUD sits on something". It sat
+  // over the sky, which is the 40% of the frame the direction is most explicit
+  // about: plan v2, Composition -- "the sky is 40% of the frame and is never
+  // black" -- and the plan's own per-screen list names it as a defect left by
+  // the prototype, "Race.qml's 0.55 vignette darkens the sky top to ~#2a0c24".
+  // Measured on the shipped 1920x1080 frame, the mean of the top twelve rows
+  // was #4b1937 where the sky beneath it paints #9c3174: a 55% black wash
+  // across the brightest band of a retrowave sunset.
+  //
+  // The wash is gone. What it was actually needed for was the one HUD element
+  // that had no panel of its own -- the table name and its lap lamps -- and
+  // that is fixed where the problem is, by giving that block the same panel
+  // the readouts either side of it already have. Everything else in the HUD
+  // (the two gauges, the minimap, the clock, the picker, the charge) draws on
+  // its own ground and never needed the sky darkened.
+  //
+  // What survives is the bottom falloff, and it is purple rather than black,
+  // because the light rule says shadow is `#5f255e` and never grey. It is the
+  // near floor running out of the sun's reach at the bottom corners of the
+  // frame, which is a thing the reference does; it does not touch the sky.
   Rectangle {
-    anchors.fill: parent
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: parent.height * 0.26
     gradient: Gradient {
-      GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.55) }
-      GradientStop { position: 0.30; color: Qt.rgba(0, 0, 0, 0.06) }
-      GradientStop { position: 0.80; color: Qt.rgba(0, 0, 0, 0.0) }
-      // 0.42 here was the whole "per-band brightness sawtooth" a critic
-      // measured on the road: the road alone swings 1.3% within a rumble
-      // band, this vignette took the composited frame to 37.7%.
-      GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.12) }
+      GradientStop { position: 0.0; color: Qt.rgba(0.373, 0.145, 0.369, 0.0) }
+      GradientStop { position: 1.0; color: Qt.rgba(0.373, 0.145, 0.369, 0.24) }
     }
   }
 
@@ -1112,12 +1136,29 @@ FocusScope {
       padX: race.px(16)
     }
 
+    // The table name and its lap lamps, on the same gauge face as the readouts
+    // either side of them. It is the one HUD element that used to draw
+    // straight onto the sky, and the reason the sky was being washed 55% black
+    // to keep amber on hot pink legible. The panel is local rather than a
+    // HudReadout because the block is a name over a row of lamps, not a
+    // caption over a number, but it is the same face colour, the same corner
+    // radius and the same border, so the top-left of the HUD reads as one row
+    // of three instruments.
     Item {
-      width: tableBlock.width
+      width: tableBlock.width + race.px(32)
       height: lapGauge.height
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Theme.cornerRadiusSmall
+        color: Qt.rgba(0.11, 0.045, 0.10, 0.92)
+        border.width: 1
+        border.color: Theme.lineStrong
+      }
 
       Column {
         id: tableBlock
+        x: race.px(16)
         anchors.verticalCenter: parent.verticalCenter
         spacing: race.px(7)
 
@@ -1329,6 +1370,41 @@ FocusScope {
     return Math.max(race.fs(118), Math.min(wanted, widest))
   }
 
+  // The fact's ink AS IT IS ON THE SCREEN NOW: the tight bounding box of the
+  // glyphs currently drawn, in this screen's own coordinates. Two things read
+  // it, and both are the reason it is a live measurement of the item rather
+  // than a constant:
+  //
+  //   * `TrackView.factFloorY`, so a road-spanning arch gets out of the way of
+  //     the fact that is actually there -- `7 x 8` and `12 x 12` are not the
+  //     same width and the ceiling has to follow;
+  //   * the evidence, which quotes the ink as a fraction of the frame height.
+  //     The design's floor is "never smaller than a tenth of the screen
+  //     height", and a round of this project already reported `font.pixelSize`
+  //     as that number and was caught: the em box carries ascent, descent and
+  //     leading, and this face draws about 0.73 of it.
+  // `tightBoundingRect` is measured from the BASELINE, so its `y` is negative
+  // for anything above it; the Text item's own top is `ascent` above that
+  // baseline. Getting this wrong put the fact's ink at y = 5 on a frame where
+  // the glyphs start at y = 140, which is the kind of number this project has
+  // been caught quoting before -- so the evidence checks it against the pixels
+  // rather than trusting the arithmetic.
+  TextMetrics {
+    id: factInkNow
+    font: factText.font
+    text: factText.text
+  }
+  FontMetrics {
+    id: factFace
+    font: factText.font
+  }
+  readonly property rect factInkRect: {
+    var r = factInkNow.tightBoundingRect
+    return Qt.rect(question.x + factText.x + r.x,
+                   question.y + factText.y + factFace.ascent + r.y,
+                   r.width, r.height)
+  }
+
   // ------------------------------------------------------- fact and field
   // Design, Pillars: "The question is the track. The fact is the largest thing
   // on screen at every moment of a race." It is, and it sits above the horizon
@@ -1372,11 +1448,30 @@ FocusScope {
       width: race.px(214)
       height: race.px(98)
 
+      // THE FIELD WAS A HOLE CUT IN THE SKY.
+      //
+      // `Theme.panelSunken` is the shell background driven to 0.22, which on
+      // the tokyo-night the harness and the VM both hand down is rgb(6, 6, 8):
+      // at 0.92 over a sunset the field measured #08080a on the shipped frame
+      // -- a 214 x 98 near-black rectangle sitting on the horizon, a hand's
+      // width from the sun, in the one part of the picture the direction says
+      // is never black. It is the game layer, not the chrome the plan exempts,
+      // and the light rule applies to it: a dark purple body with a warm rim
+      // on the sun side, which is what every other object in this view has.
+      //
+      // The tone is the floor's own `#3c1228` driven down, so the field reads
+      // as the same material as the road it belongs to rather than as a hole,
+      // and the top edge carries the rim `#f0b07a` the sun would put on it.
       Rectangle {
         id: fieldFace
         anchors.fill: parent
         radius: Theme.cornerRadiusSmall
-        color: Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g, Theme.panelSunken.b, 0.92)
+        // 0.74, not opaque: enough of the sunset comes through that the field
+        // reads as smoked glass in front of the sky rather than as a slab cut
+        // out of it, and `Theme.amberGlow` digits at 72 px still stand at more
+        // than five to one against it. Measured on the shipped frame in the
+        // evidence, with the empty field and with four digits in it.
+        color: Qt.rgba(0.157, 0.055, 0.125, 0.74)
         border.width: 2
         border.color: reveal.active ? Theme.teal
                                     : (race.stalled ? Theme.hazard : Theme.focusRing)
@@ -1384,6 +1479,17 @@ FocusScope {
         Behavior on border.color {
           enabled: !race.reducedMotion
           ColorAnimation { duration: 160 }
+        }
+
+        // The rim the one key light puts on the field's upper edge. `#f0b07a`
+        // is the palette's rim tone; it is on the top because the sun is low
+        // and behind, so its light lands on what faces up and away.
+        Rectangle {
+          x: fieldFace.radius
+          y: 2
+          width: parent.width - fieldFace.radius * 2
+          height: Math.max(1, race.px(2))
+          color: Qt.rgba(0.941, 0.690, 0.478, 0.42)
         }
       }
 

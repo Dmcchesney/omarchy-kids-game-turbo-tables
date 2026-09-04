@@ -3,11 +3,18 @@ import "parts"
 
 // The floor. Same road, no shader.
 //
-// GOLDEN-HOUR PROTOTYPE. Above the horizon this canvas is cleared to
-// transparent -- the sky is ui/parts/SunsetSky.qml, an item behind this plane
-// -- and below it the floor is near-black purple with a neon magenta grid
-// that dissolves into a dusk fog, with the sun's foot spilling a warm ellipse
-// down from the horizon. road.frag draws the same thing per pixel.
+// GOLDEN HOUR. Above the horizon this canvas is cleared to transparent -- the
+// sky is ui/parts/SunsetSky.qml, an item behind this plane -- and below it the
+// floor is near-black purple with a neon magenta grid that dissolves into the
+// horizon glow, with the sun's foot spilling a warm ellipse down from the
+// horizon and the tarmac holding its own tone further out than the floor does.
+// road.frag draws the same thing per pixel.
+//
+// THIS IS THE PICTURE AN OMARCHY VM ACTUALLY RENDERS. The VM image pins every
+// Qt client to llvmpipe, so its scene graph has no shader pipeline and this
+// file -- not road.frag -- is what a child sees. It is held to the shader's
+// picture rather than to a cheaper one, and the evidence puts the two side by
+// side at the same camera.
 //
 // Design, Rendering approach, Fallback and floor: "If the shader fails to
 // compile on a machine, the view falls back to a Canvas port of the classic
@@ -42,6 +49,9 @@ Canvas {
   property real stripe: 1.4
   property real gridScale: 4.5
   property real fogDensity: 1.0
+  // What fraction of the floor's fog density the tarmac and its kerbs take.
+  // road.frag's `surfaceFog`; see the comment on the fog below.
+  property real surfaceFog: 0.30
   property real glowAmount: 1.0
   property real gridAlpha: 0.35
   property real sunU: 0.68
@@ -56,7 +66,7 @@ Canvas {
   property color groundColor: "#3c1228"
   property color gridColor: "#ff4fa3"
   property color skyColor: "#5e1a50"
-  property color fogColor: "#3a1032"
+  property color fogColor: "#d75d6b"
   property color glowColor: "#f0956e"
 
   // How far down the track to draw. Past this the fog has closed anyway.
@@ -106,31 +116,61 @@ Canvas {
     // was painted a single colour across boundaries the shader draws. That is
     // the coarse, wrong zebra pitch the fallback has been shipping.
     //
-    // Two rules now, and they are the ones that make the two pictures the same:
+    // ROUND FOUR: AND IT WAS STILL TWICE THE SHADER'S PITCH.
     //
-    //   * inside `detailEnd`, no band may cross a multiple of `stripe`, so every
-    //     band is one colour run and the pitch is the shader's exactly;
-    //   * near the camera a band is subdivided further still, because between
-    //     two z samples this draws a straight edge where the true projection
-    //     curves, and close to the eye that is a visible kink in the kerb.
+    // Round three's rule was "no band may cross a multiple of `stripe`", and
+    // its band colour was `floor((mid + travel) / stripe) % 2`. That paints one
+    // whole stripe one colour and the next the other -- an alternation whose
+    // PERIOD is two stripes. road.frag's is `step(0.5, fract(s / stripe))`,
+    // which flips at every HALF stripe: period one stripe. So the fallback's
+    // kerb blocks were twice as long as the shader's, all the way down the
+    // road, and the claim that the two draw the same picture was false in the
+    // most visible place there is. Amplified 6x, the CPU reference and this
+    // canvas disagreed across the whole left kerb.
     //
-    // Past `detailEnd` the alternation has already dissolved to its average, so
-    // the ladder is free to stride geometrically and the band count stays down.
+    // Four rules now, and the fourth is the one that nearly cost the road:
+    //
+    //   * inside `detailEnd`, a band's edges land on multiples of HALF a
+    //     stripe, so every band is one colour run at the shader's own pitch;
+    //   * the band's colour is the shader's expression, on the same `s`;
+    //   * past `detailEnd` the alternation has dissolved into its own average,
+    //     so the ladder strides geometrically and the band count stays down;
+    //   * AND NO BAND IS EVER THINNER THAN HALF A PLANE PIXEL.
+    //
+    // A band thinner than a third of a plane pixel is dropped by the loop
+    // below, and halving the stride to fix the zebra pitch made every band
+    // from about z = 25 outward exactly that thin. The road, its kerbs and its
+    // markings stopped being drawn there at all, and what showed instead was
+    // the fog base coat: measured on the shipped frame, the tarmac, the kerb
+    // and the floor at z = 30, 35 and 40 all read luminance 119.9, which is
+    // `fogColor` and nothing else. That is the very defect this round exists
+    // to fix, reintroduced by its own fix.
+    //
+    // `minStep` is the z-stride that gives half a plane pixel at this depth,
+    // solved rather than guessed: a band of depth dz is
+    // `height * focal * camHeight * dz / (2 z^2)` plane pixels tall, so half a
+    // pixel is `dz = z^2 / (height * focal * camHeight)`. Where that is wider
+    // than half a stripe the band spans more than one colour run -- but there
+    // it is half a pixel tall and `detail` has already dissolved the zebra
+    // toward its average, which is the same thing the shader is doing.
+    var half = stripe * 0.5
     var zs = []
     var z = drawDistance
     zs.push(z)
     var guard = 0
-    while (z > nearDistance && ++guard < 240) {
+    while (z > nearDistance && ++guard < 400) {
       var step = Math.max(0.30, z * 0.18)
       var next
       if (z > detailEnd) {
         next = z - Math.max(stripe, step)
       } else {
-        next = z - Math.min(stripe, step)
-        var edge = Math.floor((z + travel) / stripe) * stripe - travel
-        if (edge >= z - 1e-6)
-          edge -= stripe
-        if (next < edge)
+        var minStep = (z * z) / Math.max(1, height * focal * camHeight)
+        var want = Math.max(minStep, Math.min(half, step))
+        next = z - want
+        // Snap DOWN to a half-stripe boundary, so a band's edges are always
+        // colour boundaries and it is never shortened back under `want`.
+        var edge = Math.floor((next + travel) / half) * half - travel
+        if (edge < next + half - 1e-6 && edge < z - 1e-6)
           next = edge
       }
       if (next >= z - 1e-6)
@@ -139,8 +179,23 @@ Canvas {
       zs.push(z)
     }
 
+    // THE FOG IS PRE-MULTIPLIED INTO EVERY FILL, NOT LAID OVER THE TOP.
+    //
+    // Round three drew the whole floor and then covered it with one vertical
+    // gradient of `fogColor`. That is only correct while every surface fogs at
+    // the same rate, and road.frag no longer does: the tarmac and its kerbs
+    // take `surfaceFog` of the floor's density so the road stays legible into
+    // the distance. An overlay cannot express two rates, so each band's four
+    // colours are now blended toward `fogColor` before they are filled --
+    // which is the same arithmetic the shader does per pixel, costs no extra
+    // draw call, and removes the twelve-stop approximation of an exponential
+    // the gradient used to be.
     function fog(zz) {
       return Math.max(0, Math.min(1, Math.exp(-fogDensity * zz * zz * 0.0011)))
+    }
+    function fogSurface(zz) {
+      return Math.max(0, Math.min(1,
+        Math.exp(-fogDensity * surfaceFog * zz * zz * 0.0011)))
     }
     // The shader's smoothstep(edge0, edge1, z), written the same way round:
     // 0 at `far`, 1 at `near`, eased at both ends.
@@ -163,6 +218,30 @@ Canvas {
       ctx.fill()
     }
 
+    // ------------------------------------------------ the far side of the fog
+    //
+    // ONE BASE COAT UNDER THE WHOLE FLOOR, AND IT IS NOT DECORATION.
+    //
+    // road.frag draws a colour for every pixel below the horizon; this file
+    // draws bands, and the bands do not tile the floor exactly. Two rows are
+    // left over. Between the horizon line and the first band, z runs to
+    // infinity and the fog has closed over it entirely -- eight screen pixels
+    // at 1920x1080, measured. And a band thinner than a third of a plane pixel
+    // is skipped by the loop below, which leaves a one-plane-pixel gap in the
+    // middle distance. While there was a full-width fog gradient painted over
+    // the top of everything, both gaps were covered by it. There is not any
+    // more -- the fog is blended into each fill now, because the tarmac and
+    // the floor fog at different rates -- and without this coat the gaps show
+    // the Race screen's own background through the plane: three rows of
+    // `#09090d` straight across the frame at z = 42 on the very first frame
+    // after the gradient came out.
+    //
+    // The coat is what the fog converges to, which is what the shader arrives
+    // at in the limit, and it is one fill of the lower half of a 480 x 270
+    // plane.
+    ctx.fillStyle = fogColor
+    ctx.fillRect(0, hy, w, Math.max(0, h - hy))
+
     // ------------------------------------------------------------ the road
     for (var i = 0; i < zs.length - 1; i++) {
       var zFar = zs[i]
@@ -173,10 +252,18 @@ Canvas {
         continue
 
       var mid = (zFar + zNear) * 0.5
-      var band = Math.floor(((mid + travel) / stripe) % 2 + 2) % 2
+      // road.frag: `float band = step(0.5, fract(s / stripe));`
+      var bandPhase = ((mid + travel) / stripe) % 1
+      if (bandPhase < 0)
+        bandPhase += 1
+      var band = bandPhase >= 0.5 ? 1 : 0
+      // How much of each surface survives the dusk at this depth. The floor
+      // and the tarmac take different rates; see `fog` above.
+      var fFloor = fog(mid)
+      var fSurf = fogSurface(mid)
 
       // ground, full width, so the grid and the road sit on something
-      ctx.fillStyle = groundColor
+      ctx.fillStyle = blend(fogColor, groundColor, fFloor)
       ctx.fillRect(0, yFar, w, Math.max(1, yNear - yFar + 1))
 
       // The garage floor grid, in three octaves.
@@ -211,7 +298,7 @@ Canvas {
         if (alpha <= 0.02)
           continue
         ctx.globalAlpha = 1
-        ctx.fillStyle = blend(groundColor, gridColor, alpha)
+        ctx.fillStyle = blend(fogColor, blend(groundColor, gridColor, alpha), fFloor)
         var coarse = octaves[o].coarse
 
         // LONGITUDINAL: THE COLUMNS THAT CAN ACTUALLY LAND ON THE SCREEN.
@@ -276,7 +363,12 @@ Canvas {
           if (zLine <= zNear || zLine >= zFar)
             continue
           var yLine = vAt(zLine) * h
-          ctx.fillRect(0, yLine, w, Math.max(1, Math.min(2, (yNear - yFar) * 0.18)))
+          // One plane pixel, the same hairline the longitudinal columns get
+          // and the same width road.frag's derivative-scaled mask resolves to.
+          // This was up to two, so near the camera -- where the bands are ten
+          // plane pixels tall -- the transverse lines were drawn twice as
+          // thick as the shader's, eight screen pixels at 1920x1080.
+          ctx.fillRect(0, yLine, w, 1)
         }
         ctx.globalAlpha = 1
       }
@@ -301,16 +393,19 @@ Canvas {
       var detail = fade(mid, detailEnd, 16.0)
       var soft = 0.5 + (band - 0.5) * detail
 
-      ctx.fillStyle = blend(rumbleColor, rumbleAlt, soft)
+      ctx.fillStyle = blend(fogColor, blend(rumbleColor, rumbleAlt, soft), fSurf)
       quad(lFarOut, yFar, lFarIn, yFar, lNearIn, yNear + 1, lNearOut, yNear + 1)
       quad(rFarIn, yFar, rFarOut, yFar, rNearOut, yNear + 1, rNearIn, yNear + 1)
 
-      ctx.fillStyle = blend(roadColor, roadAlt, soft * 0.34)
+      ctx.fillStyle = blend(fogColor, blend(roadColor, roadAlt, soft * 0.34), fSurf)
       quad(lFarIn, yFar, rFarIn, yFar, rNearIn, yNear + 1, lNearIn, yNear + 1)
 
-      // lane markings: two solid inner edge lines and a dashed centre
-      ctx.globalAlpha = detail
-      ctx.fillStyle = laneColor
+      // Lane markings: two solid inner edge lines and a dashed centre. The
+      // shader mixes toward `laneColor` at 0.88 * detail and fogs the result,
+      // so compositing a fogged lane colour at that alpha over the fogged road
+      // is the same number.
+      ctx.globalAlpha = detail * 0.88
+      ctx.fillStyle = blend(fogColor, laneColor, fSurf)
       var inner = roadHalf * 0.88
       var markF = Math.max(0.5, (rFarIn - lFarIn) * 0.012)
       var markN = Math.max(0.5, (rNearIn - lNearIn) * 0.012)
@@ -318,7 +413,20 @@ Canvas {
       var eRF = uAt(inner, zFar) * w, eRN = uAt(inner, zNear) * w
       quad(eLF - markF, yFar, eLF + markF, yFar, eLN + markN, yNear + 1, eLN - markN, yNear + 1)
       quad(eRF - markF, yFar, eRF + markF, yFar, eRN + markN, yNear + 1, eRN - markN, yNear + 1)
-      if (Math.floor(((mid + travel) / (stripe * 2)) % 2 + 2) % 2 === 1) {
+      // THE DASH PITCH WAS TWICE THE SHADER'S, AND THE DUTY CYCLE WAS WRONG.
+      //
+      // road.frag: `dash = step(0.45, fract(s / (stripe * 2.0)))` -- a mark
+      // every 2.8 world units, on for 55% of it. This read
+      // `floor(((mid + travel) / (stripe * 2)) % 2) === 1`, which is a mark
+      // every 5.6 units, on for half of it: half as many dashes, each twice as
+      // long. Side by side at 480 x 270 the fallback drew a long broken line
+      // down the middle where the shader draws a dashed one, which is the sort
+      // of difference "the fallback draws the same picture" is supposed to
+      // exclude. Written the shader's way round, from the same `s`.
+      var dashPhase = ((mid + travel) / (stripe * 2)) % 1
+      if (dashPhase < 0)
+        dashPhase += 1
+      if (dashPhase >= 0.45) {
         var cF = uAt(0, zFar) * w, cN = uAt(0, zNear) * w
         quad(cF - markF, yFar, cF + markF, yFar, cN + markN, yNear + 1, cN - markN, yNear + 1)
       }
@@ -326,26 +434,8 @@ Canvas {
 
     }
 
-    // ------------------------------------------------------------- the fog
-    // One gradient rather than a translucent rectangle per band. Fog is a
-    // function of distance, distance is a function of the screen row, so it is
-    // a vertical gradient exactly -- and drawing it once instead of two dozen
-    // times is the single biggest saving in this file on a CPU renderer, and
-    // it removes the banding the per-band version had at the vanishing point.
-    var fogTop = vAt(drawDistance) * h
-    var fogBottom = h
-    if (fogBottom > fogTop + 1) {
-      var grad = ctx.createLinearGradient(0, fogTop, 0, fogBottom)
-      for (var f = 0; f <= 12; f++) {
-        var t = f / 12
-        var y = fogTop + (fogBottom - fogTop) * t
-        var alpha = 1 - fog(zAt(y / h))
-        grad.addColorStop(t, Qt.rgba(fogColor.r, fogColor.g, fogColor.b,
-                                     Math.max(0, Math.min(1, alpha))))
-      }
-      ctx.fillStyle = grad
-      ctx.fillRect(0, fogTop, w, fogBottom - fogTop)
-    }
+    // The fog is no longer a pass of its own: it is blended into every fill
+    // above, at the rate that surface takes. See the note on `fog`.
 
     // ------------------------------------------------------ the sun's foot
     // A warm ellipse spilling down from the horizon under the disc, over
