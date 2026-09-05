@@ -136,11 +136,11 @@ Item {
       "heatShimmer": camera.roadShimmer, "texelU": 1 / camera.planeW,
       "nightfall": camera.nightfall,
       "roadColor": hex(camera.roadTone), "roadAlt": hex(camera.roadToneAlt),
-      "rumbleColor": hex(Theme.hazard), "rumbleAlt": hex(Theme.cream),
+      "rumbleColor": hex(camera.rumbleTone), "rumbleAlt": hex(camera.rumbleAltTone),
       "laneColor": hex(camera.laneTone), "groundColor": hex(camera.groundTone),
-      "gridColor": hex(camera.gridTone), "fogColor": hex(camera.fogTone),
+      "gridColor": hex(camera.gridToneNow), "fogColor": hex(camera.fogTone),
       "glowColor": hex(camera.sunTone), "waterColor": hex(camera.waterTone),
-      "waterLit": hex(camera.waterLitTone)
+      "waterLit": hex(camera.waterLitTone), "shoreColor": hex(camera.shoreTone)
     }))
   }
 }
