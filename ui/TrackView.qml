@@ -4092,8 +4092,9 @@ Item {
                                            - view.kartSpriteH(zed) * view.kartRoofFraction : 0
 
       objectName: "fx.hoodSmoke"
-      x: cx - span * 0.44
-      y: Math.max(view.fxTopFor(cx, span * 0.44), cy - span * 0.86)
+      // ROUND 6: on the plane's own lattice. See `fxSnap`.
+      x: view.fxSnap(cx - span * 0.44)
+      y: view.fxSnap(Math.max(view.fxTopFor(cx, span * 0.44), cy - span * 0.86))
       width: span * 0.88
       height: span * 0.86
       z: 1000 - zed + 0.006
@@ -4145,8 +4146,9 @@ Item {
           // the top of the column against 0.34), because a dark crown that is
           // also transparent is nothing at all.
           amount: 0.95 * (1 - ph * 0.58) * Math.min(1, ph * 6)
-          x: hood.width / 2 - width / 2 + Math.sin(ph * 3.1 + index) * hood.span * 0.09
-          y: hood.height - hood.height * ph * 0.88 - height / 2
+          x: view.fxSnap(hood.width / 2 - width / 2
+                         + Math.sin(ph * 3.1 + index) * hood.span * 0.09)
+          y: view.fxSnap(hood.height - hood.height * ph * 0.88 - height / 2)
         }
       }
     }
@@ -4523,8 +4525,10 @@ Item {
     amount: view.bloomNow * 0.55
     falloff: 2.0
     readonly property real washAlpha: visible ? amount : 0
-    x: view.sunU * view.width - width / 2
-    y: view.horizon * view.height - height / 2
+    // ROUND 6: on the plane's own lattice, so the bloom's blocks line up with
+    // the sky's blocks rather than sitting half a block off them.
+    x: view.fxSnap(view.sunU * view.width - width / 2)
+    y: view.fxSnap(view.horizon * view.height - height / 2)
     z: 4
   }
 
@@ -4847,8 +4851,10 @@ Item {
       readonly property real guard: view.fxTopFor(cx, disc / 2)
 
       objectName: over ? "fx.pointFlashOver" : "fx.pointFlash"
-      x: cx - disc / 2
-      y: Math.max(guard, wantTop)
+      // ROUND 6: on the plane's own lattice, so a strike's light is made of the
+      // same blocks as the road it lands on and lines up with them.
+      x: view.fxSnap(cx - disc / 2)
+      y: view.fxSnap(Math.max(guard, wantTop))
       width: disc
       height: Math.max(0, cy + disc / 2 - y)
       z: over ? 1960 : 801

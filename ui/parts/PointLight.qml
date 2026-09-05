@@ -77,7 +77,13 @@ Item {
     anchors.centerIn: parent
     width: light.grid
     height: light.grid
-    scale: light.width > 0 ? light.width / light.grid : 1
+    // Exactly `pixel` screen pixels per drawn pixel when the grid is on, so a
+    // block of light is the same size as a block of road to the decimal (the
+    // disc's own width is then within half a road pixel of what the caller
+    // asked for, which is nothing on a soft light). Otherwise the old
+    // fixed-canvas behaviour: 256 px scaled to fit.
+    scale: light.blocky ? light.pixel
+                        : (light.width > 0 ? light.width / light.grid : 1)
     smooth: !light.blocky
     antialiasing: !light.blocky
     opacity: Math.max(0, Math.min(1, light.amount))
