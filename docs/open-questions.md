@@ -97,7 +97,9 @@ Neither of these is a bug. Both are art and motion direction, and both should
 be briefed as their own pieces with their own bars rather than folded into a
 defect round.
 
-## 4. The Pile-Up's photosensitivity margin — a decision only the maintainer can make
+## 4. The Pile-Up's photosensitivity margin — RESOLVED 2026-09-05: option 1, telegraph 900 ms
+
+**Decision (maintainer, 2026-09-05):** lengthen the telegraph to 900 ms with the two amber swings at 0 and 450 ms and the impact flash at 900, so no two whole-frame changes fall within 333 ms of each other. Applied in `docs/design.md` (Pile-Up, v4.1). The rest of this section is the record of how it was found.
 
 Raised 2026-09-05 by piece F round 3, which measured it rather than asserting
 it, and flagged it instead of acting because the remedy is a design number and
@@ -244,9 +246,7 @@ HUD, the lamp row growing hollow lamps on a hit.
 - The countdown's gantry and the race's grid floor are the Canvas versions;
   the kit's gantry and the terrain arrive with piece T and are not counted here.
 
-### 5.6 Open item 4 (the Pile-Up's flashes) still needs the maintainer's number
+### 5.6 Open item 4 (the Pile-Up's flashes) is resolved
 
-Recorded here so it is not lost behind the feedback: the maintainer's agent
-recommends option 1, lengthening the telegraph to 900 ms so the two amber swings
-sit more than 333 ms apart and the impact flash stands alone. It is the
-maintainer's call and is not applied until he says so.
+The maintainer chose option 1 on 2026-09-05: telegraph 900 ms, swings at 0 and
+450, impact at 900. Applied in the design; item 4 above records the decision.

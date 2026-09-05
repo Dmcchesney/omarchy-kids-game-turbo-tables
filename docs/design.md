@@ -292,9 +292,9 @@ The bread-and-butter attack, so it must be the clearest cause and effect in the 
 
 The one the whole room should notice.
 
-- **Telegraph 600:** the sky flashes amber twice, a shadow grows on the road ahead of the target, and a stack of tyres, barrels, and crates tumbles in from the top of the frame.
+- **Telegraph 900** (v4.1; was 600): the sky flashes amber twice, at 0 and at 450, so the two swings sit more than 333 ms apart and the impact flash at 900 stands alone; no two noticeable changes of the whole frame within 333 ms of each other, which is the 3 Hz rule read the way it is meant. Meanwhile a shadow grows on the road ahead of the target, and the kit's wreck (`pileUp`) drops in from the top of the frame.
 - **Impact:** hit-stop 120, then 300 at half speed: the target kart spins a full turn through all eight columns, stops sideways, and a smoke column rises. Every other racer's tag flashes once so the field reads the event. The minimap pulses on the victim.
-- **Aftermath:** the pile stays on the road as props until it scrolls out; the victim smokes heavily; a `+15` tag; the callout is in the large type reserved for this card.
+- **Aftermath:** the wreck stays on the road as a prop until it scrolls out; the victim smokes heavily (QML puffs); a `+15` tag; the callout is in the large type reserved for this card.
 - **Sound:** siren blip, crash with debris, a long hiss.
 
 #### Roll Cage (block next)
