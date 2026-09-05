@@ -10,6 +10,21 @@ import "../"
 // out into ambiguity. Enter cycles the value forward; Left and Right step it
 // backward and forward, which is what makes a five-option list reachable
 // without hunting.
+//
+// PIECE M -- THE WHOLE ROW IS THE TARGET, NOT ONLY THE CHIP.
+//
+// Design v4.1 names "the settings rows" among the things that must be
+// clickable, and it says rows rather than buttons for a reason a child's hand
+// makes obvious: the CHANGE chip is about 100 px wide at the right-hand edge of
+// a row 900 px long, and everything a child is looking at while they decide --
+// the icon, the word RIVALS, the value PRO -- is in the other 800. So the row
+// itself takes the click and cycles the value forward, which is what Enter on
+// the chip does; the chip is still a target of its own and still the thing that
+// lights, so what a press will do is drawn where the eye already is.
+//
+// A row that cannot change takes no click at all. TRACK, GOAL and TIMER are out
+// of the Tab chain by the rule that a stop which cannot act is a dead press,
+// and a click that does nothing is the same dead press with a mouse.
 Item {
   id: row
 
@@ -42,7 +57,22 @@ Item {
 
   readonly property Item focusItem: change
 
+  // PIECE M. The pointer is somewhere on this row, on either target.
+  readonly property bool hovered: row.changeable && (rowHit.hovered || changeHit.hovered)
+
   implicitHeight: 62
+
+  // The row's own hover wash, under everything the row draws. A rectangle at
+  // the bottom of the stacking order rather than a border, because the rows sit
+  // flush against each other in a Column and a ring around one would collide
+  // with the hairline the next row draws.
+  Rectangle {
+    anchors.fill: parent
+    anchors.topMargin: row.separator ? 1 : 0
+    radius: Theme.cornerRadiusSmall
+    visible: row.hovered
+    color: Theme.hoverFill
+  }
 
   Rectangle {
     visible: row.separator
@@ -103,7 +133,18 @@ Item {
     // still driven by `changeable`.
     activeFocusOnTab: false
 
-    Accessible.role: Accessible.Button
+    // PIECE M -- A ROW THAT CANNOT CHANGE IS NOT A BUTTON, AND SAID IT WAS.
+    //
+    // TRACK, GOAL and TIMER carried `Accessible.role: Accessible.Button` and
+    // `Accessible.focusable: false`, which is a control that announces itself as
+    // pressable and cannot be pressed or reached. Nothing noticed for five
+    // rounds; the control walk this piece is gated on noticed on its first run,
+    // because it reads the role to find controls the click list might have
+    // missed and found two "buttons" with nothing behind them. They are status
+    // readouts and now say so. The role is the only thing that changes: the
+    // name, the description, the FIXED chip and the missing focus stop were all
+    // already right.
+    Accessible.role: row.changeable ? Accessible.Button : Accessible.StaticText
     readonly property string spoken: row.spokenName.length > 0 ? row.spokenName : row.label
     Accessible.name: row.changeable ? (spoken + ", " + row.value + ", change")
                                     : (spoken + ", " + row.value + ", fixed")
@@ -136,9 +177,11 @@ Item {
       visible: row.changeable
       anchors.fill: parent
       radius: Theme.cornerRadiusSmall
-      color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      color: row.hovered
+             ? Theme.hoverFill
+             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
       border.width: 1
-      border.color: Theme.lineStrong
+      border.color: row.hovered ? Theme.hoverRing : Theme.lineStrong
     }
 
     // ROUND-4: the right rail is one line. A chip has no box, so centring its
@@ -161,6 +204,36 @@ Item {
       font.letterSpacing: 1
     }
 
-    FocusRing { on: change.activeFocus }
+    FocusRing {
+      on: change.activeFocus || row.hovered
+      hover: !change.activeFocus
+    }
+
+    Clickable {
+      id: changeHit
+      objectName: "clickSettingChange"
+      enabled: row.changeable
+      stop: row.changeable ? change : null
+      label: row.spokenName.length > 0 ? row.spokenName : row.label
+      does: "change " + (row.spokenName.length > 0 ? row.spokenName : row.label)
+      key: "Enter, or Left and Right"
+      onActed: row.stepped(1)
+    }
+  }
+
+  // The row itself, declared LAST so it is the bottom of the input stack: the
+  // CHANGE chip above it takes the presses that land on the chip, and this one
+  // takes everything else. Both call `row.stepped(1)`, which is what the chip's
+  // own Enter calls, so there is one behaviour and two places to reach it.
+  Clickable {
+    id: rowHit
+    objectName: "clickSettingRow"
+    enabled: row.changeable
+    stop: row.changeable ? change : null
+    label: (row.spokenName.length > 0 ? row.spokenName : row.label) + " row"
+    does: "change " + (row.spokenName.length > 0 ? row.spokenName : row.label)
+    key: "Enter, or Left and Right"
+    onActed: row.stepped(1)
+    z: -1
   }
 }

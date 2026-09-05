@@ -16,6 +16,20 @@ import "../../engine/engine.mjs" as Engine
 // chain through three cards would be a second way to do the same thing that a
 // child would have to discover. `selected` is what a chosen card looks like.
 //
+// PIECE M. IT IS STILL NOT A FOCUS STOP, AND IT IS NOW A CLICK TARGET.
+//
+// Those two are not in tension: `stop` is null on the target below, because the
+// key that reaches this card is `1`, `2` or `3` and not Tab, and the parity
+// table prints that key rather than pretending there is a Tab stop here. Design
+// v4.1 names "the picker's cards" among the things that must be clickable, and
+// this is the one moment of choice in the whole game -- a child looking at
+// three cards laid out in playing-card proportions, drawn to be pressed.
+//
+// The card OWNS the target rather than the picker placing one over it, so the
+// hover paint and the press are the same fact: `hovered` below is read off the
+// very MouseArea that fires `tapped`, and a card cannot light without being
+// pressable or be pressable without lighting.
+//
 // ---------------------------------------------------------------- ROUND 3
 //
 // IT IS A CARD NOW, AND IT WAS A ROW IN A LIST.
@@ -53,6 +67,12 @@ Item {
   // card's border and nothing else, so it is a breath rather than a blink and
   // nothing on the card ever changes what it says.
   property real breathe: 0
+
+  // PIECE M. A click on the card. The picker wires it to `choose(index)` and to
+  // `confirm()` for a card that is already chosen, which are the same two
+  // functions its `1 2 3` and Enter branches call.
+  signal tapped()
+  readonly property bool hovered: cardHit.hovered
 
   function px(v) { return Math.round(v * card.scaleUnit) }
 
@@ -100,24 +120,43 @@ Item {
   // word of it, which is the whole reason for drawing one.
   implicitHeight: Math.round(width * 1.4)
 
-  Accessible.role: Accessible.StaticText
+  // PIECE M: a Button, because it is one now. It was StaticText while the only
+  // way to reach it was a key the picker's own handler read, and the enumeration
+  // this piece is gated on reads Accessible.role to find controls the click
+  // walk might have missed -- so a control that has become pressable has to say
+  // so here too, or it is invisible to the very check that would catch it.
+  Accessible.role: Accessible.Button
   Accessible.name: "Card " + card.index + ", " + card.cardLabel + ", " + card.effect
                    + ", " + card.tier + (card.selected ? ", chosen" : "")
+  Accessible.description: card.selected
+                          ? "Chosen. Press it again, or Enter, to use it."
+                          : "Press it, or the " + card.index + " key, to choose it."
+  Accessible.onPressAction: card.tapped()
 
   Rectangle {
     id: face
     anchors.fill: parent
     radius: Theme.cornerRadiusSmall
-    color: card.selected ? Theme.selectedFill
-                         : Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g,
-                                   Theme.panelSunken.b, 0.96)
+    color: card.selected
+           ? Theme.selectedFill
+           : (card.hovered
+              ? Qt.rgba(Theme.panelSunken.r + Theme.hoverFill.r * 0.35,
+                        Theme.panelSunken.g + Theme.hoverFill.g * 0.35,
+                        Theme.panelSunken.b + Theme.hoverFill.b * 0.35, 0.96)
+              : Qt.rgba(Theme.panelSunken.r, Theme.panelSunken.g,
+                        Theme.panelSunken.b, 0.96))
     // The border is the rarity, at two pixels, so the three cards in a hand are
     // told apart at a glance and before any of them is read.
+    //
+    // PIECE M. Hover raises the rarity border to full rather than replacing it
+    // with the accent: the border is how a child tells three cards apart from
+    // across a room, and a pointer passing over one must not take that away.
+    // The accent ring outside the card is what says "pressable".
     border.width: card.selected ? 3 : 2
     border.color: card.selected
                   ? Theme.focusRing
                   : Qt.rgba(card.tierColor.r, card.tierColor.g, card.tierColor.b,
-                            0.50 + card.breathe * 0.45)
+                            card.hovered ? 1.0 : 0.50 + card.breathe * 0.45)
   }
 
   // ------------------------------------------------------------ the top band
@@ -241,5 +280,29 @@ Item {
     // than anything else the game prints.
     font.pixelSize: Math.max(12, Math.round(card.detailSize * 0.86))
     font.letterSpacing: 1
+  }
+
+  // PIECE M. The accent ring outside the card, so the pointer's answer to "is
+  // this pressable" is the same shape the keyboard's answer is everywhere else.
+  // It is off while the card is chosen: a chosen card already carries the
+  // accent on its own border, and two accent rings on one card is not a state.
+  FocusRing {
+    on: card.hovered && !card.selected
+    hover: true
+    radius: Theme.cornerRadiusSmall
+    wash: false
+    gap: 4
+  }
+
+  Clickable {
+    id: cardHit
+    objectName: "clickHandCard"
+    // Null on purpose: the key that reaches a card is its own number, not Tab.
+    // See the note at the top of this file.
+    stop: null
+    label: "card " + card.index + " " + card.cardLabel
+    does: card.selected ? ("use " + card.cardLabel) : ("choose " + card.cardLabel)
+    key: String(card.index) + ", then Enter"
+    onActed: card.tapped()
   }
 }

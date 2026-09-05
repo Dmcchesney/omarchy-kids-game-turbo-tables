@@ -9,6 +9,18 @@ import "../"
 // a number that runs from 1 to 99 must never need a text field -- the design
 // forbids free text anywhere in this game, and this is the control that would
 // otherwise have wanted it.
+//
+// PIECE M -- AND THE TWO ARROWS WERE ALREADY DRAWN AS BUTTONS.
+//
+// This control has looked clickable since round one: two arrow keys either side
+// of a gauge face, which is the shape of a spin box on every desktop a child
+// has ever used. It was not clickable, and design v4.1 names it first among the
+// things that must be ("including the garage's steppers and swatches"). The two
+// arrows now click, and each one emits `stepped()` with the same delta its key
+// sends -- the left arrow is Left, the right arrow is Right. The face between
+// them takes a click too, and that click only takes focus: there is no third
+// thing a stepper does, and a face that silently stepped in one direction would
+// be a control whose behaviour depends on where inside it you pressed.
 Item {
   id: stepper
 
@@ -63,9 +75,15 @@ Item {
       width: stepper.arrowWidth
       height: parent.height
       radius: Theme.cornerRadiusSmall
-      color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      // PIECE M. The arrow lights under the pointer, in the accent wash the
+      // focus ring uses, so a child sweeping across the control can see which
+      // half of it they are about to press.
+      color: leftHit.hovered
+             ? Theme.hoverFill
+             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
       border.width: 1
-      border.color: stepper.activeFocus ? Theme.lineStrong : Theme.line
+      border.color: leftHit.hovered ? Theme.hoverRing
+                                    : (stepper.activeFocus ? Theme.lineStrong : Theme.line)
 
       PixelIcon {
         anchors.centerIn: parent
@@ -73,7 +91,17 @@ Item {
         height: width
         mirror: true
         art: Glyphs.chevron
-        color: stepper.activeFocus ? Theme.accent : Theme.text
+        color: (stepper.activeFocus || leftHit.hovered) ? Theme.accent : Theme.text
+      }
+
+      Clickable {
+        id: leftHit
+        objectName: "clickStepDown"
+        stop: stepper
+        label: stepper.name + " down"
+        does: "step " + stepper.name + " back one"
+        key: "Left"
+        onActed: stepper.stepped(-1)
       }
     }
 
@@ -87,25 +115,55 @@ Item {
       valueColor: stepper.valueColor
       rivetInset: Math.max(3, Math.round(parent.height * 0.14))
       rivetSize: Math.max(1.5, parent.height * 0.045)
+
+      // The face is not a third action. Clicking it puts the keyboard on this
+      // control and stops there, which is what clicking the middle of a spin
+      // box does everywhere else; a face that stepped would make the meaning of
+      // a press depend on which pixel it landed on.
+      Clickable {
+        id: faceHit
+        objectName: "clickStepFace"
+        stop: stepper
+        label: stepper.name
+        does: "put the keyboard on " + stepper.name
+        key: "Tab"
+      }
     }
 
     Rectangle {
+      id: right
       width: stepper.arrowWidth
       height: parent.height
       radius: Theme.cornerRadiusSmall
-      color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      color: rightHit.hovered
+             ? Theme.hoverFill
+             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
       border.width: 1
-      border.color: stepper.activeFocus ? Theme.lineStrong : Theme.line
+      border.color: rightHit.hovered ? Theme.hoverRing
+                                     : (stepper.activeFocus ? Theme.lineStrong : Theme.line)
 
       PixelIcon {
         anchors.centerIn: parent
         width: Math.round(parent.height * 0.46)
         height: width
         art: Glyphs.chevron
-        color: stepper.activeFocus ? Theme.accent : Theme.text
+        color: (stepper.activeFocus || rightHit.hovered) ? Theme.accent : Theme.text
+      }
+
+      Clickable {
+        id: rightHit
+        objectName: "clickStepUp"
+        stop: stepper
+        label: stepper.name + " up"
+        does: "step " + stepper.name + " on one"
+        key: "Right"
+        onActed: stepper.stepped(1)
       }
     }
   }
 
-  FocusRing { on: stepper.activeFocus }
+  FocusRing {
+    on: stepper.activeFocus || leftHit.hovered || faceHit.hovered || rightHit.hovered
+    hover: !stepper.activeFocus
+  }
 }

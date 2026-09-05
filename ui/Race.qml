@@ -2461,6 +2461,19 @@ FocusScope {
     onCardUsed: function (index, targetId) {
       race.send({ "kind": "useCard", "index": index, "targetId": targetId })
     }
+    // PIECE M. A mouse touched the hand. Everything the digit arbitration above
+    // holds -- the deferred digit parked in the field, the provisional claim on
+    // digits the card press itself typed -- exists only because `1`, `2` and `3`
+    // are also digits, and a click is not a digit. So a click settles the
+    // ambiguity in the child's favour: the parked digit comes back out of the
+    // field (it was never handed to the engine, so nothing is lost and no
+    // streak is spent) and the provisional claim is retired. Without this, a
+    // child who typed `1` on `2 × 3` and then reached for the mouse would be
+    // left with a `1` in the answer box they never meant to send.
+    onHandTouched: {
+      race.dropPending()
+      race.takeBackProvisional()
+    }
   }
 
   // The charge sits directly above the picker's dock, so the two read as one
@@ -2501,17 +2514,132 @@ FocusScope {
   // ------------------------------------------------------------ pit crew
   // Always available, and it says so, because the design's fairness list makes
   // it a promise: "A child can never be trapped on a fact."
-  Text {
+  //
+  // PIECE M -- THE TWO THINGS THE RACE DOES THAT ARE NOT TYPING.
+  //
+  // Everything else on this screen is the fact, the field and the road. The two
+  // ACTIONS a child can take that are not an answer are the pit crew and the
+  // way out, both of them keys, and neither had anywhere to click: the maintainer
+  // could open a race with a mouse in his hand and there was not one pixel of it
+  // that did anything. They are laid out where the pit-crew line already stood
+  // and in the same quiet type -- this is the one screen where nothing may
+  // compete with the fact -- and each one calls the exact branch of `keys`
+  // above that its key calls.
+  //
+  // The hint text is unchanged. Design v4.1 asks for these to be drawn as key
+  // caps (`[H] PIT CREW · shows the answer`) and that is piece F's line to
+  // redraw; this piece gives them a target and a hover state and leaves the
+  // words where it found them.
+  Column {
     anchors.left: parent.left
     anchors.leftMargin: race.px(30)
     anchors.bottom: parent.bottom
     anchors.bottomMargin: race.px(28)
-    textFormat: Text.PlainText
-    text: "H  PIT CREW"
-    color: Theme.textLabel
-    font.family: Theme.mono
-    font.bold: true
-    font.pixelSize: race.fs(17)
-    font.letterSpacing: 2
+    spacing: race.px(6)
+
+    Item {
+      id: pitCrewHint
+      width: pitCrewText.implicitWidth + race.px(16)
+      height: pitCrewText.implicitHeight + race.px(9)
+
+      Accessible.role: Accessible.Button
+      Accessible.name: "Pit crew"
+      Accessible.description: "Shows the answer and moves on. The H key does it too."
+      Accessible.onPressAction: pitCrewHit.acted()
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Theme.cornerRadiusSmall
+        visible: pitCrewHit.hovered
+        color: Theme.hoverFill
+        border.width: 1
+        border.color: Theme.hoverRing
+      }
+
+      Text {
+        id: pitCrewText
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: "H  PIT CREW"
+        color: pitCrewHit.hovered ? Theme.textBright : Theme.textLabel
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: race.fs(17)
+        font.letterSpacing: 2
+      }
+
+      Clickable {
+        id: pitCrewHit
+        objectName: "clickPitCrew"
+        stop: null
+        label: "pit crew"
+        does: "show the answer and move on"
+        key: "H"
+        // The same three calls the `H` branch of `keys` makes, in the same
+        // order and for the same reason: the hint moves the fact on, so every
+        // claim on the old fact's field has to die with it.
+        onActed: {
+          if (!race.state)
+            return
+          race.dropPending()
+          race.clearProvisional()
+          race.send({ "kind": "hint" })
+        }
+      }
+    }
+
+    Item {
+      id: leaveHint
+      width: leaveText.implicitWidth + race.px(16)
+      height: leaveText.implicitHeight + race.px(9)
+
+      Accessible.role: Accessible.Button
+      Accessible.name: "Leave the race"
+      Accessible.description: "Back to the garage. The Escape key does it too."
+      Accessible.onPressAction: leaveHit.acted()
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Theme.cornerRadiusSmall
+        visible: leaveHit.hovered
+        color: Theme.hoverFill
+        border.width: 1
+        border.color: Theme.hoverRing
+      }
+
+      Text {
+        id: leaveText
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: "ESC  LEAVE"
+        color: leaveHit.hovered ? Theme.textBright : Theme.textLabel
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: race.fs(17)
+        font.letterSpacing: 2
+      }
+
+      Clickable {
+        id: leaveHit
+        objectName: "clickRaceLeave"
+        stop: null
+        label: "leave the race"
+        does: "go back to the garage"
+        key: "Escape"
+        // Escape's own branch, with its one meaning: back out of a card choice
+        // if there is one, and otherwise leave.
+        onActed: {
+          race.clearRevealQueue()
+          if (picker.chosen >= 0) {
+            race.dropPending()
+            race.takeBackProvisional()
+            picker.reset()
+            return
+          }
+          race.dropPending()
+          race.leaveRequested()
+        }
+      }
+    }
   }
 }

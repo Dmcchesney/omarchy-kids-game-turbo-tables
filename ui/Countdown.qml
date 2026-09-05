@@ -650,15 +650,61 @@ FocusScope {
     z: 5
   }
 
-  Text {
+  // PIECE M. The countdown's one action, and it was already printed here: the
+  // line that says ESC is now the thing you press. No new chrome and no new
+  // words -- the screen already told the child what the key was, and this makes
+  // the sentence a control.
+  //
+  // The other keys of this screen are the type-ahead digits, which belong to
+  // the answer and not to any control on it. See the report's "what is not
+  // covered": there is no on-screen keypad anywhere in this game.
+  Item {
+    id: countdownBack
     anchors.horizontalCenter: parent.horizontalCenter
-    y: countdown.height - countdown.px(56)
-    textFormat: Text.PlainText
-    text: "ESC  BACK TO THE GARAGE"
-    color: Qt.rgba(Theme.cream.r, Theme.cream.g, Theme.cream.b, 0.55)
-    font.family: Theme.mono
-    font.pixelSize: countdown.fs(16)
-    font.letterSpacing: countdown.px(2)
+    y: countdown.height - countdown.px(62)
+    width: backText.implicitWidth + countdown.px(20)
+    height: backText.implicitHeight + countdown.px(11)
     z: 5
+
+    Accessible.role: Accessible.Button
+    Accessible.name: "Back to the garage"
+    Accessible.description: "Stops the countdown. The Escape key does it too."
+    Accessible.onPressAction: backHit.acted()
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Theme.cornerRadiusSmall
+      visible: backHit.hovered
+      color: Theme.hoverFill
+      border.width: 1
+      border.color: Theme.hoverRing
+    }
+
+    Text {
+      id: backText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: "ESC  BACK TO THE GARAGE"
+      color: backHit.hovered
+             ? Theme.cream
+             : Qt.rgba(Theme.cream.r, Theme.cream.g, Theme.cream.b, 0.55)
+      font.family: Theme.mono
+      font.pixelSize: countdown.fs(16)
+      font.letterSpacing: countdown.px(2)
+    }
+
+    Clickable {
+      id: backHit
+      objectName: "clickCountdownBack"
+      stop: null
+      label: "back to the garage"
+      does: "stop the countdown and go back to the garage"
+      key: "Escape"
+      // The Escape branch, exactly: stop the beats, then say so.
+      onActed: {
+        ticker.stop()
+        countdown.abortRequested()
+      }
+    }
   }
 }

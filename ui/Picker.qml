@@ -324,6 +324,25 @@ FocusScope {
   // needs no rival.
   signal cardUsed(int index, string targetId)
 
+  // PIECE M -- THE ONE THING A MOUSE NEEDS THE HOST TO KNOW.
+  //
+  // In the game this panel never has focus: `ui/Race.qml` owns every key of the
+  // race, because only the race screen knows the expected answer and can tell a
+  // card key from a digit. That arbitration leaves state behind it -- a
+  // PROVISIONAL digit (one the card press itself put in the field) and a
+  // DEFERRED one (parked because it might be the answer to a one-digit fact) --
+  // and both exist only because `1`, `2` and `3` are also digits.
+  //
+  // A click is not a digit. It is the one press in this game with no ambiguity
+  // in it at all, so choosing a card by clicking it must clear whatever the
+  // keyboard's ambiguity left in the field, or a child who typed `1` and then
+  // reached for the mouse would leave a `1` sitting in the answer box that they
+  // never meant as an answer. This signal is how the panel says "a mouse did
+  // that": the race screen drops the parked digit and retires the provisional
+  // claim, and standing on its own in the harness nothing is listening because
+  // there is no arbitration to undo.
+  signal handTouched()
+
   visible: picker.hand.length > 0 || picker.slamming
 
   // Two invariants the previous version did not keep, and both were reachable
@@ -399,6 +418,35 @@ FocusScope {
       return
     picker.chosen = index
     picker.targetIndex = 0
+  }
+
+  // PIECE M. What a click on a card means, in one place, so the three routes
+  // into it -- the card, the harness's drive script and a screen reader's press
+  // action -- cannot drift apart.
+  //
+  // A card that is not chosen is chosen; a card that IS chosen is used. That is
+  // the keyboard's own two presses (`2`, then Enter) collapsed onto the control
+  // they are both about, and it is why the card says `USE` on its second press
+  // rather than needing a separate button somewhere else on the panel. A
+  // targeted card with nobody left to aim at cannot be used by either route --
+  // `confirm()` refuses it and the panel already prints why.
+  function tapCard(index) {
+    picker.handTouched()
+    if (picker.chosen === index) {
+      picker.confirm()
+      return
+    }
+    picker.choose(index)
+  }
+
+  // Clicking a rival is the Left/Right arrow landing on that rival, and nothing
+  // more: it aims, it does not fire. Firing is the card's second press, which
+  // is where the keyboard fires from too.
+  function tapRival(index) {
+    if (!picker.targeting || index < 0 || index >= picker.rivals.length)
+      return
+    picker.handTouched()
+    picker.targetIndex = index
   }
 
   function stepTarget(delta) {
@@ -602,6 +650,17 @@ FocusScope {
             detailSize: picker.fsFloor(14, 13)
             breathe: picker.breathe
 
+            // PIECE M. Choose it, or -- if it is already chosen -- use it. The
+            // click goes through `tapCard`, which calls the panel's own
+            // `choose` and `confirm`: the same two functions `ui/Race.qml`
+            // calls for the `1 2 3` keys and for Enter.
+            //
+            // Dead while the hand is flying off. `shownHand` keeps drawing the
+            // spent cards for 570 ms so the slam has something to draw, and a
+            // click on a card that has already been played would be a press
+            // with no rule behind it.
+            onTapped: if (!picker.slamming) picker.tapCard(cardSlot.slot)
+
             // The deal: up from the bottom right.
             y: picker.reducedMotion ? 0
                : (1 - CardFx.easeOut(cardSlot.dealU)) * picker.dockWidth * 0.30
@@ -684,15 +743,19 @@ FocusScope {
               model: picker.rivals
 
               Rectangle {
+                id: aimTile
                 readonly property bool aimed: picker.targeting && picker.targetIndex === model.index
                 width: Math.floor((targetColumn.width - picker.px(8) * Math.max(0, picker.rivals.length - 1))
                                   / Math.max(1, picker.rivals.length))
                 height: picker.px(46)
                 radius: Theme.cornerRadiusSmall
                 color: aimed ? Theme.selectedFill
-                             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.06)
+                             : (aimHit.hovered
+                                ? Theme.hoverFill
+                                : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.06))
                 border.width: aimed ? 2 : 1
-                border.color: aimed ? Theme.focusRing : Theme.line
+                border.color: aimed ? Theme.focusRing
+                                    : (aimHit.hovered ? Theme.hoverRing : Theme.line)
 
                 Text {
                   anchors.centerIn: parent
@@ -705,6 +768,31 @@ FocusScope {
                   font.bold: true
                   font.pixelSize: picker.fsFloor(16, 14)
                   font.letterSpacing: picker.px(1)
+                }
+
+                // PIECE M. Design v4.1: "a rival's kart tag as a target". This
+                // is that tag -- the rival's name, in the panel, in the moment
+                // the game asks a child who to aim at -- and it is the only
+                // place in the running game where the question is put. The
+                // rival tags `ui/TrackView.qml` draws on the road belong to
+                // piece T this round and are not touched here; the aim is
+                // reachable by mouse in the panel that asks for it, which is
+                // where the arrow keys reach it too.
+                Accessible.role: Accessible.Button
+                Accessible.name: "Aim at " + String(modelData.name)
+                    + (aimTile.aimed ? ", aimed" : "")
+                Accessible.description: "Left and right pick a rival. Then use the card."
+                Accessible.onPressAction: picker.tapRival(model.index)
+
+                Clickable {
+                  id: aimHit
+                  objectName: "clickAimRival"
+                  enabled: picker.targeting
+                  stop: null
+                  label: "aim " + String(modelData.name)
+                  does: "aim at " + String(modelData.name)
+                  key: "Left, Right"
+                  onActed: picker.tapRival(model.index)
                 }
               }
             }

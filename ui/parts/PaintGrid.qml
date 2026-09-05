@@ -57,19 +57,51 @@ Item {
     model: grid.count
 
     Item {
+      id: cell
       x: (index % grid.columns) * (grid.cellW + grid.gap)
       y: Math.floor(index / grid.columns) * (grid.cellH + grid.gap)
       width: grid.cellW
       height: grid.cellH
 
+      // PIECE M. A swatch is the one control in this game that is nothing but
+      // colour, so its hover state may not be a colour: it is a white rim, one
+      // step lighter than nothing and two steps below the chosen swatch's own
+      // 3 px white ring, plus the accent ring outside the cell. The same rule
+      // the tick below is drawn for -- "every state has shape or text as well
+      // as colour" -- applies to the pointer as much as to the choice.
+      readonly property bool hovered: swatchHit.hovered
+
       Rectangle {
         anchors.fill: parent
         radius: Theme.cornerRadiusSmall
         color: Theme.paint(index)
-        border.width: index === grid.selected ? 3 : 1
+        border.width: index === grid.selected ? 3 : (cell.hovered ? 2 : 1)
         border.color: index === grid.selected
                       ? "#ffffff"
-                      : Qt.rgba(0, 0, 0, 0.55)
+                      : (cell.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(0, 0, 0, 0.55))
+      }
+
+      Rectangle {
+        visible: cell.hovered && index !== grid.selected
+        anchors.fill: parent
+        anchors.margins: -3
+        radius: Theme.cornerRadiusSmall + 2
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.hoverRing
+      }
+
+      // The click is the arrow key's own `picked`, not a second way to choose:
+      // `move(delta)` emits exactly this signal, so the kart changes colour on
+      // a click for the same reason and by the same route it changes on Right.
+      Clickable {
+        id: swatchHit
+        objectName: "clickPaint"
+        stop: grid
+        label: "paint " + Theme.paintName(index)
+        does: "paint the kart " + Theme.paintName(index)
+        key: "Left, Right"
+        onActed: grid.picked(index)
       }
 
       // The tick: a shape, so the chosen paint is not signalled by colour

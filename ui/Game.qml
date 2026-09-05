@@ -1,4 +1,5 @@
 import QtQuick
+import "parts"
 
 // The flow. One screen at a time, and the only file that decides which.
 //
@@ -543,52 +544,94 @@ FocusScope {
   // another builder's and frozen this round -- see the note at the top. A key
   // a child cannot find is not a door, so as long as the flow owns the key it
   // owns saying what the key is.
-  Row {
+  // PIECE M -- AND THIS WAS THE ONLY DOOR TO SETTINGS IN THE WHOLE GAME.
+  //
+  // `S` is the one key this file owns, and until now it was the ONLY way to
+  // reach the settings screen and the three save-file resets from anywhere.
+  // With no mouse anywhere in `ui/`, that made the resets keyboard-only -- which
+  // is the same shape of defect as round two's, where they were named to nobody
+  // and were therefore as unreachable for a screen-reader user as they had been
+  // for everybody. A parent who opens this game with a mouse in their hand and
+  // wants to clear a leaderboard could not get there.
+  //
+  // The keycap and its caption are unchanged, still not a Tab stop for the
+  // reason below, and now a button: the click calls `game.openSettings()`,
+  // which is what the `S` branch of `Keys.onPressed` calls.
+  Item {
     id: settingsHint
     visible: game.screen === "garage"
 
-    // Named, so the door is a door for a screen reader too. It is a readout and
-    // not a stop in the Tab chain: `S` works from every one of the garage's
-    // eight stops, so putting a ninth stop in front of the child would add a Tab
-    // press to reach the race and change nothing about who can find the key.
-    Accessible.role: Accessible.StaticText
+    // Named, so the door is a door for a screen reader too. It is not a stop in
+    // the Tab chain: `S` works from every one of the garage's eight stops, so
+    // putting a ninth stop in front of the child would add a Tab press to reach
+    // the race and change nothing about who can find the key.
+    Accessible.role: Accessible.Button
     Accessible.name: "S, settings and resets"
     Accessible.description: "Press S to open settings, where sound, motion, the rival level and the three resets are."
+    Accessible.onPressAction: settingsHit.acted()
     anchors.horizontalCenter: parent.horizontalCenter
-    y: game.px(38) + Math.round((game.px(80) - height) / 2)
-    spacing: game.px(9)
+    y: game.px(38) + Math.round((game.px(80) - hintRow.height) / 2)
+    width: hintRow.width + game.px(18)
+    height: hintRow.height + game.px(12)
 
     Rectangle {
-      anchors.verticalCenter: parent.verticalCenter
-      width: hintKey.implicitWidth + game.px(15)
-      height: game.px(28)
+      anchors.fill: parent
       radius: Theme.cornerRadiusSmall
-      color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.07)
+      visible: settingsHit.hovered
+      color: Theme.hoverFill
       border.width: 1
-      border.color: Theme.lineStrong
+      border.color: Theme.hoverRing
+    }
+
+    Row {
+      id: hintRow
+      anchors.centerIn: parent
+      spacing: game.px(9)
+
+      Rectangle {
+        anchors.verticalCenter: parent.verticalCenter
+        width: hintKey.implicitWidth + game.px(15)
+        height: game.px(28)
+        radius: Theme.cornerRadiusSmall
+        color: settingsHit.hovered
+               ? Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.18)
+               : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.07)
+        border.width: 1
+        border.color: settingsHit.hovered ? Theme.hoverRing : Theme.lineStrong
+
+        Text {
+          id: hintKey
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: "S"
+          color: settingsHit.hovered ? Theme.textBright : Theme.text
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: Math.max(13, game.fs(17))
+          font.letterSpacing: game.px(1)
+        }
+      }
 
       Text {
-        id: hintKey
-        anchors.centerIn: parent
+        anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
-        text: "S"
-        color: Theme.text
+        text: "SETTINGS AND RESETS"
+        color: settingsHit.hovered ? Theme.textBright : Theme.textLabel
         font.family: Theme.mono
         font.bold: true
         font.pixelSize: Math.max(13, game.fs(17))
-        font.letterSpacing: game.px(1)
+        font.letterSpacing: game.px(2)
       }
     }
 
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      textFormat: Text.PlainText
-      text: "SETTINGS AND RESETS"
-      color: Theme.textLabel
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: Math.max(13, game.fs(17))
-      font.letterSpacing: game.px(2)
+    Clickable {
+      id: settingsHit
+      objectName: "clickSettingsDoor"
+      stop: null
+      label: "settings and resets"
+      does: "open settings and the three resets"
+      key: "S"
+      onActed: game.openSettings()
     }
   }
 }

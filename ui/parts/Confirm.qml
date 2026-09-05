@@ -129,14 +129,18 @@ FocusScope {
                    { index: 1, label: confirm.confirmLabel, tone: Theme.urgent } ]
 
           Rectangle {
+            id: answer
             readonly property bool chosen: confirm.choice === modelData.index
             width: confirm.px(240)
             height: confirm.px(64)
             radius: Theme.cornerRadiusSmall
             color: chosen ? Qt.rgba(modelData.tone.r, modelData.tone.g, modelData.tone.b, 0.22)
-                          : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.06)
+                          : (answerHit.hovered
+                             ? Theme.hoverFill
+                             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.06))
             border.width: chosen ? 2 : 1
-            border.color: chosen ? Theme.focusRing : Theme.lineStrong
+            border.color: chosen ? Theme.focusRing
+                                 : (answerHit.hovered ? Theme.hoverRing : Theme.lineStrong)
 
             Text {
               anchors.centerIn: parent
@@ -149,6 +153,36 @@ FocusScope {
               font.bold: true
               font.pixelSize: confirm.fs(24)
               font.letterSpacing: confirm.px(2)
+            }
+
+            // PIECE M -- A CLICK ON AN ANSWER IS THE ANSWER, AND ONLY ITS OWN.
+            //
+            // The keyboard reaches this dialog in two presses: an arrow to arm
+            // the answer, then Enter to give it. A click is one press, and the
+            // one press has to be unambiguous, so it arms the answer it landed
+            // on and gives THAT one. It cannot give the other. Round-one
+            // thinking here was to have a click arm and a second click confirm,
+            // which is the shape every child has learned means "this is a
+            // button that needs pressing twice" and is the shape nothing else
+            // in this game has.
+            //
+            // This is the one modal in the game and there is no undo behind it,
+            // so the safe answer is on the left, is where the selection starts,
+            // and is where the pointer's own reading order lands first.
+            Clickable {
+              id: answerHit
+              objectName: "clickConfirmAnswer"
+              stop: confirm
+              label: modelData.label
+              does: "answer " + modelData.label
+              key: "Left, Right, then Enter"
+              onActed: {
+                confirm.choice = modelData.index
+                if (modelData.index === 1)
+                  confirm.confirmed()
+                else
+                  confirm.cancelled()
+              }
             }
           }
         }

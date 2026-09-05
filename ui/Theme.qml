@@ -307,6 +307,45 @@ QtObject {
   readonly property color focusFill: Qt.rgba(accent.r, accent.g, accent.b, 0.14)
   readonly property color selectedFill: Qt.rgba(accent.r, accent.g, accent.b, 0.20)
 
+  // PIECE M -- WHAT A CONTROL LOOKS LIKE UNDER THE POINTER.
+  //
+  // The mouse needs an answer to a question the keyboard never asks: "is the
+  // thing under the pointer a control at all?" A child moving a mouse across
+  // this game has to be able to find that out BEFORE pressing, so every click
+  // target lights while the pointer is over it.
+  //
+  // It is the accent, because that is what the rest of the game already means
+  // by "the thing you are on" -- the focus ring is `accent` and so is the
+  // selection fill -- and it is deliberately WEAKER than both: hover is a
+  // pointer passing over, focus is where the keyboard stands, and if the two
+  // read the same then moving a mouse across a screen looks like eight
+  // controls all being focused at once. Half the ring's alpha and two thirds
+  // of the fill's, measured to sit between "nothing" and the focus ring rather
+  // than beside either.
+  readonly property color hoverRing: Qt.rgba(accent.r, accent.g, accent.b, 0.52)
+  readonly property color hoverFill: Qt.rgba(accent.r, accent.g, accent.b, 0.09)
+
+  // PIECE M -- `panel` AT 0.55 OVER `ground`, ALREADY COMPOSED.
+  //
+  // Settings and Results each stand one Panel across the whole window at
+  // `Qt.rgba(panel.r, panel.g, panel.b, 0.55)`, over a Rectangle filled with
+  // `ground` and nothing else. At 1080p that is a 1888 x 1048 per-pixel alpha
+  // blend, every frame, to produce a colour that never varies -- the backdrop
+  // under it is a constant, so the composite is a constant too.
+  //
+  // This is that constant: source-over of `panel` at 0.55 onto an opaque
+  // `ground`, which for an opaque backdrop is exactly
+  // `src * a + dst * (1 - a)` per channel. It is written here rather than as a
+  // literal at the two call sites so a retinted desktop moves it with the rest
+  // of the theme, and so the arithmetic exists once.
+  //
+  // It is NOT a general-purpose role: it is only the same pixels while the
+  // thing underneath is `ground`. Both callers fill their root with `ground`
+  // and draw nothing between; anything else has to compose its own.
+  readonly property color panelOnGround: Qt.rgba(panel.r * 0.55 + ground.r * 0.45,
+                                                 panel.g * 0.55 + ground.g * 0.45,
+                                                 panel.b * 0.55 + ground.b * 0.45, 1)
+
   readonly property int cornerRadius: Math.max(10, shellCornerRadius)
   readonly property int cornerRadiusSmall: Math.max(6, shellCornerRadius)
 

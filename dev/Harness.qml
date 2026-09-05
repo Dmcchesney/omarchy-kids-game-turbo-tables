@@ -141,6 +141,71 @@ import "../ui/parts"
 //                       the glyphs taken out, so a contrast figure is read
 //                       off the shipped picture instead of off an assumption
 //                       about which surface a string happens to sit on.
+//
+// ------------------------------------------------------------------ PIECE M
+//
+// THE MOUSE SIDE, AND WHY IT IS THE SYMMETRIC THING TO --focus.
+//
+// `--focus n` presses Tab n times and `--print-focus` prints every focus stop:
+// between them, the keyboard half of every screen has been inspectable since
+// round one. There was no click half, because until this piece there was
+// nothing to inspect -- no screen under `ui/` had a `MouseArea`, a `TapHandler`
+// or a `HoverHandler` anywhere.
+//
+//   --print-controls    WALK the loaded screen and print the parity table, then
+//                       quit. Three tables, all of them GENERATED FROM THE ITEM
+//                       TREE rather than typed by anybody:
+//
+//                         click   every click target in the tree, found by its
+//                                 `isClickTarget` duck-type (`ui/parts/
+//                                 Clickable.qml` is the only thing in `ui/`
+//                                 that carries it and the only thing in `ui/`
+//                                 that declares a mouse handler at all), with
+//                                 its box, what one click does, and THE KEY
+//                                 THAT DOES THE SAME THING.
+//                         control every item in the tree whose `Accessible.role`
+//                                 says it is a control -- Button, SpinBox,
+//                                 ComboBox, CheckBox, RadioButton, Slider --
+//                                 and whether a click target was found inside
+//                                 it. This is the independent oracle: it does
+//                                 not consult the click list, so a control that
+//                                 exists and was forgotten shows up as a `NO`
+//                                 rather than as an absence nobody notices.
+//                         stop    the screen's own `stops` list -- the very
+//                                 array its Tab handler walks -- and whether
+//                                 each stop has a click target under it.
+//
+//                       Then one `parity` line per direction, and a non-zero
+//                       exit when either fails: a click target with no key
+//                       behind it is a mouse-only path, and a control or a stop
+//                       with no click target is a keyboard-only one. The design
+//                       forbids both.
+//
+//   --do <step>,...     DRIVE the screen with real synthetic input, in order.
+//                       Steps:
+//
+//                         click:<text>  left-click the centre of the click
+//                                       target whose label contains <text>,
+//                                       case-insensitively
+//                         hover:<text>  move the pointer onto it and leave it
+//                                       there
+//                         key:<name>    press a key: tab, backtab, up, down,
+//                                       left, right, enter, space, esc,
+//                                       backspace, a single letter, a digit
+//                         wait          let the event loop turn once
+//
+//                       The events are real `QMouseEvent`s and `QKeyEvent`s
+//                       posted into the window (see `dev/Pointer.qml`), not
+//                       handler calls. A run prints `do:` for every step and
+//                       `do kinds:` for the SET of step kinds it used, so a run
+//                       that claims to be "clicks alone" can be read as such off
+//                       its own output rather than off the command line.
+//
+//                       `--do ... --dump-text` is how the two drives are
+//                       compared: the text dump is every visible string on the
+//                       screen with its box, its colour and its size, so two
+//                       drives that reached the same state produce byte-
+//                       identical dumps and two that did not, do not.
 Window {
   id: harness
 
@@ -196,6 +261,11 @@ Window {
   readonly property bool dumpRects: flag("dump-rects")
   readonly property bool hideText: flag("hide-text")
   readonly property int warmup: parseInt(argument("warmup", "0"), 10)
+
+  // ---------------------------------------------------------------- piece M
+  readonly property bool printControls: flag("print-controls")
+  readonly property string doArg: argument("do", "")
+  readonly property bool driving: doArg.length > 0
 
   // ---------------------------------------------------------------- piece F
   readonly property string injectArg: argument("inject", "")
@@ -323,6 +393,305 @@ Window {
       if (harness.isText(item))
         item.color = "transparent"
     })
+  }
+
+  // ========================================================================
+  // PIECE M -- THE CONTROL WALK.
+  // ========================================================================
+  //
+  // The whole point of this section is that NOTHING in it is a list somebody
+  // maintains. Every row of every table below comes out of the same depth-first
+  // walk `--dump-text` and `--dump-rects` use, on the live tree, so a control
+  // added tomorrow appears without anybody remembering to add it, and a control
+  // that was forgotten today appears as a failing row rather than as a silence.
+
+  /** A click target: `ui/parts/Clickable.qml` and nothing else carries this. */
+  function isClickTarget(item) {
+    return item !== null && item.isClickTarget === true
+  }
+
+  /**
+   * The `Accessible.role` of an item, as a number, or -1 when it has no
+   * Accessible attached object. Reading an attached property that was never
+   * declared throws in some Qt builds and returns undefined in others, so it is
+   * asked for exactly once, here, behind a try.
+   */
+  function roleOf(item) {
+    try {
+      var role = item.Accessible.role
+      return role === undefined ? -1 : role
+    } catch (error) {
+      return -1
+    }
+  }
+
+  function accessibleName(item) {
+    try {
+      var name = item.Accessible.name
+      return name === undefined ? "" : String(name)
+    } catch (error) {
+      return ""
+    }
+  }
+
+  /**
+   * Does this item's Accessible role declare it a CONTROL -- something a child
+   * or a screen reader can act on -- as opposed to a pane, a grouping or a
+   * label? This is the independent oracle for the key -> click direction: it
+   * knows nothing about click targets, so it cannot be satisfied by the same
+   * mistake that would hide one.
+   */
+  function isDeclaredControl(item) {
+    var role = harness.roleOf(item)
+    return role === Accessible.Button || role === Accessible.SpinBox
+           || role === Accessible.ComboBox || role === Accessible.CheckBox
+           || role === Accessible.RadioButton || role === Accessible.Slider
+  }
+
+  /** Is a click target anywhere under this item, and enabled? */
+  function clickTargetUnder(item) {
+    var found = null
+    harness.walk(item, function (node) {
+      if (found === null && harness.isClickTarget(node) && node.enabled
+          && harness.effectiveOpacity(node) > 0)
+        found = node
+    })
+    return found
+  }
+
+  /** The centre of an item, in the window's own coordinates. */
+  function centreOf(item) {
+    var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
+    return Qt.point(Math.round(box.x + box.width / 2),
+                    Math.round(box.y + box.height / 2))
+  }
+
+  function runControlWalk() {
+    var screen = screenLoader.item
+    if (!screen) {
+      console.log("controls: no screen")
+      Qt.exit(3)
+      return
+    }
+
+    // ------------------------------------------------- click -> key
+    var clicks = []
+    harness.walk(screen, function (item) {
+      if (harness.isClickTarget(item))
+        clicks.push(item)
+    })
+
+    var mouseOnly = 0
+    console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey")
+    for (var i = 0; i < clicks.length; i++) {
+      var hit = clicks[i]
+      var box = hit.mapToItem(harness.contentItem, 0, 0, hit.width, hit.height)
+      var live = hit.enabled && harness.effectiveOpacity(hit) > 0
+      // A target that is not drawn at all is not a path either way; a DRAWN,
+      // ENABLED target with no key behind it is a mouse-only path.
+      if (live && String(hit.key).length === 0)
+        mouseOnly += 1
+      console.log("click\t" + hit.label + "\t" + Math.round(box.x) + "\t"
+                  + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
+                  + Math.round(box.height) + "\t" + (live ? "yes" : "no")
+                  + "\t" + hit.does + "\t" + (String(hit.key).length > 0 ? hit.key : "NONE"))
+    }
+
+    // ------------------------------------------------- key -> click, oracle 1
+    // Every item that DECLARES itself a control to a screen reader.
+    var keyOnly = 0
+    var controls = 0
+    console.log("control\tname\tx\ty\tw\th\thasClick")
+    harness.walk(screen, function (item) {
+      if (!harness.isDeclaredControl(item))
+        return
+      if (harness.effectiveOpacity(item) <= 0)
+        return
+      controls += 1
+      var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
+      var hit = harness.clickTargetUnder(item)
+      if (!hit)
+        keyOnly += 1
+      console.log("control\t" + harness.accessibleName(item) + "\t"
+                  + Math.round(box.x) + "\t" + Math.round(box.y) + "\t"
+                  + Math.round(box.width) + "\t" + Math.round(box.height) + "\t"
+                  + (hit ? "yes" : "NO"))
+    })
+
+    // ------------------------------------------------- key -> click, oracle 2
+    // The screen's OWN `stops` array -- the one its Tab handler walks. Where a
+    // screen keeps one, this is the exact definition of "what the keyboard can
+    // reach by Tab", so a stop with no click target under it is a Tab stop the
+    // mouse cannot get to.
+    var stopsWithoutClick = 0
+    var stopCount = 0
+    if (screen.stops !== undefined && screen.stops !== null) {
+      console.log("stop\tindex\tname\thasClick")
+      for (var s = 0; s < screen.stops.length; s++) {
+        var stop = screen.stops[s]
+        stopCount += 1
+        var stopHit = stop ? harness.clickTargetUnder(stop) : null
+        if (!stopHit)
+          stopsWithoutClick += 1
+        console.log("stop\t" + s + "\t"
+                    + (typeof screen.focusName === "function" ? screen.focusName(s)
+                                                             : harness.accessibleName(stop))
+                    + "\t" + (stopHit ? "yes" : "NO"))
+      }
+    }
+
+    console.log("parity\tscreen\t" + harness.screenName)
+    console.log("parity\tclickTargets\t" + clicks.length)
+    console.log("parity\tdeclaredControls\t" + controls)
+    console.log("parity\tfocusStops\t" + stopCount)
+    console.log("parity\tmouseOnly\t" + mouseOnly)
+    console.log("parity\tcontrolsWithoutClick\t" + keyOnly)
+    console.log("parity\tstopsWithoutClick\t" + stopsWithoutClick)
+    var bad = mouseOnly + keyOnly + stopsWithoutClick
+    console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
+    Qt.exit(bad === 0 ? 0 : 1)
+  }
+
+  // ========================================================================
+  // PIECE M -- THE DRIVE.
+  // ========================================================================
+
+  /** Every click target on the screen, drawn or not, in walk order. */
+  function allClickTargets() {
+    var found = []
+    harness.walk(screenLoader.item, function (item) {
+      if (harness.isClickTarget(item))
+        found.push(item)
+    })
+    return found
+  }
+
+  /**
+   * The first drawn, enabled click target whose label contains `text`. Matching
+   * on the label rather than on an index means a drive script says what it is
+   * pressing -- `click:ready up` -- and stops working rather than pressing the
+   * wrong thing if the screen is reordered.
+   */
+  function findClickTarget(text) {
+    var wanted = String(text).toLowerCase()
+    var targets = harness.allClickTargets()
+    for (var i = 0; i < targets.length; i++) {
+      var hit = targets[i]
+      if (!hit.enabled || harness.effectiveOpacity(hit) <= 0)
+        continue
+      if (String(hit.label).toLowerCase().indexOf(wanted) >= 0)
+        return hit
+    }
+    return null
+  }
+
+  readonly property var keyCodes: ({
+    "tab": Qt.Key_Tab, "backtab": Qt.Key_Backtab, "up": Qt.Key_Up,
+    "down": Qt.Key_Down, "left": Qt.Key_Left, "right": Qt.Key_Right,
+    "enter": Qt.Key_Return, "return": Qt.Key_Return, "space": Qt.Key_Space,
+    "esc": Qt.Key_Escape, "escape": Qt.Key_Escape, "backspace": Qt.Key_Backspace
+  })
+
+  function keyCodeFor(name) {
+    var key = String(name).toLowerCase()
+    if (harness.keyCodes.hasOwnProperty(key))
+      return harness.keyCodes[key]
+    if (key.length === 1 && key >= "0" && key <= "9")
+      return Qt.Key_0 + (key.charCodeAt(0) - 48)
+    if (key.length === 1 && key >= "a" && key <= "z")
+      return Qt.Key_A + (key.charCodeAt(0) - 97)
+    return -1
+  }
+
+  property var driveSteps: []
+  property int driveIndex: 0
+  property var driveKinds: []
+
+  function driveBegin() {
+    harness.driveSteps = harness.doArg.split(",")
+    harness.driveIndex = 0
+    harness.driveKinds = []
+    pointerLoader.active = true
+    driveNext.restart()
+  }
+
+  function driveStep() {
+    if (harness.driveIndex >= harness.driveSteps.length) {
+      // The SET of step kinds this run used, printed by the run itself. A drive
+      // that claims to be clicks alone is read off this line.
+      console.log("do kinds:\t" + harness.driveKinds.join(" "))
+      harness.driveFinish()
+      return
+    }
+    var raw = String(harness.driveSteps[harness.driveIndex]).trim()
+    harness.driveIndex += 1
+    var colon = raw.indexOf(":")
+    var kind = colon < 0 ? raw : raw.substring(0, colon)
+    var value = colon < 0 ? "" : raw.substring(colon + 1)
+    if (harness.driveKinds.indexOf(kind) < 0) {
+      var kinds = harness.driveKinds.slice()
+      kinds.push(kind)
+      harness.driveKinds = kinds
+    }
+
+    var pointer = pointerLoader.item
+    if (kind === "click" || kind === "hover") {
+      var hit = harness.findClickTarget(value)
+      if (!hit) {
+        console.log("do: " + raw + " -> NO SUCH CLICK TARGET")
+        Qt.exit(4)
+        return
+      }
+      var at = harness.centreOf(hit)
+      if (kind === "click")
+        pointer.clickAt(at.x, at.y)
+      else
+        pointer.moveTo(at.x, at.y)
+      console.log("do: " + raw + " -> " + hit.label + " at " + at.x + "," + at.y)
+    } else if (kind === "key") {
+      var code = harness.keyCodeFor(value)
+      if (code < 0) {
+        console.log("do: " + raw + " -> NO SUCH KEY")
+        Qt.exit(4)
+        return
+      }
+      pointer.pressKey(code, Qt.NoModifier)
+      console.log("do: " + raw)
+    } else if (kind === "wait") {
+      console.log("do: wait")
+    } else {
+      console.log("do: " + raw + " -> NO SUCH STEP")
+      Qt.exit(4)
+      return
+    }
+    driveNext.restart()
+  }
+
+  function driveFinish() {
+    var screen = screenLoader.item
+    if (screen && typeof screen.focusedName === "function")
+      console.log("do focus:\t" + screen.focusedName())
+    if (harness.dumpText || harness.dumpRects)
+      harness.runDump()
+    if (harness.shotPath.length > 0) {
+      settle.start()
+      return
+    }
+    Qt.exit(0)
+  }
+
+  Loader {
+    id: pointerLoader
+    active: false
+    sourceComponent: Pointer { root: harness.contentItem }
+  }
+
+  Timer {
+    id: driveNext
+    // One turn of the event loop between steps, so a binding the last step
+    // changed has been evaluated before the next one reads a geometry off it.
+    interval: 16
+    onTriggered: harness.driveStep()
   }
 
   // A fixed field for a bare TrackView: the child's car from the seeded
@@ -650,6 +1019,19 @@ Window {
       harness.applySession()
       if (harness.hideText)
         harness.applyHideText()
+
+      // PIECE M. The control walk and the drive both come BEFORE the dump: the
+      // walk quits on its own, and a drive's dump has to be taken after the
+      // drive has finished rather than before it started.
+      if (harness.printControls) {
+        harness.runControlWalk()
+        return
+      }
+      if (harness.driving) {
+        harness.driveBegin()
+        return
+      }
+
       if (harness.dumpText || harness.dumpRects) {
         harness.runDump()
         // In strip mode the dump is per FRAME, below, so the run carries on.

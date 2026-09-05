@@ -4,9 +4,14 @@ import "../"
 // The three large controls at the bottom right: READY UP, LEAVE, and the
 // RACE A FRIEND sign that stands where the mock's friend badges were.
 //
-// No mouse handler anywhere in it -- Enter and Space are the whole interface,
-// which is also what makes the screen-reader name the only label a control
-// needs.
+// PIECE M. Enter and Space were once the whole interface of this control, and
+// that sentence stood at the top of this file for four rounds while the
+// maintainer told us twice that clicking things did nothing. A click is now the
+// third way in and it is the SAME way: `hit.acted()` calls `activated()`, which
+// is the exact signal the Enter branch below emits. The sign variant takes no
+// click, because it takes no key either -- it is out of the Tab chain on
+// purpose and a control a child can press but that cannot act is worse than one
+// they cannot press.
 //
 // Three weights, because the round-one screen gave READY UP and LEAVE the
 // same treatment and left a child scanning two equal buttons, one of which
@@ -55,6 +60,10 @@ Item {
   property color offTone: Theme.textDisabled
 
   signal activated()
+
+  // PIECE M. Is the pointer on it? Read off the one click target below, so the
+  // hover paint and the click are the same fact and cannot disagree.
+  readonly property bool hovered: hit.hovered && button.focusable
 
   readonly property color toneColor: tone === "go" ? button.goTone
                                                    : tone === "quit" ? Theme.urgent
@@ -106,17 +115,25 @@ Item {
     id: face
     anchors.fill: parent
     radius: Theme.cornerRadius
+    // PIECE M. Hover is a step, not a jump: the primary's fill brightens by
+    // half what focus brightens it by, and the secondary's outline goes from
+    // 0.55 of its tone to 0.85. Focus still wins where both are true, so a
+    // pointer resting on the control the keyboard is already standing on does
+    // not invent a third look.
     color: button.sign
            ? Qt.rgba(button.surface.r, button.surface.g, button.surface.b, 0.85)
            : button.primary
-             ? (button.activeFocus ? Qt.lighter(button.fillColor, 1.22) : button.fillColor)
+             ? (button.activeFocus ? Qt.lighter(button.fillColor, 1.22)
+                                   : (button.hovered ? Qt.lighter(button.fillColor, 1.11)
+                                                     : button.fillColor))
              : Qt.rgba(button.toneColor.r * 0.20, button.toneColor.g * 0.20,
-                       button.toneColor.b * 0.20, 0.75)
+                       button.toneColor.b * 0.20, button.hovered ? 0.88 : 0.75)
     border.width: button.sign ? 0 : (button.primary ? (button.activeFocus ? 4 : 3) : 1)
     border.color: button.primary
                   ? (button.activeFocus ? Theme.focusRing
                                         : Qt.lighter(button.toneColor, 1.25))
-                  : Qt.rgba(button.toneColor.r, button.toneColor.g, button.toneColor.b, 0.55)
+                  : Qt.rgba(button.toneColor.r, button.toneColor.g, button.toneColor.b,
+                            button.hovered ? 0.85 : 0.55)
   }
 
   // ROUND-4: the sign is a tile.
@@ -268,12 +285,27 @@ Item {
   }
 
   FocusRing {
-    on: button.activeFocus
+    on: button.activeFocus || button.hovered
+    hover: !button.activeFocus
     radius: Theme.cornerRadius
     // The primary control never takes the accent wash: a translucent film
     // over a filled block is exactly the "focus dims it" fault this replaces.
     wash: !button.primary
     thickness: button.primary ? 3 : 2
     gap: button.primary ? 5 : 3
+  }
+
+  // PIECE M. The click target, last so it is over everything this control
+  // draws. It is absent from the sign variant by the same rule that keeps the
+  // sign out of the Tab chain: nothing a child can press may fail to act.
+  Clickable {
+    id: hit
+    objectName: "clickAction"
+    enabled: button.focusable
+    stop: button.focusable ? button : null
+    label: button.label
+    does: "press " + button.label
+    key: "Enter or Space"
+    onActed: button.activated()
   }
 }
