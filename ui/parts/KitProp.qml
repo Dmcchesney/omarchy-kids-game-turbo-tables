@@ -76,6 +76,28 @@ Item {
   // the plugin never writes it.
   property url sheetRoot: Theme.propSheetRoot
 
+  // ------------------------------------------------------------- THE TINT
+  // The kit may be tinted and this is where it is: `ui/parts/PropKey.qml` is
+  // the warm rim underneath and `ui/parts/PropWash.qml` the purple shadow on
+  // top, and both of those files say why they are `ColorImage` rather than a
+  // shader. The four numbers are authored per prop in `ui/parts/Circuit.js`
+  // (`TINT`) and driven by the hour in `ui/TrackView.qml`; nothing is decided
+  // here, because a light rule that lives in the item that draws one sprite is
+  // a light rule twenty-five props can disagree about.
+  //
+  // The design's shadow, `#5f255e` at hue 301, is the target the wash pulls
+  // toward; `#7a2260` is the colour that LANDS there once it is composited over
+  // the bake's own blue-grey rather than replacing it.
+  property color washColor: "#7a2260"
+  property real washAmount: 0
+  // The design's warm rim, "one low sun, warm rim #f0b07a".
+  property color keyColor: "#f0b07a"
+  property real keyAmount: 0
+  // How far the warm rim reaches in from the prop's sun-facing edge, as a
+  // share of its drawn width -- so a rock wall and the same rock wall four
+  // times further away are lit the same.
+  property real keyReach: 0.030
+
   readonly property var meta: PropMeta.forProp(prop.kind)
   readonly property int column: prop.viewIndex >= 0
                                 ? prop.viewIndex
@@ -113,6 +135,30 @@ Item {
   height: 0
   visible: known && clarity > 0.004 && drawnW > 0.5
 
+  // THE SUN, UNDER THE CELL. Declared before the cell, so the warm silhouettes
+  // are painted first and all that survives of them is the rim outside the
+  // prop's own outline.
+  //
+  // LOADED BY NAME, AND THAT IS THE POINT OF THE LOADER. The only primitive
+  // that can recolour a baked sprite on a SOFTWARE scene graph -- which is what
+  // this project's evidence renders on, and what a weak machine may well fall
+  // back to -- is `ColorImage`, and it lives in `QtQuick.Controls.impl`, a
+  // Qt-internal module. An `import` of it at the top of THIS file would take the
+  // whole roadside down on a Qt build that does not ship it. Behind a `Loader`
+  // the failure is contained: the loader logs and stays empty, and the circuit
+  // keeps its props with the kit drawn as baked. The URL is a literal, which is
+  // what `npm run check:readme` requires of anything a plugin loads, and Qt
+  // compiles it once for all hundred and thirty-eight props.
+  //
+  // It is never toggled. A prop crosses in and out of the draw distance many
+  // times a lap and constructing two items each time would be allocation in a
+  // path that runs every frame, which plan v3 forbids; what turns off inside is
+  // `visible`, on numbers that are already zero when the prop is not live.
+  Loader {
+    source: "PropKey.qml"
+    onLoaded: item.host = prop
+  }
+
   Image {
     id: cellImage
     objectName: prop.kind
@@ -130,5 +176,11 @@ Item {
     mipmap: false
     cache: true
     asynchronous: false
+  }
+
+  // THE SHADOW, OVER THE CELL. Same contract as the key above.
+  Loader {
+    source: "PropWash.qml"
+    onLoaded: item.host = prop
   }
 }

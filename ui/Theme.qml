@@ -185,6 +185,7 @@ QtObject {
   // somewhere else with one assignment -- and the plugin never writes it.
   property url propSheetRoot: Qt.resolvedUrl("../assets/props/")
 
+
   // ------------------------------------------------------- the sound cues
   // PIECE F. One PCM WAV per cue under `assets/sfx/`, synthesised by
   // `src/tools/bake-sfx.py`; `ui/parts/Sfx.qml` is the table that says which

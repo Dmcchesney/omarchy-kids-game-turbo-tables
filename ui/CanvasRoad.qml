@@ -541,6 +541,12 @@ Canvas {
     var wr = waterColor.r, wg = waterColor.g, wb = waterColor.b
     var lr0 = waterLit.r, lg0 = waterLit.g, lb0 = waterLit.b
     var uFog = fogDensity
+    // THE HOUR, HOISTED. `Terrain.duskMul` is the same triple road.frag applies
+    // at the same point in the same order; read once per repaint rather than
+    // once per block, for the reason the whole of this function's preamble
+    // exists.
+    var dusk = Terrain.duskMul(nightfall)
+    var dmR = dusk[0], dmG = dusk[1], dmB = dusk[2]
     var scratch = [0, 0, 0]
     var z = nearDistance
     var guard = 0
@@ -605,9 +611,10 @@ Canvas {
       var rowH = Math.max(1, yNear - yFar + 1)
       for (var c = cLo; c <= cHi; c++) {
         Terrain.rowGround(row, c * gstep + gstep * 0.5, scratch)
-        var rr = Math.round((fr + (scratch[0] - fr) * fFloor) * 255)
-        var gg = Math.round((fg + (scratch[1] - fg) * fFloor) * 255)
-        var bb = Math.round((fb + (scratch[2] - fb) * fFloor) * 255)
+        var gr = scratch[0] * dmR, gg0 = scratch[1] * dmG, gb0 = scratch[2] * dmB
+        var rr = Math.round((fr + (gr - fr) * fFloor) * 255)
+        var gg = Math.round((fg + (gg0 - fg) * fFloor) * 255)
+        var bb = Math.round((fb + (gb0 - fb) * fFloor) * 255)
         var key = (rr << 16) | (gg << 8) | bb
         if (runColor === null) {
           runStart = c
@@ -687,9 +694,14 @@ Canvas {
     return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
             a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t]
   }
+  // The grid's own backing tone. Dusked with the same triple the terrain takes,
+  // so the pit's floor under the neon dims with everything else rather than
+  // staying at noon under a lap-12 sky.
   function sectorSoil(s) {
     var m = Terrain.sectorMix(s)
-    return Terrain.mix3(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2])
+    var soil = Terrain.mix3(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2])
+    var d = Terrain.duskMul(nightfall)
+    return [soil[0] * d[0], soil[1] * d[1], soil[2] * d[2]]
   }
 
   // The pit's diagnostic grid, three octaves, both directions. Unchanged from

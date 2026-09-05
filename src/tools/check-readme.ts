@@ -700,7 +700,15 @@ for (const file of tree.files) {
       const opener = codeLines[back]?.match(/^\s*([A-Z][\w.]*)\s*\{/);
       if (opener) { element = opener[1]!; break; }
     }
-    if (/^(Image|AnimatedImage|BorderImage)$/.test(element)) continue;
+    // `ColorImage` is on this list for the same reason and no other: it is
+    // `QQuickColorImage`, a SUBCLASS of the `Image` above it, and its `source`
+    // reaches exactly the same image loader. Piece T tints the frozen prop kit
+    // with it -- the one primitive that recolours a baked sprite on a software
+    // scene graph, where `ShaderEffect` draws nothing -- and a prop's sheet is
+    // chosen by kind, which cannot be a literal. Nothing about the exemption
+    // changes: the path is decoded as pixels, it is never run, and it can still
+    // name a file outside the plugin, which is the same stated limit.
+    if (/^(Image|AnimatedImage|BorderImage|ColorImage)$/.test(element)) continue;
     fail(
       "runtime name assembly in a plugin file",
       `${file.path}:${line}: a \`source\` bound to an expression this gate cannot resolve to a string literal. Whatever it names is loaded and run; name it literally.\n    ${(file.text.split(/\r?\n/)[line - 1] ?? "").trim().slice(0, 120)}`,

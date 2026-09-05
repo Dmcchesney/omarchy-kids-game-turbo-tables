@@ -123,6 +123,30 @@ for (const name of ["COARSE", "FINE", "RUT"]) {
   }
 }
 
+// THE HOUR ON THE GROUND. `DUSK` is what one unit of nightfall multiplies the
+// terrain by, and it is applied in both renderers at the same point in the same
+// order. It is a triple rather than a scalar, so it is compared as one: a build
+// that dims the shader's ground and not the fallback's would otherwise ship a
+// lap-12 desert on every machine without a shader pipeline, which is exactly
+// the class of defect this file exists for.
+{
+  const inFrag = frag.match(/const\s+vec3\s+DUSK\s*=\s*vec3\(([^)]*)\)/);
+  const inJs = terrain.match(/\bvar\s+DUSK\s*=\s*\[([^\]]*)\]/);
+  if (!inFrag) fail("road.frag DUSK: not found");
+  else if (!inJs) fail("Terrain.js DUSK: not found");
+  else {
+    const a = numbers(inFrag[1]);
+    const b = numbers(inJs[1]);
+    if (a.length !== 3) fail(`road.frag DUSK has ${a.length} numbers, expected 3`);
+    if (b.length !== 3) fail(`Terrain.js DUSK has ${b.length} numbers, expected 3`);
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      if (Math.abs(a[i] - b[i]) > 5e-5) {
+        fail(`DUSK[${i}]: road.frag has ${a[i]}, Terrain.js has ${b[i]}`);
+      }
+    }
+  }
+}
+
 // The integer hash: the three wrapping multipliers and the two shifts have to
 // be the same in both, or the two renderers paint different noise fields with
 // no other symptom than a picture that does not match.
@@ -172,5 +196,6 @@ if (failures.length > 0) {
 console.log(
   "check:terrain ok -- shaders/road.frag and ui/parts/Terrain.js agree on the sector curve, "
     + "the twelve soil and scrub palettes, the twelve flag quads, the three lattice sizes, "
-    + "the integer hash's constants, the sector crossfade and the fine octave's fade.",
+    + "the integer hash's constants, the dusk triple, the sector crossfade and the fine "
+    + "octave's fade.",
 );

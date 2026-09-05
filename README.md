@@ -253,7 +253,9 @@ reproduce.
   which read concatenated, array-assembled and constant-folded strings.
 - **An `Image`'s `source` may be an expression; a `Loader`'s may not.** The runtime-assembly rule
   holds every `source:` to a single string literal, or to one the file's own constants fold to, with
-  one exemption: the innermost enclosing element is `Image`, `AnimatedImage` or `BorderImage`. The car
+  one exemption: the innermost enclosing element is `Image`, `AnimatedImage`, `BorderImage` or
+  `ColorImage` — the last of which is a subclass of the first and reaches the same image loader, and
+  is how piece T tints the frozen prop kit on a scene graph with no shaders. The car
   sprite chooses one of 48 sheets by body and paint, which cannot be a literal, and what an image
   loader decodes is pixels — it cannot be run. The limit is that such a source can still name a file
   outside the plugin and display it. `check:boundary`'s content rule governs what may sit under

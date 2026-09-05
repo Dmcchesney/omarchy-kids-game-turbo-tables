@@ -149,6 +149,12 @@ const float COARSE = 2.0;
 const float FINE = 0.5;
 const float RUT = 1.0;
 
+// What one unit of nightfall multiplies the ground by. Terrain.js `DUSK`,
+// mirrored; compared number by number by npm run check:terrain. Red and green
+// fall further than blue, so the ground walks toward the design's purple as it
+// halves rather than turning grey.
+const vec3 DUSK = vec3(0.50, 0.40, 0.62);
+
 // The integer hash. Every operation is 32-bit and wrapping, so this is the
 // same number JavaScript's Math.imul chain produces for the same cell.
 float hashCell(float cx, float cy)
@@ -297,6 +303,12 @@ void main()
         float wind = blockNoise(x + s * 0.4, s * 0.10, COARSE);
         floorCol *= 1.0 + flags.z * (wind - 0.5) * 0.34;
     }
+
+    // THE HOUR REACHES THE GROUND. Terrain.js `duskMul`, applied at the same
+    // point the fallback applies it: after the octaves, the ruts and the wind,
+    // before the grid, the water and the haze -- those three carry the hour in
+    // their own uniforms already.
+    floorCol *= mix(vec3(1.0), DUSK, nightfall);
 
     // ------------------------------------------------------- the pit floor
     // The diagnostic grid, both ways, in three octaves -- and ONLY where the

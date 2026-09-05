@@ -52,7 +52,60 @@ var SECTOR_NAMES = [
   "THE OVERPASS", "THE SCRAPYARD", "THE BILLBOARDS", "THE FINISH"
 ]
 
+// ------------------------------------------------------- THE LIGHT ON THE KIT
+//
+// `docs/prop-kit.md`: a builder "places, scales, animates, TINTS and crops"
+// these. This is the tinting, authored per prop the same way the placements are,
+// because how much of the sun a thing takes is a property of what it is made of
+// and not of where it stands.
+//
+// Four numbers per kind:
+//
+//   wash0    how strongly the design's shadow purple washes the prop at lap 1
+//   wash1    the same at lap 12, when the sun is half set
+//   key0     how strongly the warm rim lights its sun-facing edge at lap 1
+//   reach    how far that rim reaches in, as a share of the prop's drawn width
+//
+// THE TABLE IS NOT UNIFORM, AND THAT IS THE DESIGN'S OWN RULE. "Paint stays its
+// own hue under this light -- a red car reads red; warmth lives in the rim and
+// the lamps, never in the paint." So the props built out of the bake's NEUTRAL
+// ramp -- the rock walls, the roller door, the overpass, the gantry, all of them
+// sampling hue 227-237 -- take a heavy wash, because that ramp is the thing that
+// is out of the palette. The props that carry paint take a light one: the tyre
+// wall stays red, the hay bales stay yellow, the billboards stay cream, and what
+// they get from the hour is the darkening every object in the picture gets.
+//
+// The pines are the other end of it. They bake at hue 185, teal, and the design
+// asks sector 6 for "a hillside of SILHOUETTED pines" -- so they take the
+// heaviest wash in the table and become what the design asked for.
+var TINT = {
+  //             wash0 wash1  key0  reach
+  "rockWall":   [0.46, 0.74, 0.44, 0.032],
+  "overpass":   [0.46, 0.74, 0.40, 0.022],
+  "rollerDoor": [0.44, 0.72, 0.38, 0.020],
+  "gantry":     [0.40, 0.70, 0.36, 0.018],
+  "pine":       [0.48, 0.78, 0.22, 0.026],
+  "waterTower": [0.34, 0.66, 0.38, 0.030],
+  "bridge":     [0.22, 0.58, 0.30, 0.018],
+  "scrapyard":  [0.20, 0.56, 0.32, 0.030],
+  "tireWall":   [0.20, 0.54, 0.28, 0.030],
+  "crowd":      [0.36, 0.70, 0.26, 0.022],
+  "billboard":  [0.12, 0.36, 0.24, 0.024],
+  "banner":     [0.12, 0.36, 0.24, 0.024],
+  "pitBoard":   [0.14, 0.40, 0.24, 0.028],
+  "distanceBoard": [0.14, 0.42, 0.24, 0.034],
+  "hayBale":    [0.18, 0.52, 0.28, 0.040],
+  "jetty":      [0.26, 0.60, 0.32, 0.034],
+  "drum":       [0.20, 0.54, 0.30, 0.044],
+  "cone":       [0.16, 0.48, 0.26, 0.050],
+  "markerPost": [0.22, 0.56, 0.28, 0.060]
+}
+var TINT_DEFAULT = [0.24, 0.58, 0.28, 0.030]
+
+function tintFor(kind) { return TINT[kind] || TINT_DEFAULT }
+
 function at(kind, side, s, x, anim, frame, phase, tag) {
+  var light = tintFor(kind)
   return {
     "kind": kind,
     "side": side,
@@ -68,6 +121,14 @@ function at(kind, side, s, x, anim, frame, phase, tag) {
     "world": PropMeta.META[kind] ? PropMeta.META[kind].world[0] : 1,
     "worldH": PropMeta.META[kind] ? PropMeta.META[kind].world[1] : 1,
     "spans": side === "C",
+    // The prop's own share of the light, copied in once. `TrackView` reads all
+    // four on every frame for every placement, and a table lookup plus an
+    // array index there was the same thing a hundred and thirty times over for
+    // numbers that never change.
+    "wash0": light[0],
+    "wash1": light[1],
+    "key0": light[2],
+    "keyReach": light[3],
     // Every view this placement can ever show, as {name, idx} pairs, worked out
     // once here. `viewAt` and `viewIndexAt` index this rather than building a
     // string and searching the prop's view list on every frame for every prop.

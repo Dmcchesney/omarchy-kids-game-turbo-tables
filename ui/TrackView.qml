@@ -915,9 +915,33 @@ Item {
       fogDay.r + (fogDusk.r - fogDay.r) * nightfall,
       fogDay.g + (fogDusk.g - fogDay.g) * nightfall,
       fogDay.b + (fogDusk.b - fogDay.b) * nightfall, 1)
-  readonly property color roadTone: "#221420"
-  readonly property color roadToneAlt: "#2c1a2a"
-  readonly property color laneTone: Theme.cream
+  // ------------------------------------------------- THE HOUR ON THE SURFACE
+  //
+  // The terrain takes `Terrain.DUSK` inside both renderers. Everything else the
+  // ground is made of arrives as a UNIFORM, which means one function here dims
+  // it for the shader and the fallback at once: the tarmac, its two tones, the
+  // kerbs, the lane markings and the pit's neon.
+  //
+  // THE SURFACE TAKES LESS OF IT THAN THE TERRAIN, and that is the same rule
+  // `surfaceFog` already encodes: the road is the thing the eye must be able to
+  // follow, so it keeps 0.72 of its value at lap 12 where the ground keeps
+  // 0.50/0.40/0.62, and the lane markings keep 0.84 -- they are the only thing
+  // on the tarmac that says where the lanes are once the sun is down. The
+  // headlamps come on at lap 8, which is what the design gives the last laps
+  // instead of daylight.
+  readonly property real surfaceDusk: 1 - 0.28 * nightfall
+  readonly property real markingDusk: 1 - 0.16 * nightfall
+  // Dim one colour by a scalar, keeping its alpha. `Qt.darker` divides by a
+  // factor and clamps oddly at the black end; this is a plain multiply, which
+  // is what the shader does to the terrain beside it.
+  function dimmed(c, k) { return Qt.rgba(c.r * k, c.g * k, c.b * k, c.a) }
+
+  readonly property color roadTone: dimmed(Qt.rgba(0.133, 0.078, 0.125, 1), surfaceDusk)
+  readonly property color roadToneAlt: dimmed(Qt.rgba(0.173, 0.102, 0.165, 1), surfaceDusk)
+  readonly property color laneTone: dimmed(Theme.cream, markingDusk)
+  readonly property color rumbleTone: dimmed(Theme.hazard, surfaceDusk)
+  readonly property color rumbleAltTone: dimmed(Theme.cream, surfaceDusk)
+  readonly property color gridToneNow: dimmed(gridTone, surfaceDusk)
   readonly property color sunTone: "#f0956e"
   // The lake. Deep purple water with the sun's own core as the reflected
   // column; both dim with the hour, because a reflection cannot outlive its
@@ -1061,11 +1085,11 @@ Item {
 
       property color roadColor: view.roadTone
       property color roadAlt: view.roadToneAlt
-      property color rumbleColor: Theme.hazard
-      property color rumbleAlt: Theme.cream
+      property color rumbleColor: view.rumbleTone
+      property color rumbleAlt: view.rumbleAltTone
       property color laneColor: view.laneTone
       property color groundColor: view.groundTone
-      property color gridColor: view.gridTone
+      property color gridColor: view.gridToneNow
       property color skyColor: view.fogTone
       property color fogColor: view.fogTone
       property color glowColor: view.sunTone
@@ -1107,11 +1131,11 @@ Item {
 
       roadColor: view.roadTone
       roadAlt: view.roadToneAlt
-      rumbleColor: Theme.hazard
-      rumbleAlt: Theme.cream
+      rumbleColor: view.rumbleTone
+      rumbleAlt: view.rumbleAltTone
       laneColor: view.laneTone
       groundColor: view.groundTone
-      gridColor: view.gridTone
+      gridColor: view.gridToneNow
       skyColor: view.fogTone
       fogColor: view.fogTone
       glowColor: view.sunTone
@@ -1124,6 +1148,11 @@ Item {
       onHorizonChanged: requestPaint()
       onFocalChanged: requestPaint()
       onWidthChanged: requestPaint()
+      // The hour is a repaint reason of its own: `advance()` asks for one on
+      // every moving frame, but a lap can turn over under reduced motion, in a
+      // harness still or on a paused frame, and the ground has to darken there
+      // too or the fallback keeps a noon floor under a dusk sky.
+      onNightfallChanged: requestPaint()
       Component.onCompleted: requestPaint()
     }
   }
@@ -1411,6 +1440,39 @@ Item {
   // at z = 60 at 19%, so the far roadside is present as a ghost and the near
   // one is solid.
   readonly property real propFog: 0.42
+
+  // ----------------------------------------------- THE LIGHT RULE ON THE KIT
+  //
+  // Design, Visual style: "one low sun, warm rim `#f0b07a` ... Shadow: purple
+  // `#5f255e`, NEVER GREY ... paint stays its own hue under this light -- a red
+  // car reads red; warmth lives in the rim and the lamps, never in the paint."
+  //
+  // The kit is baked against a neutral ramp in hue band 227-237 -- blue-grey --
+  // and `ui/parts/PropTint.qml` is what puts the design's colour on it. These
+  // two are the colours; `Circuit.TINT` is how much of each a given prop takes;
+  // `nightfall` is where the sun is. `#7a2260` is the wash that LANDS on the
+  // design's `#5f255e` once it is composited over the bake rather than replacing
+  // it: measured on rockWall's own ramp it carries hue 228.9 to 288.0 and hue
+  // 235.0 to 307.7, either side of the design's 301.
+  // AND THE WASH ITSELF DARKENS, which is not the same thing as more of it.
+  // Washing harder toward one mid purple pulls a dark tone UP as well as round:
+  // at lap 12 the quarry came out a saturated magenta rather than a rock in the
+  // dark. So the target moves too -- `#7a2260` at lap 1, `#3d1035` at lap 12,
+  // the same hue at a third of the value -- and the two together take the
+  // bake's (52,58,82) to H 296 V 0.345 on the first lap and H 297 V 0.235 on
+  // the last, against a sky that has halved.
+  readonly property color propWashDay: "#7a2260"
+  readonly property color propWashDusk: "#3d1035"
+  readonly property color propWashColor: Qt.rgba(
+      propWashDay.r + (propWashDusk.r - propWashDay.r) * nightfall,
+      propWashDay.g + (propWashDusk.g - propWashDay.g) * nightfall,
+      propWashDay.b + (propWashDusk.b - propWashDay.b) * nightfall, 1)
+  readonly property color propKeyColor: Qt.rgba(0.941, 0.690, 0.478, 1)
+  // A low sun carries less key than a high one, and by lap 12 it is half set.
+  // It never reaches zero: the disc is still above the horizon at the flag, so
+  // an object with no lit edge at all would be wrong in the other direction.
+  readonly property real propKeyFall: 1 - 0.62 * nightfall
+
   function hazeClarity(z) {
     return Math.max(0, Math.min(1, Math.exp(-propFog * z * z * 0.0011)))
   }
@@ -1460,6 +1522,16 @@ Item {
                    ? Circuit.viewIndexAt(roadside.place, view.worldClock) : 0
         pxPerUnit: roadside.pxUnit
         clarity: roadside.clarity
+        // THE HOUR, ON THE KIT. `Circuit.TINT` says how much of each a prop
+        // takes; `nightfall` says where between lap 1 and lap 12 the sun is.
+        // Both are read off numbers this placement already carries, so the
+        // whole light rule costs two multiplies per drawn prop per frame.
+        washColor: view.propWashColor
+        keyColor: view.propKeyColor
+        washAmount: roadside.visible
+                    ? place.wash0 + (place.wash1 - place.wash0) * view.nightfall : 0
+        keyAmount: roadside.visible ? place.key0 * view.propKeyFall : 0
+        keyReach: roadside.place.keyReach
       }
 
       // ------------------------------------------------- THE FACT BILLBOARDS

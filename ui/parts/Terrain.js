@@ -114,6 +114,41 @@ var FLAGS = [
   [1.0, 0.0, 0.0, 0.22]
 ]
 
+// -------------------------------------------------------------- the hour
+// WHAT THE GROUND DOES AS THE SUN GOES DOWN, AND WHY IT IS A TABLE HERE.
+//
+// The sky loses half its value between lap 1 and lap 12; before this the ground
+// lost seven per cent and the quarry lost nothing at all, so the last lap was a
+// night sky over a daylit desert. A critic called it "the most expensive-looking
+// mistake in the set", and it was one number missing rather than a hard problem:
+// `nightfall` already drove the sky, the haze, the shadows and the lamps, and
+// simply was not applied to the floor.
+//
+// DUSK is what one unit of nightfall multiplies the ground by. It is a TRIPLE
+// and not a scalar on purpose: dividing the channels unevenly is what makes
+// dusk read as dusk rather than as a dimmer switch. Red and green fall further
+// than blue, so a sunlit ochre at H 352 walks toward the design's purple as it
+// darkens instead of turning into grey ochre. Measured on the dunes' own soil,
+// (0.478, 0.251, 0.282) V 0.478 becomes (0.239, 0.100, 0.175) V 0.239 -- the
+// same halving the sky takes, and thirty degrees of hue with it.
+//
+// The road, the kerbs and the lane markings are NOT this: they are uniforms
+// TrackView hands both renderers, and it dims them by less, because the design's
+// haze rule already says the road is the thing the eye must be able to follow.
+// `shaders/road.frag` mirrors this triple and `npm run check:terrain` compares
+// them, exactly as it does the palettes.
+var DUSK = [0.50, 0.40, 0.62]
+
+// The multiplier at a given nightfall, 0..1. Both renderers apply it to the
+// finished terrain colour, after the two octaves, the ruts and the wind lines
+// and before the grid, the water and the haze -- those three carry the hour in
+// their own uniforms already.
+function duskMul(nightfall) {
+  return [1 + (DUSK[0] - 1) * nightfall,
+          1 + (DUSK[1] - 1) * nightfall,
+          1 + (DUSK[2] - 1) * nightfall]
+}
+
 // ------------------------------------------------------------- the lattice
 // Block sizes in world units. COARSE is scrub bands and patches; FINE is the
 // grit that keeps the bottom of the frame from being a flat wash. FINE is faded
