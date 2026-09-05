@@ -147,12 +147,19 @@ Item {
   readonly property int anchorDx: groundPoint ? scaled(groundPoint[0]) : drawnWidth / 2
   readonly property int anchorDy: groundPoint ? scaled(groundPoint[1]) : drawnHeight
   // WHERE THE BAKE'S CONTACT SHADOW STARTS, in this row's own cell pixels.
-  // Two rows under the contact point: above that line the sheet still has
-  // bodywork and a wheel in it, and below it there is nothing but the shadow
-  // the bake runs on toward the camera. Zero when this cell has no contact
-  // point declared, which turns the pass off rather than guessing at it.
+  //
+  // TWO ROWS ABOVE THE CONTACT POINT, NOT BELOW IT, AND THE FRAMES SAID SO.
+  // Read off `assets/karts/coupe/red.png`, the (95,37,94,128) rows begin at
+  // y = 100 while the road camera's contact point is y = 102.4 -- so a clip
+  // that started under the anchor left four sheet rows of untinted bake above
+  // it, and at the lake, where the sector's hill puts the kart at a different
+  // screen row, that band measured luminance 37.5 against a road at 23.4 while
+  // the dunes measured 12.3. The same shadow, half of it fixed.
+  //
+  // What the extra rows cost is three rows of the wheel arch's own paint at the
+  // very bottom of the flank, which is where a car meets its own shadow anyway.
   readonly property int shadeTopPx: groundPoint
-                                    ? Math.round((groundPoint[1] + 2) * rowScale) : 0
+                                    ? Math.round((groundPoint[1] - 2) * rowScale) : 0
   readonly property int shadeRows: groundPoint ? Math.max(0, cellH - shadeTopPx) : 0
 
   width: 0
