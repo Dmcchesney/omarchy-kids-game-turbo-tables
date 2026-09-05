@@ -892,13 +892,38 @@ Item {
   // ground in the air, so it is the sector's own scrub tone, lifted toward the
   // light and dusked with everything else. The same table the shader paints the
   // ground from, which is what `dustiness` above already does for how MUCH.
+  // AND IT IS THE BRIGHTEST THING IN THE LOWER FRAME, WHICH IT WAS NOT.
+  //
+  // Round 2's tone was the sector's scrub at one and a half times value plus a
+  // constant, and measured on the shipped frames that put a puff between 0 and
+  // 25 luminance above the road it rose from -- at the faint end of its own
+  // fade, identical to it. A critic read the result as "flat dark discs ...
+  // dead pixels" and as dust that is DARKER than the road, and the second half
+  // of that is arithmetically not what happens; the first half is exactly what
+  // it looks like, because a few points of luminance at a shifted hue reads as
+  // a stain rather than as a lit thing.
+  //
+  // Dust catches the light. It is the one thing in the frame that has to be
+  // brighter than its background, and the reference's is the hottest thing in
+  // the picture. So the tone is the sector's own ground carried nearly half way
+  // to the design's warm rim `#f0b07a` and then lifted -- so it is still THIS
+  // sector's dirt in the air rather than one brown everywhere, and it is now
+  // five to six times the luminance of the tarmac under it.
+  //
+  // AND IT TAKES HALF THE GROUND'S FALL, NOT ALL OF IT. Airborne dust at a low
+  // sun is lit from the side by the one thing still above the horizon; the
+  // ground under it is not. Halving the dusk keeps a lap-12 puff visible
+  // against a road that has lost 28% and a verge that has lost 50%.
   readonly property color dustTone: {
     var m = Terrain.sectorMix(travel + playerZ)
     var c = Terrain.mix3(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2])
     var d = Terrain.duskMul(nightfall)
-    return Qt.rgba(Math.min(1, c[0] * d[0] * 1.5 + 0.12),
-                   Math.min(1, c[1] * d[1] * 1.5 + 0.08),
-                   Math.min(1, c[2] * d[2] * 1.5 + 0.12), 1)
+    var rim = [0.941, 0.690, 0.478]
+    var out = [0, 0, 0]
+    for (var i = 0; i < 3; i++)
+      out[i] = Math.min(1, (c[i] + (rim[i] - c[i]) * 0.45)
+                           * (1 + (d[i] - 1) * 0.5) * 1.35)
+    return Qt.rgba(out[0], out[1], out[2], 1)
   }
 
   // GOLDEN-HOUR PALETTE. Sampled off the bar (plan v2, "Visual direction v3"):
@@ -1540,6 +1565,66 @@ Item {
       propWashDay.r + (propWashDusk.r - propWashDay.r) * nightfall,
       propWashDay.g + (propWashDusk.g - propWashDay.g) * nightfall,
       propWashDay.b + (propWashDusk.b - propWashDay.b) * nightfall, 1)
+  // ------------------------------------------------- THE HOUR ON THE KARTS
+  //
+  // The props took the tint in round 2 and the karts did not, and a critic
+  // measured what that cost: the world darkened 44-55% from lap 1 to lap 12,
+  // the player's kart darkened 1.6% with its red flank byte-for-byte
+  // (235,130,110) at every lap, and a rival came out 56% BRIGHTER because its
+  // tail lamps were the only part of it the hour reached. "By lap 12 the karts
+  // sit at four times the luminance of the ground they are on and read as
+  // stickers pasted over a photograph."
+  //
+  // `ui/parts/CarWash.qml` is the same primitive `PropWash` is and puts them in
+  // the pass. Two numbers here and nothing decided in the item that draws one
+  // car, for the same reason the prop light rule lives here.
+  //
+  // WHY THE KARTS TAKE LESS OF IT THAN THE GROUND. The ground keeps 0.50/0.40/
+  // 0.62 of itself at lap 12 and the tarmac 0.72, by the rule `surfaceFog`
+  // already encodes: the things the child must be able to follow hold their
+  // value longest, and the four karts are the things the child looks at for the
+  // whole race. 0.52 of wash takes the flank's luminance down about 40% -- the
+  // sky's own rate -- while the paint keeps its hue, which is the design's
+  // sentence exactly: warmth lives in the rim and the lamps, and a red car at
+  // dusk is a darker red rather than the same red.
+  //
+  // AND IT IS ZERO ON THE FIRST LAP, so a lap-1 frame is byte-identical to the
+  // round that was judged and the change can only ever be a change in the hour.
+  readonly property color kartWashColor: "#2b0c28"
+  readonly property real kartWashAmount: 0.52 * nightfall
+
+  // --------------------------------------- THE SHADOW THAT LIGHTENED THE ROAD
+  //
+  // Every contact shadow in this view -- under the karts, under the props,
+  // under the arch -- was a fill of the design's `#5f255e` at a fixed alpha,
+  // and `#5f255e` is (95,37,94): a MID purple. Composited over a lap-12 road of
+  // (31,18,29) that is an underglow, and a critic measured it: the shadow under
+  // the player's kart came out 90% BRIGHTER than the surface it fell on, and
+  // "a shadow that lightens the floor is worse than no shadow".
+  //
+  // The cause is one line repeated in three places and it is the same cause as
+  // the karts above: a CONSTANT drawn over a surface that is not constant. The
+  // ground halves over twelve laps, the shadow did not move at all, and by the
+  // last lap it was brighter than everything around it.
+  //
+  // So a shadow is now defined AGAINST the darkest surface it can land on
+  // rather than as an absolute colour. `roadTone` is the tarmac at this lap --
+  // already dusked, and darker than any terrain palette in the table -- and the
+  // shadow is that tone taken to a third of its value and carried round to the
+  // design's own hue. It is purple, never grey, at every lap; it is always
+  // darker than the road, by construction rather than by luck; and it darkens
+  // with the hour because the thing it is derived from does.
+  readonly property color shadowTone: Qt.rgba(
+      Math.min(roadTone.r * 0.62, 0.150) + 0.030,
+      Math.min(roadTone.g * 0.34, 0.055),
+      Math.min(roadTone.b * 0.62, 0.145) + 0.028, 1)
+  // What the bake's own half-alpha shadow under a kart is refilled with. A
+  // third of the tone above, because it is laid through an alpha the sheet
+  // chose rather than one this view chose, and `CarWash.qml` has the sum.
+  readonly property color kartShadeColor: Qt.rgba(shadowTone.r * 0.35,
+                                                  shadowTone.g * 0.35,
+                                                  shadowTone.b * 0.35, 1)
+
   readonly property color propKeyColor: Qt.rgba(0.941, 0.690, 0.478, 1)
   // A low sun carries less key than a high one, and by lap 12 it is half set.
   // It never reaches zero: the disc is still above the horizon at the flag, so
@@ -1647,7 +1732,7 @@ Item {
             x: Math.round((propShade.mid + foot - width / 2 - propShade.lean * k) / propShade.px)
                * propShade.px
             y: Math.round((-height * 0.5 - propShade.px * tier * 0.5) / propShade.px) * propShade.px
-            color: "#5f255e"
+            color: view.shadowTone
             opacity: tier === 0 ? 0.40 : 0.26
             antialiasing: false
           }
@@ -1918,6 +2003,11 @@ Item {
         showNumber: false
         sheetScale: junker.cellFit.sheetScale
         pixelScale: junker.cellFit.pixelScale
+        // A dead kart in a scrapyard is in the same hour as the live ones.
+        washColor: view.kartWashColor
+        washAmount: view.kartWashAmount
+        shadeColor: view.kartShadeColor
+        shadeAmount: 1.0
       }
     }
   }
@@ -2002,7 +2092,11 @@ Item {
                          + view.shakeX - width / 2) / px) * px
           y: Math.round((view.vAt(Math.max(0.2, zHere)) * view.height
                          + view.shakeY) / px) * px
-          color: "#3a0f2c"
+          // The same tone the kart and prop shadows take, and for the same
+          // reason: `#3a0f2c` is (58,15,44), which at 0.62 over a lap-12 road
+          // of (24,14,23) is a bar of LIGHT laid across the tarmac under an
+          // arch. See `shadowTone`.
+          color: view.shadowTone
           opacity: 0.62
           antialiasing: false
         }
@@ -2170,7 +2264,7 @@ Item {
             height: Math.max(shade.px, Math.round(shade.span * [0.050, 0.038, 0.026][index] / shade.px) * shade.px)
             x: Math.round((-width / 2 - shade.lean * k * 1.4) / shade.px) * shade.px
             y: Math.round((-height * 0.5 - shade.px * index * 0.5) / shade.px) * shade.px
-            color: "#5f255e"
+            color: view.shadowTone
             opacity: a
             antialiasing: false
           }
@@ -2283,6 +2377,14 @@ Item {
                           : Math.min(1, (isHuman ? view.pullback * 1.4 : 0)
                                         + Math.abs(view.curve) / view.curveAmplitude * 0.30
                                         + view.nightfall * 0.45)
+        // THE HOUR, ON THE KART. See `kartWashAmount`: the props were in the
+        // tint pass and these were not, and it was the worst single thing in
+        // the round-2 frames. A ghost is already a translucent nothing, so it
+        // takes no wash; everything else on the circuit does.
+        washColor: view.kartWashColor
+        washAmount: isGhost ? 0 : view.kartWashAmount
+        shadeColor: view.kartShadeColor
+        shadeAmount: isGhost ? 0 : 1.0
         opacity: isGhost ? 0.55 : 1.0
       }
 

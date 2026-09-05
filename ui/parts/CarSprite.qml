@@ -73,6 +73,21 @@ Item {
   // 0..1: how brightly the tail lamps glow, on the road camera, from the
   // lamp centres meta.json lists. The track drives it from a hit.
   property real lampGlow: 0.0
+
+  // ------------------------------------------------------------- THE HOUR
+  // How far this car has gone into the dusk, and what colour the dusk is.
+  // `ui/parts/CarWash.qml` is the silhouette that does it and carries the
+  // argument for why a kart has to be in the tint pass at all. Zero here, so
+  // every caller that does not set it -- the garage, the roster, the
+  // countdown, the results, all of which are lit by their own room and not by
+  // the circuit's sun -- draws exactly the pixels it drew before.
+  property real washAmount: 0
+  property color washColor: "#2e0d2b"
+  // The bake's own contact shadow, which is `#5f255e` at alpha 128 in the sheet
+  // and therefore brighter than the tarmac it lands on. `CarWash.qml` carries
+  // the measurement and the arithmetic; these two say how dark and in what.
+  property real shadeAmount: 0
+  property color shadeColor: "#0a0209"
   // Where the sheets are. Bound to Theme so the harness can redirect every
   // car at once; a host may override it for one car.
   property url sheetRoot: Theme.carSheetRoot
@@ -131,6 +146,14 @@ Item {
                                      ? meta.ground[camera] : null
   readonly property int anchorDx: groundPoint ? scaled(groundPoint[0]) : drawnWidth / 2
   readonly property int anchorDy: groundPoint ? scaled(groundPoint[1]) : drawnHeight
+  // WHERE THE BAKE'S CONTACT SHADOW STARTS, in this row's own cell pixels.
+  // Two rows under the contact point: above that line the sheet still has
+  // bodywork and a wheel in it, and below it there is nothing but the shadow
+  // the bake runs on toward the camera. Zero when this cell has no contact
+  // point declared, which turns the pass off rather than guessing at it.
+  readonly property int shadeTopPx: groundPoint
+                                    ? Math.round((groundPoint[1] + 2) * rowScale) : 0
+  readonly property int shadeRows: groundPoint ? Math.max(0, cellH - shadeTopPx) : 0
 
   width: 0
   height: 0
@@ -155,6 +178,28 @@ Item {
     mipmap: false
     cache: true
     asynchronous: false
+  }
+
+  // THE HOUR, OVER THE CELL AND UNDER THE LAMPS.
+  //
+  // Declared here and not lower down, so the dusk darkens the bodywork and the
+  // tail lamps and the number are painted on top of it: the design's "tail
+  // lamps get brighter" as the light goes is only visible if the lamps are the
+  // one part of the car the wash does not reach.
+  //
+  // LOADED BY NAME. `QtQuick.Controls.impl` is a Qt-internal module and
+  // `ColorImage` is the only primitive that recolours a baked sprite on a
+  // software scene graph; behind a `Loader` a Qt build that does not ship it
+  // logs once and the game keeps its cars, instead of every screen with a kart
+  // on it failing to load. The URL is a literal, which is what
+  // `npm run check:readme` requires of anything a plugin loads.
+  //
+  // It is never toggled -- constructing an item when a lap ticks over is
+  // allocation in a path the race runs -- so what turns off inside is
+  // `visible`, on a number that is already zero at lap 1.
+  Loader {
+    source: "CarWash.qml"
+    onLoaded: item.host = car
   }
 
   // The tail lamps, lit. Two flat squares per lamp: a wider dim one for the
