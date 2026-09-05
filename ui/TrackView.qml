@@ -4975,8 +4975,14 @@ Item {
     // frame is 0.40 rather than 0.66 with the setting on, which is about a
     // 60% attenuation of the light and leaves every word, lamp, tag and plume of
     // the event exactly where it was.
+    // ROUND 6: 0.26 with the setting on, not 0.40. The light being hit puts on
+    // the picture is now split differently for a child who asked for less
+    // motion -- less of it at the rim, and a capped full-frame wash that
+    // actually reaches the ROAD, which is where round 5 put nothing at all and
+    // a critic measured +2.6 RGB and called it nothing. The whole-frame total
+    // is measured in the report and it is still below the setting-off figure.
     readonly property real amount: Math.max(dark * 0.55,
-                                            hot * (view.reducedMotion ? 0.40 : 0.66))
+                                            hot * (view.reducedMotion ? 0.26 : 0.66))
     readonly property real depth: hitting ? 0.20 : 0.16
     readonly property real washAlpha: amount
     visible: amount > 0.004
