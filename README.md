@@ -186,6 +186,7 @@ runs the whole gate, and each part can be run alone:
 | `npm test` | the engine's rules, against committed seed-to-sequence vectors |
 | `npm run check:types` | `src/engine` type-checks with no dependencies and no ambient types |
 | `npm run check:boundary` | no symlink, executable, installer-like name, `bin/`, `scripts/` or `node_modules`; every file opened and its first bytes read, so a `.png` has to be a PNG and no other file may hold binary content; the manifest against the marketplace's validator rules; and no shell token in any file except the three that may hold one, read as written, with string concatenations glued, and with names bound once to a literal folded in |
+| `npm run check:qmlids` | no `.qml` file declares an `id` whose name it also declares as a property, alias, signal or function — a collision QML resolves silently in the id's favour, which once made half the card deck unplayable while every test passed |
 | `npm run check:bundle` | `engine/engine.mjs` is the current build of `src/engine`, not a stale copy |
 | `npm run check:readme` | the four safety invariants against the whole tree, this README's disclosure of them, and each present-tense capability claim here against stripped source — the list above |
 | `npm run scan` | the marketplace's own security-baseline rules, run against the working tree, and that the index holds no file the working tree has lost |
