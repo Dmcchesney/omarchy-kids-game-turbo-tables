@@ -85,6 +85,47 @@
 // it. Round two proved that at 0.15; the plate does not care whether the number
 // under it is 0.15 or 0.55. The seatbelt is what buys the amplitude.
 //
+// ---------------------------------------------- ROUND 5: EIGHT GESTURES
+//
+// A blind critic looked at four rounds of strips and reduced the whole piece to
+// one sentence:
+//
+//     "Seven of eight cards resolve at impact to the same gesture -- tint the
+//      whole framebuffer, different hue. The props do all the distinguishing
+//      work."
+//
+// That is exactly what `flashPeak` above was: ONE tool, spent identically by
+// every card, differing only in `flashTone`. The grammar table in design v4
+// lists five tools and says they are "used in every card in DIFFERENT MIXES",
+// and the per-card spec does not describe eight tints -- it describes eight
+// different things happening.
+//
+// So the flash now has a SHAPE as well as a height, and the shape is a
+// statement about where the light came from:
+//
+//   "full"   the whole frame. The child's own engine (Turbo's "one white
+//            frame") and the legendary, whose light is already split over and
+//            under the wreck. Two cards, and both are written that way in the
+//            design.
+//   "point"  a round light centred on the kart the event happened to, mostly
+//            painted UNDER the sprites so the victim is a silhouette in it and
+//            not a ghost inside it. The Wrench's clang, the Pothole's thud, the
+//            Nitro's own exhaust (anchored on the child instead of a victim),
+//            and the Roll Cage's block.
+//   "road"   the tarmac only, from the horizon down, near end strongest. The
+//            Oil Slick, whose whole idea is that the ROAD changed -- and the
+//            one card whose light goes DOWN rather than up.
+//   "line"   the tow line itself goes white-hot and thick along its length.
+//            Nothing else in the picture changes.
+//
+// `pointGain` is why a point light may be brighter than the card's full-frame
+// number: a disc of 0.24 of the frame height covers about a sixth of the
+// screen, so the same alpha is a sixth of the light. `pointSpan` is the disc's
+// radius as a multiple of the victim's own drawn sprite, and `pointFloor` is
+// its floor as a fraction of the frame height -- see `fxMarkSize`, and see the
+// distant victim in the round-5 report, which is the case that floor exists
+// for.
+//
 // WHAT DOES BOUND THESE IS THE RATE, NOT THE HEIGHT. The design's accessibility
 // rule is "nothing flashes faster than 3 Hz". Every card below flashes ONCE at
 // its impact; only the Pile-Up flashes in its telegraph as well, and that pair
@@ -116,6 +157,18 @@ var BEATS = {
     flashPeak: 0.13,
     flashMs: 180,
     impactShake: 0.10,
+    // ROUND 5. Nitro's light is the child's OWN exhaust, so it is a point on
+    // the child's own kart and not a tint of the sky. What the card is is the
+    // motion: the road throws forward, sixteen speed lines come in from the
+    // corners, four lamps chase. In greyscale a Nitro is a frame full of lines
+    // pointing at the horizon with a bright kart at the bottom of them.
+    flashShape: "point",
+    pointGain: 3.4,
+    pointSpan: 1.9,
+    pointFloor: 0.15,
+    // Mostly OVER the sprites: this light is between the camera and the kart
+    // that made it, which is where an exhaust flare actually is.
+    flashOver: 0.72,
   },
   // "Turbo (skip 10)": telegraph 250, hit-stop 90, aftermath 1200.
   turbo: {
@@ -162,6 +215,12 @@ var BEATS = {
     flashTone: "#ffffff",
     flashPeak: 0.40,
     flashMs: 120,
+    // ROUND 5. The one card the design writes as a full-frame event in so many
+    // words -- "hit-stop 90, ONE WHITE FRAME" -- and the only boost that earns
+    // it. What tells a Turbo from a Nitro without colour is the geometry: the
+    // focal length bumps, the horizon dips 59 px, the rivals stream past BOTH
+    // sides of the frame, and the lap counter turns over.
+    flashShape: "full",
     throwForward: 1.0,
     // On top of the 0.45 the lurch itself carries: a launch kicks the camera.
     impactShake: 0.42,
@@ -184,6 +243,16 @@ var BEATS = {
     flashPeak: 0.30,
     flashMs: 260,
     impactShake: 0.46,
+    // ROUND 5. THE ROAD, AND ONLY THE ROAD. This card's idea is that the
+    // TARMAC changed under the whole field, so the light goes down on the
+    // tarmac and the sky is not touched at all -- the one card in the deck
+    // whose world reaction makes the picture DARKER, and the only one below
+    // the horizon line. Near end strongest, because the slick came off the
+    // back of the child's own kart.
+    flashShape: "road",
+    // The whole of the flash, on the road band.
+    groundBias: 1.0,
+    roadNear: true,
   },
   // "Wrench (one rival +5)": telegraph 500 (the projectile's flight), hit-stop
   // 80, smoke from the target's hood until the effect ends.
@@ -206,6 +275,15 @@ var BEATS = {
     flashPeak: 0.26,
     flashMs: 140,
     impactShake: 0.34,
+    // ROUND 5. A wrench is a thing that flies, arcs and STRIKES, and the light
+    // of a strike is at the point of the strike. A round light on the victim,
+    // mostly under the sprites, so the kart is a hard silhouette standing in
+    // its own flare instead of a ghost inside a screen-wide tan wash.
+    flashShape: "point",
+    pointGain: 3.2,
+    pointSpan: 2.4,
+    pointFloor: 0.20,
+    flashOver: 0.30,
   },
   // "Pothole (one rival +8)": telegraph 350, hit-stop 100, the kart bounces
   // twice, a hubcap flies off and rolls to the verge.
@@ -227,6 +305,20 @@ var BEATS = {
     flashPeak: 0.32,
     flashMs: 180,
     impactShake: 0.38,
+    // ROUND 5. The light is in the HOLE -- low, on the road, at the kart that
+    // fell into it -- and the camera drops with the kart rather than shaking
+    // sideways. See `dropPx`.
+    flashShape: "point",
+    pointGain: 3.0,
+    pointSpan: 2.2,
+    pointFloor: 0.19,
+    flashOver: 0.26,
+    // ROUND 5: THE CAMERA FALLS IN TOO. Every other card shakes; this one
+    // drops. A downward kick of 1.8% of the frame that recovers in two
+    // bounces, so the Pothole is the one impact in the deck that moves the
+    // whole picture in a single direction the eye can name.
+    dropPx: 0.018,
+    dropMs: 420,
   },
   // "Pile-Up (one rival +15, legendary)": telegraph 600 with the sky flashing
   // amber twice, hit-stop 120, then 300 at half speed while the kart spins a
@@ -284,6 +376,12 @@ var BEATS = {
     // over it. See `fx.worldFlash` in ui/TrackView.qml for the arithmetic that
     // keeps the composite over the road identical.
     flashOver: 0.24,
+    // ROUND 5 leaves the legendary full-frame. It is the one card the design
+    // says the whole room should notice, its light is already split so it
+    // falls ON the wreck rather than over it, and it has a second helping laid
+    // on the tarmac below. It is also, now, the ONLY card besides Turbo that
+    // touches the whole frame at all -- which is what makes it the loudest.
+    flashShape: "full",
     // THE LIGHT OF THE CRASH ON THE TARMAC. A second helping of the same amber,
     // laid from the horizon down and strongest where the wreck is, because a
     // wall of tyres and barrels landing on a road lights the ROAD -- not the
@@ -337,6 +435,10 @@ var BEATS = {
     flashPeak: 0,
     flashMs: 0,
     impactShake: 0,
+    // Nothing at all, and that is the card. ROUND 5 leaves it alone: a blind
+    // critic named it the best card in the set precisely because it does not
+    // reach for a wash.
+    flashShape: "none",
     // THE BLOCK. Design, Wrench: "the wrench shatters against the target's Roll
     // Cage with a white flash and a ring, the cage outline cracks and vanishes
     // ... the block is the payoff and must be loud." A blind critic found three
@@ -345,6 +447,16 @@ var BEATS = {
     // expands off the cage, and the outline cracking over 260 ms.
     blockFlash: 0.50,
     blockFlashMs: 150,
+    // ROUND 5. The block's white flash is a POINT as well -- the light comes
+    // off the bar the wrench hit, and it is the biggest point light in the
+    // game because it is the payoff. `blockFlashFull` is what is left over for
+    // the room, which is what a bright event at close range actually does to
+    // a picture, and it is a quarter of what round 4 put over the whole frame.
+    blockShape: "point",
+    blockPointGain: 1.9,
+    blockPointSpan: 3.0,
+    blockPointFloor: 0.30,
+    blockOver: 0.58,
     blockShake: 0.55,
     blockRingMs: 420,
     blockCrackMs: 260,
@@ -370,6 +482,19 @@ var BEATS = {
     flashPeak: 0.28,
     flashMs: 200,
     impactShake: 0.42,
+    // ROUND 5. NOTHING TINTS. The line itself goes white-hot and thick along
+    // its whole length at the latch, and the two karts trade places through
+    // it. In greyscale a Tow Hook is the only frame in the game with a bright
+    // taut cable running up the road from the child's kart to a rival's.
+    flashShape: "line",
+    // How much thicker and brighter the line gets at the latch, as a multiple
+    // of its resting two pixels.
+    lineGain: 7.0,
+    // The flare at each end of it, on the two karts that are trading places.
+    pointGain: 2.2,
+    pointSpan: 1.6,
+    pointFloor: 0.11,
+    flashOver: 0.62,
   },
 }
 
@@ -389,7 +514,35 @@ function flashOf(card) {
            // for a boost -- the light comes from the child's own engine and
            // there is nowhere in the picture it does not reach -- and is what
            // every card here but the Pile-Up asks for.
-           over: b.flashOver === undefined ? 1 : b.flashOver }
+           over: b.flashOver === undefined ? 1 : b.flashOver,
+           // ROUND 5. THE SHAPE, which is the whole of this round's answer to
+           // "seven cards resolve to the same gesture". See the block above the
+           // table. A card that states no shape is full-frame, which is what
+           // every card was.
+           shape: b.flashShape === undefined ? "full" : b.flashShape,
+           gain: b.pointGain === undefined ? 1 : b.pointGain,
+           span: b.pointSpan === undefined ? 2.2 : b.pointSpan,
+           floor: b.pointFloor === undefined ? 0.18 : b.pointFloor,
+           lineGain: b.lineGain === undefined ? 1 : b.lineGain,
+           roadNear: b.roadNear === true }
+}
+
+// The same, for the Roll Cage's block -- which is not a card being played and
+// therefore has its own row rather than a `flashPeak`. Kept beside `flashOf` so
+// the two events that light the world read their numbers the same way.
+function blockFlashOf() {
+  var b = BEATS.rollCage
+  return { tone: "#ffffff",
+           peak: b.blockFlash,
+           ms: b.blockFlashMs,
+           ground: 0,
+           over: b.blockOver === undefined ? 1 : b.blockOver,
+           shape: b.blockShape === undefined ? "full" : b.blockShape,
+           gain: b.blockPointGain === undefined ? 1 : b.blockPointGain,
+           span: b.blockPointSpan === undefined ? 2.2 : b.blockPointSpan,
+           floor: b.blockPointFloor === undefined ? 0.18 : b.blockPointFloor,
+           lineGain: 1,
+           roadNear: false }
 }
 function shakeOf(card) {
   var b = BEATS[card]
@@ -521,3 +674,26 @@ function reducedOut(name) {
 // the screen doubling in brightness to say it.
 var FLASH_CAP = 0.085
 var SKY_CAP = 0.10
+
+// ROUND 5, AND THE CAP IS ABOUT AREA, WHICH IS WHY A SHAPED LIGHT GETS ITS OWN.
+//
+// `FLASH_CAP` is 0.085 because a FULL-FRAME wash at alpha a moves the whole
+// picture by roughly 125a, and 0.085 is where a reduced-motion Pile-Up lands at
+// about +16% whole-frame. That arithmetic is about the whole frame, and it is
+// the wrong arithmetic for a light that covers a sixth of it.
+//
+// A point light is a disc whose radius floors at 0.19 to 0.30 of the frame
+// HEIGHT, so at 16:9 the largest of them covers about pi*0.30^2/(16/9) = 16% of
+// the screen, and its alpha falls off as the square of the radius, so the mean
+// alpha over even that disc is a third of the peak. The road band is below the
+// horizon, which is a little over half the frame, and it makes the picture
+// DARKER rather than brighter. The line is two pixels wide.
+//
+// So a shaped light keeps the reduced-motion MULTIPLIER (a third off, as every
+// card always had) and is capped at 0.34 rather than 0.085. What that buys is
+// measured in the round-5 report: every reduced strip stays inside the +16%
+// whole-frame figure the round-4 work order named, and a child with the setting
+// on still gets a light at the place the event happened rather than a tag and
+// nothing else. The full-frame cards -- Turbo and the Pile-Up, the only two
+// left -- are unchanged and still governed by `FLASH_CAP`.
+var SHAPED_CAP = 0.34

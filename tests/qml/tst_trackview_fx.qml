@@ -613,47 +613,78 @@ Item {
     // and named it for what it is -- "the setting most likely to be switched on
     // by a photosensitive child is the one keeping most of the flash."
     //
-    // This walks every card with the setting on and holds the two washes that
-    // can cover the whole frame to `CardFx.FLASH_CAP` and `CardFx.SKY_CAP`. It
+    // This walks every card with the setting on and holds the washes that can
+    // cover the whole frame to `CardFx.FLASH_CAP` and `CardFx.SKY_CAP`. It
     // asserts the INFORMATION survives in the same breath, because a cap that
     // bought its number by removing the event would be worse than the defect:
     // every card still puts something on the screen.
+    //
+    // ROUND 5: TWO CAPS, BECAUSE THE CAP IS ABOUT AREA. Only Turbo and the
+    // Pile-Up put any light on the whole frame now; the other six spend theirs
+    // on a disc at the kart, a band on the tarmac or the tow line itself, and
+    // `FLASH_CAP` -- which was solved against the WHOLE frame, at "an alpha of
+    // a moves the picture by 125a" -- is the wrong arithmetic for a light that
+    // covers a sixth of it. `flashFullNow` is the full-frame component and is
+    // held to the old number unchanged; `flashNow` is the card's height whatever
+    // its shape, and is held to `SHAPED_CAP`. The whole-frame consequence of
+    // both is measured on the reduced strips in the round-5 report, and it is
+    // the same +13% to +16% figure round 4 landed on.
+    //
+    // A `verify` failure aborts the function, so the setting is restored in a
+    // `try/finally` rather than on the last line: round 5 changed one number,
+    // this test failed, and six later tests failed with it because the setting
+    // it had switched on was never switched off.
     function test_05c_reduced_motion_caps_the_flash_and_keeps_the_event() {
       Store.setSetting("reducedMotion", true)
-      var cards = Object.keys(Engine.CARDS)
-      var worstFlash = 0
-      var worstSky = 0
-      var loudest = ""
-      for (var c = 0; c < cards.length; c++) {
-        race.buildRace()
-        preroll()
-        race.injectEvent("cardUsed", cards[c])
-        var sawSomething = false
-        for (var f = 0; f < 26; f++) {
-          if (track.flashNow > worstFlash) {
-            worstFlash = track.flashNow
-            loudest = cards[c]
+      try {
+        var cards = Object.keys(Engine.CARDS)
+        var worstFull = 0
+        var worstShaped = 0
+        var worstSky = 0
+        var loudest = ""
+        var loudestFull = ""
+        for (var c = 0; c < cards.length; c++) {
+          race.buildRace()
+          preroll()
+          race.injectEvent("cardUsed", cards[c])
+          var sawSomething = false
+          for (var f = 0; f < 26; f++) {
+            if (track.flashFullNow > worstFull) {
+              worstFull = track.flashFullNow
+              loudestFull = cards[c]
+            }
+            if (track.flashNow > worstShaped) {
+              worstShaped = track.flashNow
+              loudest = cards[c]
+            }
+            worstSky = Math.max(worstSky, track.fxSkyFlash * track.fxSkyPeak)
+            if (root.effectBoxes().length > 0)
+              sawSomething = true
+            race.stepClock(60)
           }
-          worstSky = Math.max(worstSky, track.fxSkyFlash * track.fxSkyPeak)
-          if (root.effectBoxes().length > 0)
-            sawSomething = true
-          race.stepClock(60)
+          verify(sawSomething,
+                 cards[c] + " still draws something with reduced motion on")
         }
-        verify(sawSomething,
-               cards[c] + " still draws something with reduced motion on")
+        verify(worstFull <= CardFx.FLASH_CAP + 0.001,
+               "the loudest reduced-motion FULL-FRAME flash in the whole deck is "
+               + worstFull.toFixed(3) + " (" + loudestFull + "), cap "
+               + CardFx.FLASH_CAP)
+        verify(worstShaped <= CardFx.SHAPED_CAP + 0.001,
+               "and the loudest reduced-motion shaped light is "
+               + worstShaped.toFixed(3) + " (" + loudest + "), cap "
+               + CardFx.SHAPED_CAP)
+        verify(worstSky <= CardFx.SKY_CAP + 0.001,
+               "and the loudest reduced-motion sky flash is " + worstSky.toFixed(3)
+               + ", cap " + CardFx.SKY_CAP)
+        console.log("FX-REDUCED|full-frame " + worstFull.toFixed(3) + " (cap "
+                    + CardFx.FLASH_CAP + ") · shaped " + worstShaped.toFixed(3)
+                    + " (cap " + CardFx.SHAPED_CAP + ") · sky "
+                    + worstSky.toFixed(3) + " (cap " + CardFx.SKY_CAP
+                    + ")|loudest full-frame " + loudestFull)
+      } finally {
+        Store.setSetting("reducedMotion", false)
+        race.buildRace()
       }
-      verify(worstFlash <= CardFx.FLASH_CAP + 0.001,
-             "the loudest reduced-motion flash in the whole deck is "
-             + worstFlash.toFixed(3) + " (" + loudest + "), cap "
-             + CardFx.FLASH_CAP)
-      verify(worstSky <= CardFx.SKY_CAP + 0.001,
-             "and the loudest reduced-motion sky flash is " + worstSky.toFixed(3)
-             + ", cap " + CardFx.SKY_CAP)
-      console.log("FX-REDUCED|flash " + worstFlash.toFixed(3) + " (cap "
-                  + CardFx.FLASH_CAP + ") · sky " + worstSky.toFixed(3) + " (cap "
-                  + CardFx.SKY_CAP + ")|loudest " + loudest)
-      Store.setSetting("reducedMotion", false)
-      race.buildRace()
     }
 
     // ... AND THE ROAD IS STILL A ROAD.
@@ -1058,6 +1089,7 @@ Item {
       var cageGoesAway = false
       var ring = 0
       var flash = 0
+      var flashLit = 0
       var sparks = 0
       var said = false
       for (var f = 0; f < 26; f++) {
@@ -1070,8 +1102,21 @@ Item {
             ring = Math.max(ring, boxes[i].box.width)
           if (boxes[i].name === "fx.sparks")
             sparks = Math.max(sparks, boxes[i].box.width)
-          if (boxes[i].name === "fx.worldFlash")
+          // ROUND 5: WHEREVER THE BLOCK'S LIGHT IS DRAWN. It used to be a
+          // white pane over the whole frame; it is a disc on the cage now,
+          // with a floor of 0.30 of the frame height, most of it painted in
+          // front of the bar the wrench struck. The THRESHOLD below is
+          // unchanged -- this is the same question ("a white flash worth the
+          // name?") asked of the item that now carries the answer, not a
+          // lowered bar. `flashLit` is the widest the light got, which is the
+          // half of "loud" a peak alpha cannot say.
+          if (boxes[i].name === "fx.worldFlash"
+              || boxes[i].name === "fx.pointFlash"
+              || boxes[i].name === "fx.pointFlashOver") {
             flash = Math.max(flash, boxes[i].opacity)
+            if (boxes[i].name !== "fx.worldFlash")
+              flashLit = Math.max(flashLit, boxes[i].box.width)
+          }
         }
         if (cageNow)
           sawCage = true
@@ -1089,11 +1134,16 @@ Item {
       verify(flash >= 0.40,
              "and a white flash worth the name (" + flash.toFixed(2)
              + ", against round two's 0.30)")
+      verify(flashLit >= root.height * 0.29,
+             "and it is a light on the cage, not a pane over the picture ("
+             + Math.round(flashLit) + " px across, floor "
+             + Math.round(root.height * 0.30) + ")")
       verify(sparks >= root.height * 0.06,
              "the shatter is shards, not three puffs (" + Math.round(sparks) + " px)")
       verify(said, "and the callout reads ROLL CAGE HELD")
       console.log("FX-BLOCK|ring " + Math.round(ring) + "px|flash "
-                  + flash.toFixed(2) + "|shatter " + Math.round(sparks) + "px")
+                  + flash.toFixed(2) + " across " + Math.round(flashLit)
+                  + "px|shatter " + Math.round(sparks) + "px")
     }
 
     // THE HAND IS A HAND OF CARDS, AND THE TWELVE SEGMENTS DO BURST.
