@@ -2,9 +2,6 @@ import QtQuick
 import "parts"
 import "parts/CarMeta.js" as CarMeta
 import "parts/CardFx.js" as CardFx
-import "parts/PropMeta.js" as PropMeta
-import "parts/Terrain.js" as Terrain
-import "parts/Circuit.js" as Circuit
 
 // Looking down the track.
 //
@@ -156,27 +153,31 @@ Item {
   // measurement it controls: the far road centre at y=510 moves
   // 11846 * curve pixels at 1920x1080, so 0.0255 is a +-302 px swing and a
   // 604 px peak-to-peak excursion, 31% of the frame's width.
-  //
-  // PIECE T. The two tables and the blend now live in `ui/parts/Terrain.js`,
-  // because the shader's terrain, the fallback's terrain and the minimap's
-  // outline all read them too and three copies of a circuit is three circuits.
-  // `npm run check:terrain` holds `shaders/road.frag`'s mirror of them to that
-  // one source.
-  readonly property int sectorCount: Terrain.SECTOR_COUNT
-  readonly property real sectorLength: Terrain.SECTOR_LENGTH
-  readonly property real circuitLength: Terrain.CIRCUIT_LENGTH
+  readonly property int sectorCount: 12
+  readonly property real sectorLength: 36.0
+  readonly property real circuitLength: sectorCount * sectorLength
   readonly property real curveAmplitude: 0.0255
   readonly property real hillAmplitude: 0.030
 
   // Two long straights, one wide left-hand sweep, one tighter right-hander,
   // which is the shape the minimap draws. Positive bends the road right.
-  readonly property var sectorCurve: Terrain.SECTOR_CURVE
-  readonly property var sectorHill: Terrain.SECTOR_HILL
+  readonly property var sectorCurve: [0.00, 0.10, -0.45, -1.00, -0.80, -0.20,
+                                      0.00, 0.55, 1.00, 0.62, 0.15, -0.10]
+  readonly property var sectorHill:  [0.00, 0.30, 0.72, 0.40, 0.00, -0.40,
+                                      -0.75, -0.35, 0.10, 0.55, 0.25, -0.20]
 
   // Sampled at sector boundaries and blended with a smoothstep, so the value
   // is continuous and its slope is zero at every boundary: a corner opens and
   // closes rather than switching on.
-  function sectorBlend(table, at) { return Terrain.sectorBlend(table, at) }
+  function sectorBlend(table, at) {
+    var p = at / sectorLength
+    var i = Math.floor(p)
+    var f = p - i
+    var s = f * f * (3 - 2 * f)
+    var a = table[((i % sectorCount) + sectorCount) % sectorCount]
+    var b = table[(((i + 1) % sectorCount) + sectorCount) % sectorCount]
+    return a + (b - a) * s
+  }
 
   function curveAt(at) { return sectorBlend(sectorCurve, at) * curveAmplitude }
   function hillAt(at) { return sectorBlend(sectorHill, at) * hillAmplitude }
@@ -830,43 +831,6 @@ Item {
     shake = Math.min(1, shake + strength * 0.80)
   }
 
-  // ====================================================== GOLDEN HOUR PASSES
-  //
-  // Design v4, The circuit, "Time passes": "Golden hour should actually pass.
-  // The sun sits on the horizon at lap 1 and is half set by lap 12. Sky and
-  // haze shift with it, headlamps light around lap 8, tail lamps get brighter,
-  // the first stars appear by lap 11. Four uniforms driven by lap number, and
-  // the race gains a clock the child can feel without reading."
-  //
-  // The four are here. Everything else in the picture is a function of them:
-  // the sky's sun height and palette, the haze the whole world lerps toward,
-  // the sun's foot on the road, the headlamp cones, the stars. Race.qml sets
-  // `lap` and nothing else; a bare TrackView in the harness is at lap 1.
-  //
-  // `lap` is 1-based and `lapCount` is the design's twelve, so `nightfall` is
-  // 0 on the first lap and 1 on the last -- which is what "half set by lap 12"
-  // means once `SunsetSky.sunLift` is read: 0.80 of the disc above the horizon
-  // at lap 1, 0.50 -- a disc bisected by it -- at lap 12.
-  property int lap: 1
-  property int lapCount: 12
-  readonly property real nightfall: Math.max(0, Math.min(1,
-                                      (lap - 1) / Math.max(1, lapCount - 1)))
-  // The three beats the design names by lap, written as the lap they start on
-  // rather than as a number derived from `nightfall`, so moving `lapCount`
-  // cannot silently move them.
-  readonly property real headlampsOn: Math.max(0, Math.min(1, (lap - 7) / 2))
-  readonly property real starsOut: Math.max(0, Math.min(1, (lap - 10) / 2))
-  // Heat shimmer over the far road: strongest while the sun is still up.
-  readonly property real shimmerNow: reducedMotion ? 0 : 0.85 * (1 - nightfall * 0.7)
-  // Seconds of world time, for the things that move without the camera moving:
-  // the lake's ripples, the shimmer's wobble, the crowd's wave, the flags. It
-  // is `fxClock`, which is the deterministic clock the harness drives, so a
-  // strip written twice is the same bytes. Zero under reduced motion, which
-  // stops the water and the shimmer dead rather than slowing them -- the
-  // design's reduced motion "removes all shake, lurch, and streak lines", and
-  // a rippling reflection is a streak by another name.
-  readonly property real worldClock: reducedMotion ? 0 : fxClock / 1000
-
   // GOLDEN-HOUR PALETTE. Sampled off the bar (plan v2, "Visual direction v3"):
   // near-black purple ground, neon magenta grid, purple-tinted tarmac, the
   // horizon glow and the sun's pink-orange spill. Held here rather than in the
@@ -884,32 +848,11 @@ Item {
   // vanishing point read as nothing at all. `#d75d6b` is the palette table's
   // own horizon-glow stop and is the colour SunsetSky puts on the horizon
   // line, so the floor and the sky now meet in one tone.
-  //
-  // AND THE HAZE IS WHERE THE HOUR PASSES. Every ground, road and kerb colour
-  // in both renderers lerps toward `fogTone` by distance, so moving this one
-  // colour as the sun drops moves the entire distance of the world with it:
-  // `#d75d6b` at lap 1, a deep dusk plum by lap 12. The sky's own horizon stop
-  // is bound to the same pair (see `SunsetSky.dusk`), so the floor and the sky
-  // still meet in one tone at every lap rather than only at the first.
-  readonly property color fogDay: "#d75d6b"
-  readonly property color fogDusk: "#6b2a55"
-  readonly property color fogTone: Qt.rgba(
-      fogDay.r + (fogDusk.r - fogDay.r) * nightfall,
-      fogDay.g + (fogDusk.g - fogDay.g) * nightfall,
-      fogDay.b + (fogDusk.b - fogDay.b) * nightfall, 1)
+  readonly property color fogTone: "#d75d6b"
   readonly property color roadTone: "#221420"
   readonly property color roadToneAlt: "#2c1a2a"
   readonly property color laneTone: Theme.cream
   readonly property color sunTone: "#f0956e"
-  // The lake. Deep purple water with the sun's own core as the reflected
-  // column; both dim with the hour, because a reflection cannot outlive its
-  // source.
-  readonly property color waterTone: Qt.rgba(0.196 * (1 - 0.35 * nightfall),
-                                             0.086 * (1 - 0.35 * nightfall),
-                                             0.290 * (1 - 0.25 * nightfall), 1)
-  readonly property color waterLitTone: Qt.rgba(0.949 * (1 - 0.28 * nightfall),
-                                                0.784 * (1 - 0.36 * nightfall),
-                                                0.494 * (1 - 0.30 * nightfall), 1)
   // What fraction of the floor's fog density the tarmac and its kerbs take.
   // At 1.0 -- which is what shipped -- the road reached the fog's colour at
   // the same distance the floor did and the two became one number: measured
@@ -1023,11 +966,6 @@ Item {
       property real sunU: view.planeSunU
       property real glowRx: 0.24 * view.planeKx
       property real glowRy: 0.08 * view.planeKy
-      property real sectorLength: view.sectorLength
-      property real clock: view.worldClock
-      property real shimmer: view.shimmerNow
-      property real texelU: 1 / view.planeW
-      property real nightfall: view.nightfall
 
       property color roadColor: view.roadTone
       property color roadAlt: view.roadToneAlt
@@ -1039,8 +977,6 @@ Item {
       property color skyColor: view.fogTone
       property color fogColor: view.fogTone
       property color glowColor: view.sunTone
-      property color waterColor: view.waterTone
-      property color waterLit: view.waterLitTone
 
       onStatusChanged: view.noteShaderStatus(status)
     }
@@ -1069,11 +1005,6 @@ Item {
       sunU: view.planeSunU
       glowRx: 0.24 * view.planeKx
       glowRy: 0.08 * view.planeKy
-      sectorLength: view.sectorLength
-      clock: view.worldClock
-      shimmer: view.shimmerNow
-      texelU: 1 / view.planeW
-      nightfall: view.nightfall
 
       roadColor: view.roadTone
       roadAlt: view.roadToneAlt
@@ -1085,8 +1016,6 @@ Item {
       skyColor: view.fogTone
       fogColor: view.fogTone
       glowColor: view.sunTone
-      waterColor: view.waterTone
-      waterLit: view.waterLitTone
 
       // Under reduced motion nothing calls advance(), so the plane repaints
       // only when the camera itself changes -- which is the static plane the
