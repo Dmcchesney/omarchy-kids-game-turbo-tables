@@ -158,13 +158,73 @@ Item {
         return
       if (item.width <= 0 || item.height <= 0)
         return
-      var p = item.mapToItem(root, 0, 0)
+      // ROUND 6: all four corners, because `mapToItem(root, 0, 0)` goes through
+      // the item's own `scale` and `item.width` does not. The `+5` tag pops in
+      // at a scale that runs 0.70 to 1.00.
+      var p = item.mapToItem(root, 0, 0, item.width, item.height)
       // Three of the four washes paint through their children, so their own
       // `opacity` is 1 and says nothing; each publishes `washAlpha`, which is
       // the strongest alpha it actually puts on a pixel.
       var alpha = (item.washAlpha !== undefined) ? item.washAlpha : item.opacity
       out.push({ "name": name, "opacity": alpha,
-                 "box": Qt.rect(p.x, p.y, item.width, item.height) })
+                 "box": Qt.rect(p.x, p.y, p.width, p.height) })
+    })
+    return out
+  }
+
+  // ---------------------------------------------------- ROUND 6, DEFECT ONE
+  //
+  // THE READOUT AND THE CAR IT IS ABOUT.
+  //
+  // A blind critic found `PISTON +5` drawn on top of the green GASKET kart, and
+  // `PISTON +15` doing it again on the legendary. Every readout that names a
+  // racer -- the plate on the road, the plate on the chaser rail, the `+5` that
+  // pops over a victim -- carries that racer's id in its objectName, and every
+  // car carries its own, so this is arithmetic and not an eye judgement.
+  //
+  // THE BOX IS THE CAR, NOT THE CELL. A road cell is 192x128 of which the car
+  // is the middle. Measured over every road-camera cell of all six bodies and
+  // all eight yaws in assets/karts, alpha above the meta's contact row spans
+  // x 0.0625..0.9375 and y 0.2812..0.8125 of the cell; below the contact row is
+  // the baked contact shadow, which is ground. Those are the same four numbers
+  // `TrackView.carInk*` holds, read from the view here so the two cannot drift.
+  function carBoxes() {
+    var out = []
+    root.walk(race, function (item) {
+      var name = String(item.objectName)
+      if (name.indexOf("kart.") !== 0 || !root.drawn(item))
+        return
+      if (item.width <= 0 || item.height <= 0)
+        return
+      var p = item.mapToItem(root, 0, 0, item.width, item.height)
+      var t = race.trackView
+      out.push({ "who": name.substring(5),
+                 "box": Qt.rect(p.x + p.width * t.carInkLeft,
+                                p.y + p.height * t.carInkTop,
+                                p.width * (t.carInkRight - t.carInkLeft),
+                                p.height * (t.carInkBottom - t.carInkTop)) })
+    })
+    return out
+  }
+
+  readonly property var readoutNames: ["fx.tag.", "racePlate.", "chaserPlate."]
+
+  function readoutBoxes() {
+    var out = []
+    root.walk(race, function (item) {
+      var name = String(item.objectName)
+      if (!root.drawn(item) || item.width <= 0 || item.height <= 0)
+        return
+      for (var i = 0; i < root.readoutNames.length; i++) {
+        var pre = root.readoutNames[i]
+        if (name.indexOf(pre) !== 0)
+          continue
+        // Through the transform, size included: the `+5` tag pops in with a
+        // scale and its drawn box is smaller than its `width` says.
+        var p = item.mapToItem(root, 0, 0, item.width, item.height)
+        out.push({ "name": name, "who": name.substring(pre.length),
+                   "box": Qt.rect(p.x, p.y, p.width, p.height) })
+      }
     })
     return out
   }
@@ -1499,6 +1559,80 @@ Item {
       console.log("FX-ONSCREEN|" + checked
                   + " drawn effect boxes over ten events, 0 off the screen"
                   + "|thinnest speed-line fan " + thinnestFan + "/16")
+    }
+
+    // ------------------------------------------------- ROUND 6, DEFECT ONE
+    //
+    // A READOUT IS NEVER DRAWN ON A CAR THAT IS NOT ITS SUBJECT.
+    //
+    // The verdict: "the largest, most legible, most eye-catching element on
+    // screen is a victim's name and penalty printed on the wrong car ... in a
+    // game whose entire premise is who did what to whom, this is the defect I
+    // would fix first." It is not a craft note. The game was telling a child
+    // they hit somebody they did not hit.
+    //
+    // This drives the ten events the strips are made of, and on every frame of
+    // every one of them compares every readout box against every OTHER racer's
+    // drawn car. `TrackView.fxDodgeY` is what makes it pass; the assertion is
+    // here so it cannot quietly stop being true.
+    function test_21_no_readout_is_drawn_on_another_racers_car() {
+      var cases = [["cardUsed", "wrench"], ["cardUsed", "wrench+leader"],
+                   ["cardUsed", "pothole"], ["cardUsed", "pileUp"],
+                   ["cardUsed", "pileUp+leader"], ["cardUsed", "oilSlick"],
+                   ["cardUsed", "towHook"], ["cardUsed", "nitro"],
+                   ["cardUsed", "turbo"], ["hit", "wrench"], ["hit", "pothole"],
+                   ["blocked", "wrench"]]
+      var worst = null
+      var worstArea = 0
+      var pairs = 0
+      var boxes = 0
+      var hidden = 0
+      for (var c = 0; c < cases.length; c++) {
+        race.warmup = (cases[c][1].indexOf("leader") > 0) ? 22 : 6
+        race.buildRace()
+        preroll()
+        race.injectEvent(cases[c][0], cases[c][1])
+        for (var f = 0; f < 24; f++) {
+          var cars = root.carBoxes()
+          var reads = root.readoutBoxes()
+          boxes += reads.length
+          for (var r = 0; r < reads.length; r++) {
+            for (var k = 0; k < cars.length; k++) {
+              if (cars[k].who === reads[r].who)
+                continue
+              pairs += 1
+              var a = reads[r].box
+              var b = cars[k].box
+              var ox = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+              var oy = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+              if (ox <= 0 || oy <= 0)
+                continue
+              if (ox * oy > worstArea) {
+                worstArea = ox * oy
+                worst = { "card": cases[c][1], "frame": f, "name": reads[r].name,
+                          "on": cars[k].who, "ox": ox, "oy": oy }
+              }
+            }
+          }
+          // How often there was nowhere legal to put a readout at all. The
+          // delegate draws nothing rather than lying; this counts it.
+          for (var h = 0; h < race.trackView.kartCount; h++)
+            if (isNaN(race.trackView.fxDodgeY(h, 0, 120, 30, root.height * 0.5, 0)))
+              hidden += 1
+          race.stepClock(60)
+        }
+      }
+      verify(worst === null,
+             worst === null
+             ? "no readout is on another racer's car"
+             : ("on " + worst.card + " f" + worst.frame + ", " + worst.name
+                + " is drawn over kart." + worst.on + " by "
+                + Math.round(worst.ox) + "x" + Math.round(worst.oy) + " px"))
+      console.log("FX-TAGCLEAR|" + boxes + " readout boxes over twelve events|"
+                  + pairs + " readout/other-car pairs|0 overlaps|"
+                  + hidden + " frames with nowhere legal on the centre line")
+      race.warmup = 6
+      race.buildRace()
     }
   }
 }

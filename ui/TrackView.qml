@@ -1285,9 +1285,7 @@ Item {
       readonly property var cellFit: view.kartCell(zed)
       // The child's kart bobs a little with speed: the one thing on screen
       // that says the engine is running while the child is thinking.
-      readonly property real bob: (isHuman && !view.reducedMotion)
-                                  ? Math.sin(view.travel * 0.62) * (1.2 + view.speed * 2.6)
-                                  : 0
+      readonly property real bob: view.kartBob(isHuman)
 
       // PIECE F. The target state, read off the model's fx roles. Each is zero
       // whenever the kart is not in that state and zero always under reduced
@@ -1457,6 +1455,7 @@ Item {
       // `zed > playerZ + 1.0`, which left a rival a fifth of a question ahead
       // with no plate at all while its sprite filled a third of the screen.
       visible: !isHuman && !isGhost && delta > 0 && zed < view.drawDistance
+               && !isNaN(clearY)
       width: tag.implicitWidth + tagGap.implicitWidth + 14
       height: tag.implicitHeight + 6
       z: 2000
@@ -1486,13 +1485,21 @@ Item {
       readonly property real anchorX: view.uAt(view.laneOf(kartSeat), zed) * view.width
                                       + view.shakeX - width / 2
       readonly property real anchorY: view.vAt(zed) * view.height + view.shakeY + leader
-      readonly property real haulX: view.width * 0.5 - width / 2
-      readonly property real haulY: view.height * 0.575 + plateRow * (height + 6)
+      // ROUND 6: the rail, not the middle of the picture. See `railSlotX`.
+      readonly property real haulX: view.railSlotX(kartSeat, width)
+      readonly property real haulY: view.railSlotY(view.chaserCount + plateRow, height)
       readonly property real carX: view.uAt(view.laneOf(kartSeat), zed) * view.width
                                    + view.shakeX
       readonly property real carY: view.vAt(zed) * view.height + view.shakeY
 
       x: anchorX + (haulX - anchorX) * haul
+      // ROUND 6. Wherever the two ends of the haul put it, it may not be drawn
+      // on a car that is not this racer. `fxDodgeY` returns NaN when there is
+      // nowhere legal at all; `wantY` below is what it asked for, and `visible`
+      // refuses to draw a readout that could not be placed.
+      readonly property real wantY: anchorY + (haulY - anchorY) * haul
+      readonly property real clearY: view.fxDodgeY(index, x, width, height, wantY,
+                                                   plateRow * (height + 3))
       // BELOW the kart, stacked downward, furthest-away first.
       //
       // Above the kart was the obvious place and it was wrong twice. Three
@@ -1510,7 +1517,7 @@ Item {
       // offsets and the depths pull the same way, so the vertical gap between
       // two plates is at least one row however the field is spread.
       readonly property real leader: 3 + plateRow * (height + 3)
-      y: anchorY + (haulY - anchorY) * haul
+      y: isNaN(clearY) ? wantY : clearY
 
       // The leader: from the car's contact point on the road to the top of this
       // plate, in the rival's own paint. It used to be a one-pixel vertical
@@ -1518,15 +1525,56 @@ Item {
       // plate may have travelled halfway down the road, so it is a line between
       // two points and it stretches to keep pointing at the car it names. With
       // `haul` at zero the two ends are exactly where they were.
+      //
+      // ROUND 6 -- THICK, WARM AND ANIMATED, WHICH IS WHAT THE CRITIC ASKED FOR.
+      //
+      // The old leader was one pixel of the rival's own paint at 0.85, and the
+      // verdict's words for it were "a thin, low-contrast hairline" that a
+      // reader had to hunt for. It is the whole of the association between a
+      // readout and the car it is about, so at the moment the readout matters
+      // -- the 240 ms it is hauling and the seconds it is carrying `+5` -- it
+      // is four pixels of the rival's paint lifted toward white, and a bead of
+      // light runs down it FROM the car TO the plate, which is the direction
+      // the news travelled. At rest, with the plate sitting under its own car
+      // and the two a few pixels apart, it is the one pixel it always was.
+      readonly property real link: Math.max(haul, view.fxPlateShowing(index) ? 1 : 0)
+      readonly property real linkX1: Math.round(width / 2)
+      readonly property real linkY1: (carY < y) ? 0 : height
+      readonly property real linkX2: carX - x
+      readonly property real linkY2: carY - y
+      // The bead's head, 0..1 along the line from the car to the plate, on a
+      // 600 ms loop off the effect clock -- which `advance()` steps, so a
+      // frame strip written twice is still the same bytes.
+      readonly property real beadU: ((view.fxClock % 600) / 600)
+
       Line {
-        x1: Math.round(badge.width / 2)
-        y1: 0
-        x2: badge.carX - badge.x
-        y2: badge.carY - badge.y
-        thickness: 1 + badge.haul
-        soft: badge.haul > 0.02
-        tone: badge.paintCol
-        amount: 0.85
+        x1: badge.linkX1
+        y1: badge.linkY1
+        x2: badge.linkX2
+        y2: badge.linkY2
+        thickness: 1 + badge.link * Math.max(2, view.height * 0.0028)
+        soft: badge.link > 0.02
+        tone: Qt.rgba(badge.paintCol.r + (1 - badge.paintCol.r) * 0.35 * badge.link,
+                      badge.paintCol.g + (1 - badge.paintCol.g) * 0.35 * badge.link,
+                      badge.paintCol.b + (1 - badge.paintCol.b) * 0.35 * badge.link,
+                      1)
+        amount: 0.85 + 0.14 * badge.link
+      }
+
+      // The bead: a short bright segment travelling the line, drawn only while
+      // there is something to say.
+      Line {
+        readonly property real u0: Math.max(0, 1 - badge.beadU - 0.14)
+        readonly property real u1: Math.max(0, 1 - badge.beadU)
+        visible: badge.link > 0.35
+        x1: badge.linkX2 + (badge.linkX1 - badge.linkX2) * u0
+        y1: badge.linkY2 + (badge.linkY1 - badge.linkY2) * u0
+        x2: badge.linkX2 + (badge.linkX1 - badge.linkX2) * u1
+        y2: badge.linkY2 + (badge.linkY1 - badge.linkY2) * u1
+        thickness: 1 + badge.link * Math.max(3, view.height * 0.0042)
+        soft: true
+        tone: view.fxLinkTone(index, badge.paintCol)
+        amount: 0.92 * badge.link
       }
 
       Rectangle {
@@ -1604,6 +1652,41 @@ Item {
   // and only what the plate on the road already states for a rival in front.
   readonly property real chaserSize: Math.max(13, Math.round(height * 0.017))
 
+  // ROUND 6. The rail's geometry, as two functions, because a plate hauling
+  // down off a far car now lands ON the rail rather than in the middle of the
+  // picture -- so the arriving plate and the plate it becomes a moment later
+  // have to agree about where the rail is to the pixel.
+  //
+  // WHY THE RAIL. Round 3 hauled a far victim's plate to the centre of the
+  // near field, which is exactly where the cars are: that is how `PISTON +5`
+  // came to be drawn on top of GASKET. The rail is the one horizontal band in
+  // this picture that is structurally clear of cars -- it starts below the
+  // child's own contact point, and every rival that is level or behind is
+  // already drawn there rather than on the road. It is also where the victim
+  // is about to BE: a Wrench sends them five questions back, which is behind
+  // the camera inside a quarter of a second. So the readout travels to its own
+  // future home instead of across the field of play, and when the kart goes,
+  // nothing about the readout moves.
+  function railSlotX(seat, w) {
+    return Math.max(6, Math.min(width - w - 6,
+                                uAt(laneOf(seat), playerZ) * width + shakeX - w / 2))
+  }
+  function railSlotY(row, h) {
+    return Math.min(height - h - 6,
+                    vAt(playerZ) * height + shakeY + 10 + row * (h + 4))
+  }
+  // How many rivals are already on the rail, so a plate hauling down queues
+  // under them instead of on top of one.
+  readonly property int chaserCount: {
+    var n = 0
+    for (var i = 0; i < kartModel.count; i++) {
+      var k = kartModel.get(i)
+      if (!k.isHuman && !k.isGhost && k.kartProgress - humanProgress <= 0)
+        n += 1
+    }
+    return n
+  }
+
   Repeater {
     model: kartModel
 
@@ -1615,7 +1698,7 @@ Item {
       readonly property int gapQuestions: kartGap
       // Level counts as behind: a rival that has drawn alongside is one the
       // child cannot see out of the back of their own kart either.
-      visible: !isHuman && !isGhost && delta <= 0
+      visible: !isHuman && !isGhost && delta <= 0 && !isNaN(clearY)
 
       // Closest chaser at the bottom, which is the one arriving. Reading
       // `kartProgress` first is what makes this a live binding, the same
@@ -1641,14 +1724,15 @@ Item {
       // The lane the rival is in, projected at the child's own depth, so a kart
       // coming up the inside is drawn on the inside. Clamped into the view so a
       // wide lane in a hard corner cannot push a plate off the edge.
-      x: Math.max(6, Math.min(view.width - width - 6,
-                              view.uAt(view.laneOf(kartSeat), view.playerZ) * view.width
-                              + view.shakeX - width / 2))
+      x: view.railSlotX(kartSeat, width)
       // Under the child's kart, stacking downward, closest first. The child's
-      // kart stands on `vAt(playerZ)` and nothing else is drawn below it.
-      y: Math.min(view.height - height - 6,
-                  view.vAt(view.playerZ) * view.height + view.shakeY + 10
-                  + chaserRow * (height + 4))
+      // kart stands on `vAt(playerZ)` and nothing else is drawn below it --
+      // and ROUND 6 stops asserting that and checks it: `fxDodgeY` measures
+      // the four cars' drawn bodies and moves the plate off any of them.
+      readonly property real wantY: view.railSlotY(chaserRow, height)
+      readonly property real clearY: view.fxDodgeY(index, x, width, height, wantY,
+                                                   chaserRow * (height + 4))
+      y: isNaN(clearY) ? wantY : clearY
 
       // ROUND 4 -- THE THIRD BEAT FOLLOWS THE VICTIM OFF THE ROAD.
       //
@@ -1850,6 +1934,150 @@ Item {
       return
     slowUntil = Math.max(slowUntil, fxClock + ms)
     slowScale = scale
+  }
+
+  // ------------------------------------------------- WHERE THE CARS ARE
+  //
+  // ROUND 6, AND IT IS THE ROUND'S FIRST DEFECT: A TAG ON THE WRONG CAR.
+  //
+  // A blind critic found `PISTON +5` drawn on top of the green GASKET kart in
+  // `wrench-leader` f10 and f12 and `PISTON +15` doing the same in
+  // `pileup-leader` f13, tied to the car it was actually about by a one-pixel
+  // hairline running off to the vanishing point. That is not a craft note: the
+  // largest, most legible thing on the screen was a victim's name and penalty
+  // printed on a car that had not been hit. The game was telling a child they
+  // hit somebody they did not hit.
+  //
+  // Nothing in this view could even ASK the question, because a readout knew
+  // where its own car was and nothing knew where the others were. These three
+  // functions are that missing knowledge, and every readout that names a racer
+  // now goes through the last of them.
+  //
+  // THE BOX IS THE CAR, NOT THE CELL. A road cell is 192x128 of which the car
+  // is the middle; measured over every road-camera cell of all six bodies and
+  // all eight yaws, alpha above the meta's contact row spans x 0.0625..0.9375
+  // and y 0.2812..0.8125 of the cell. Below the contact row is the baked
+  // contact shadow, which is ground and not car. A guard that used the cell
+  // would push readouts around to clear transparent pixels; one that used only
+  // the wheels would miss the roof. These are the numbers the sheets have.
+  readonly property real carInkLeft: 0.0625
+  readonly property real carInkRight: 0.9375
+  readonly property real carInkTop: 0.28
+  readonly property real carInkBottom: 0.8125
+
+  function kartBob(human) {
+    return (human && !reducedMotion)
+           ? Math.sin(travel * 0.62) * (1.2 + speed * 2.6)
+           : 0
+  }
+
+  // The drawn car, in window coordinates, or a zero-width rect when this racer
+  // is not on the road at all. It rebuilds exactly what the kart delegate does
+  // -- the same projection, the same cell fit, the same jolt, the same bob --
+  // so the guard cannot be measuring a car that is somewhere else.
+  function fxCarBody(i) {
+    var none = Qt.rect(0, 0, 0, 0)
+    if (i < 0 || i >= kartModel.count)
+      return none
+    var k = kartModel.get(i)
+    if (k.isGhost)
+      return none
+    var z = fxKartZ(i)
+    if (z <= nearDistance || z >= drawDistance)
+      return none
+    var fit = kartCell(z)
+    var step = CarMeta.scaleStep(fit.sheetScale)
+    var cw = CarMeta.CELL_W[step] * fit.pixelScale
+    var ch = CarMeta.CELL_H[step] * fit.pixelScale
+    var meta = CarMeta.forBody(Theme.bodySheetName(((k.kartBody % 6) + 6) % 6))
+    var g = (meta && meta.ground && meta.ground.road
+             && meta.ground.road.length === 2) ? meta.ground.road : null
+    var adx = g ? Math.round(g[0] * CarMeta.ROW_SCALE[step]) * fit.pixelScale : cw / 2
+    var ady = g ? Math.round(g[1] * CarMeta.ROW_SCALE[step]) * fit.pixelScale : ch
+    var span = kartSheetPixels(z)
+    var px = uAt(laneOf(k.kartSeat), z) * width + shakeX + fxKartDx(i, span) - adx
+    var py = vAt(z) * height + shakeY + kartBob(k.isHuman) + fxKartDy(i, span) - ady
+    if (px + cw < -width || px > width * 2)
+      return none
+    return Qt.rect(px + cw * carInkLeft, py + ch * carInkTop,
+                   cw * (carInkRight - carInkLeft),
+                   ch * (carInkBottom - carInkTop))
+  }
+
+  // A hand's clearance between a readout and a car that is not its subject, so
+  // the two never merely touch either.
+  readonly property real fxDodgePad: Math.max(6, height * 0.008)
+
+  // WHERE A READOUT ABOUT ONE RACER IS ALLOWED TO BE.
+  //
+  // Given the box a readout wants, this returns the y it may have: the wanted
+  // one when nothing is in the way, and otherwise the y nearest to it at which
+  // the box misses every car except `mine`.
+  //
+  // IT IS A SEARCH, NOT A WALK, and the first cut of it was a walk: step out of
+  // the worst overlap, look again, repeat. On `nitro` f06 that oscillated --
+  // out from under the rival sweeping past put the plate on the child's own
+  // car, out from under the child's car put it back under the rival -- and
+  // after four passes it returned a colliding y with a straight face. The
+  // candidates are enumerated instead: the wanted y, and flush above and flush
+  // below every car that overlaps this box across the frame. One of those is
+  // the nearest legal y if any legal y exists, because a legal y that is not
+  // the wanted one is touching something. They are tried in order of distance
+  // from the wanted y, and the first that is inside the frame, below the
+  // fact's guard band and clear of every car wins.
+  //
+  // `rowStep` is added on the way down so that two plates leaving the same car
+  // do not land on the same line.
+  //
+  // A readout that cannot be placed at all returns NaN, and its delegate does
+  // not draw it: a readout on the wrong car is worse than no readout, which is
+  // this round's whole finding. `FX-TAGCLEAR` counts how often that happens.
+  function fxDodgeCollides(mine, x, y, w, h) {
+    for (var i = 0; i < kartModel.count; i++) {
+      if (i === mine)
+        continue
+      var b = fxCarBody(i)
+      if (b.width <= 0)
+        continue
+      if (Math.min(x + w, b.x + b.width) - Math.max(x, b.x) <= 0)
+        continue
+      if (Math.min(y + h, b.y + b.height) - Math.max(y, b.y) <= 0)
+        continue
+      return true
+    }
+    return false
+  }
+
+  function fxDodgeY(mine, x, w, h, wantY, rowStep) {
+    // Read unconditionally and first: a QML binding depends only on what the
+    // function actually touched while it ran, and an early return here used to
+    // leave a plate bound to nothing.
+    var count = kartModel.count
+    var guard = fxTopFor(x + w / 2, w / 2)
+    var floor = height - h - 4
+    var options = [wantY]
+    for (var i = 0; i < count; i++) {
+      if (i === mine)
+        continue
+      var b = fxCarBody(i)
+      if (b.width <= 0)
+        continue
+      if (Math.min(x + w, b.x + b.width) - Math.max(x, b.x) <= 0)
+        continue
+      options.push(b.y - h - fxDodgePad)
+      options.push(b.y + b.height + fxDodgePad + rowStep)
+    }
+    options.sort(function (a, c) {
+      return Math.abs(a - wantY) - Math.abs(c - wantY)
+    })
+    for (var o = 0; o < options.length; o++) {
+      var y = options[o]
+      if (y < guard || y > floor)
+        continue
+      if (!fxDodgeCollides(mine, x, y, w, h))
+        return y
+    }
+    return NaN
   }
 
   // -------------------------------------------------- the fact's guard band
@@ -2056,6 +2284,17 @@ Item {
                    plateGround.g * (1 - lit) + c.g * lit,
                    plateGround.b * (1 - lit) + c.b * lit,
                    Math.max(plateGround.a, 0.94))
+  }
+
+  // The colour the leader line's bead runs in: the effect's own tone while
+  // there is a readout, and the rival's paint otherwise.
+  function fxLinkTone(index, fallback) {
+    if (index < 0 || index >= kartModel.count)
+      return fallback
+    var k = kartModel.get(index)
+    if (k.fxPlate === "" || fxClock >= k.fxPlateUntil)
+      return fallback
+    return Qt.darker(k.fxPlateTone, 1.0)
   }
 
   // ------------------------------------------- HOW FAR AWAY THE VICTIM IS
@@ -3754,9 +3993,16 @@ Item {
 
       objectName: "fx.tag." + view.fxKartIdOf(gKart)
       x: cx - width / 2
-      y: Math.max(view.fxTopFor(cx, width / 2),
-                  view.fxKartTop(gKart) + view.kartSpriteH(zed) * 0.14
-                  - pop * view.kartSpriteH(zed) * 0.16 - height)
+      // ROUND 6: and off every car that is not the one it is about. A `+5`
+      // pops over its victim's roof, and a rival further up the road is drawn
+      // higher and smaller -- so the roof of a near victim is exactly where a
+      // far rival's body is. Six frames of `hand-slam` and `towhook` had this.
+      readonly property real wantY: Math.max(
+          view.fxTopFor(cx, width / 2),
+          view.fxKartTop(gKart) + view.kartSpriteH(zed) * 0.14
+          - pop * view.kartSpriteH(zed) * 0.16 - height)
+      readonly property real clearY: view.fxDodgeY(gKart, x, width, height, wantY, 0)
+      y: isNaN(clearY) ? wantY : clearY
       width: tagText.implicitWidth + 14
       height: tagText.implicitHeight + 8
       z: 1990
@@ -3765,7 +4011,7 @@ Item {
       // one every attacked rival crosses within about a quarter of a second.
       // The victim's news carries on from there on the chaser rail, which is
       // what round 4 built the rail smoke and the edge marker for.
-      visible: age >= 0 && u < 1 && view.fxKartOnRoad(gKart)
+      visible: age >= 0 && u < 1 && view.fxKartOnRoad(gKart) && !isNaN(clearY)
       opacity: Math.min(1, (1 - u) * 3.2)
       scale: 0.7 + pop * 0.3
 

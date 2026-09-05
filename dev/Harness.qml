@@ -249,15 +249,25 @@ Window {
     var count = 0
     harness.walk(screen, function (item) {
       if (harness.dumpRects && String(item.objectName).length > 0) {
-        var r = item.mapToItem(harness.contentItem, 0, 0)
+        // PIECE F ROUND 6 -- THE BOX IS THE DRAWN BOX.
+        //
+        // This used to print `mapToItem(root, 0, 0)` for the origin and
+        // `item.width`/`item.height` for the size, and those two do not agree
+        // about an item that carries a `scale`: the mapped point IS through the
+        // transform and the width is NOT. The `+5` tag pops in with a scale
+        // that runs 0.70 to 1.00, so a round-6 measurement read its box as
+        // 69x44 standing at the position of a 56x36 one and reported an
+        // overlap with a kart that is not on the screen. Mapping all four
+        // corners is exact for a scale about any origin.
+        var r = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
         // The seventh column is the EFFECTIVE OPACITY, added by piece F: the
         // walk prints every named item whether or not it is drawn, and a proof
         // that no effect box crosses the fact is only as good as its knowing
         // which boxes were on the screen. It is the same `effectiveOpacity`
         // --dump-text has always used, so 0 means "not drawn at all".
         console.log("rect\t" + item.objectName + "\t" + Math.round(r.x) + "\t"
-                    + Math.round(r.y) + "\t" + Math.round(item.width) + "\t"
-                    + Math.round(item.height) + "\t"
+                    + Math.round(r.y) + "\t" + Math.round(r.width) + "\t"
+                    + Math.round(r.height) + "\t"
                     + harness.effectiveOpacity(item).toFixed(3))
       }
       if (harness.dumpText && harness.isText(item) && item.text.length > 0
