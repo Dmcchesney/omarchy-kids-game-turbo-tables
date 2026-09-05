@@ -129,3 +129,30 @@ Three ways out, all of them one number, none of them a builder's to pick:
 
 Whichever is chosen belongs in `docs/design.md` as an amendment, so the piece F
 critic can judge against it rather than around it.
+
+### 4.1 Confirmed independently, and the design contradicts itself
+
+A second blind critic, judging round 3 against round 2 without seeing the first
+verdict or this file, reached the same place from its own measurements and added
+the finding that matters most:
+
+**The design's own instruction breaks the design's own rule.** "The sky flashes
+amber twice" inside a 600 ms telegraph is **3.33 Hz**, and the accessibility
+section says nothing may flash faster than 3 Hz. Two independent builders each
+noticed and each quietly stretched the spacing to 360 ms — **2.78 Hz, under the
+limit with no margin at all** — across about 44 % of the screen. Neither was
+asked to; both were right; neither could say so in the document, because build
+agents may not change the design.
+
+The critic also measured the impact flash on its own terms: the whole screen
+goes **74 → 162 → 100 → 76 luma inside 180 ms**, a full-screen near-doubling,
+and its verdict was that it would not ship that to a six-year-old without a
+designer watching it on a real panel. That is a stronger statement than §4's,
+made blind, and it should be treated as the operative one.
+
+**And it survives reduced motion at +77 %** (round 2's was +16 %). That is
+backwards: the setting most likely to be switched on by a photosensitive child
+is the one keeping most of the flash. Whatever is decided above, reduced motion
+should cap flash amplitude and not only remove shake and spin — and that is a
+defect the loop can fix without a design change, so it is going into piece F
+round 4 rather than waiting for this decision.
