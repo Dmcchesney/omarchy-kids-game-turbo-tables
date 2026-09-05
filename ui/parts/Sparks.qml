@@ -28,6 +28,13 @@ Item {
   property int seed: 0
   // How much the sparks fall relative to `reach` over the burst's life.
   property real gravity: 0.55
+  // ROUND 6. One internal pixel, in screen pixels. A spark was already a hard
+  // unantialiased square -- it just was not the SIZE of a road pixel, nor on
+  // the road's grid, so a burst was made of chips a quarter of a block across.
+  // 0 (the default) leaves it as it was.
+  property real pixel: 0
+  readonly property bool blocky: pixel > 1.05
+  function snap(v) { return blocky ? Math.round(v / pixel) * pixel : v }
 
   width: 0
   height: 0
@@ -59,13 +66,17 @@ Item {
       readonly property real dist: sparks.reach * speed * e
       readonly property real drop: sparks.reach * sparks.gravity * e * e
 
-      width: Math.max(1, Math.round(sparks.grain * (0.55 + spread * 0.65) * (1 - sparks.t * 0.6)))
+      readonly property real rawSize: sparks.grain * (0.55 + spread * 0.65)
+                                      * (1 - sparks.t * 0.6)
+      width: sparks.blocky
+             ? Math.max(sparks.pixel, Math.round(rawSize / sparks.pixel) * sparks.pixel)
+             : Math.max(1, Math.round(rawSize))
       height: width
       antialiasing: false
       color: sparks.tone
       opacity: Math.max(0, 1 - sparks.t) * (0.60 + spread * 0.40)
-      x: Math.cos(ang) * dist - width / 2
-      y: Math.sin(ang) * dist + drop - height / 2
+      x: sparks.snap(Math.cos(ang) * dist - width / 2)
+      y: sparks.snap(Math.sin(ang) * dist + drop - height / 2)
     }
   }
 }

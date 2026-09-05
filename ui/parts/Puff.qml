@@ -52,6 +52,13 @@ Item {
   // How hard the edge is: 1 is the documented squared falloff, higher values
   // pull the visible mass toward the centre (a tighter, denser puff).
   property real falloff: 2.0
+  // ROUND 6 OF PIECE F. How many screen pixels one internal pixel is -- four,
+  // at 1080p on the 480 x 270 plane. Given it, every ring's diameter is a whole
+  // number of road pixels and no ring is antialiased, so a puff is built out of
+  // the same blocks as the road under it rather than out of soft 1080p circles
+  // floating over it. 0 (the default) leaves it exactly as it was.
+  property real pixel: 0
+  readonly property bool blocky: pixel > 1.05
 
   implicitWidth: size
   implicitHeight: size
@@ -72,7 +79,11 @@ Item {
       // Ring 0 is the outermost and is painted first, so ring k sits on top of
       // every ring before it.
       readonly property int n: Math.max(1, puff.rings)
-      readonly property real d: puff.size * (1 - index / n)
+      readonly property real raw: puff.size * (1 - index / n)
+      readonly property real d: puff.blocky
+                                ? Math.max(puff.pixel,
+                                           Math.round(raw / puff.pixel) * puff.pixel)
+                                : raw
       // The composite this ring has to reach, and the one under it.
       readonly property real target: puff.amount * Math.pow((index + 1) / n, puff.falloff)
       readonly property real under: index === 0
@@ -82,7 +93,8 @@ Item {
       width: d
       height: d
       radius: d / 2
-      antialiasing: true
+      antialiasing: !puff.blocky
+      smooth: !puff.blocky
       color: Qt.rgba(puff.tone.r, puff.tone.g, puff.tone.b,
                      Math.max(0, Math.min(1, (target - under) / Math.max(0.001, 1 - under))))
     }

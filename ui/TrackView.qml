@@ -59,6 +59,23 @@ Item {
   readonly property real gridScale: 4.5
   readonly property real drawDistance: 190
   readonly property real nearDistance: 1.25
+  // ROUND 6 -- A RIVAL LEAVES THE FRAME RATHER THAN BEING DELETED IN IT.
+  //
+  // `nearDistance` is where the effect layer stops believing in a kart, and it
+  // is right for that: a rival the camera is in front of has no honest place on
+  // this road, which is what `fxKartOnRoad` is for. It was ALSO the cull on the
+  // kart sprite, and there it was wrong. Measured on `turbo` f07, both rivals
+  // are drawn 576 px wide, BOLT at x 275..851 and PISTON at x 978..1554 -- the
+  // design's "rivals ahead stream past both sides of the frame" -- and on f08
+  // they are simply gone, still large, still fully inside the picture. A car
+  // that vanishes is not a car that went past you.
+  //
+  // Between here and the camera the projection is still honest: `uAt` is
+  // `x*focal / (2*aspect*z)`, which grows without bound as z falls, so a kart
+  // in a lane leaves the side of the frame on its own and the box tests below
+  // cull it when it has. Under `passDistance` the numbers are no longer about
+  // anything -- z crosses zero and the sign flips -- so that is where it stops.
+  readonly property real passDistance: 0.45
   // Where the child's kart sits. The two numbers are locked together: a kart's
   // size and its height up the screen are both 1/z, so "low on the screen" and
   // "not enormous" are the same choice. At z = 2.6 with a kart 1.55 world
@@ -280,6 +297,22 @@ Item {
   readonly property real planeAspect: aspect * planeKy / planeKx
   readonly property real planeSunU: sunU * planeKx + (1 - planeKx) / 2
   // The overscan, in the view's own pixels: what the shake is allowed to spend.
+  // ROUND 6 -- HOW BIG ONE ROAD PIXEL IS ON THE SCREEN.
+  //
+  // The plane renders at 480 x 270 and is blown up nearest-neighbour, so at
+  // 1080p one internal pixel is a four-by-four block. The soft effects -- the
+  // plumes, the impact lights, the sun's bloom, the block's burst -- are
+  // painted at THIS resolution and upscaled with the same filter, so they are
+  // made of the same pixels as the road instead of floating over it as smooth
+  // 1080p gradients. See `ui/parts/PointLight.qml`.
+  //
+  // One number for both axes, taken from the width: the plane's two scales are
+  // equal at 16:9 and a light has to stay round at every other ratio.
+  readonly property real fxPixel: Math.max(1, width / 480)
+  // A point snapped to that grid, for the soft items whose x and y are in this
+  // view's own coordinates.
+  function fxSnap(v) { return Math.round(v / fxPixel) * fxPixel }
+
   readonly property real shakeLimitX: planePadX * width / 480
   readonly property real shakeLimitY: planePadY * height / 270
 
@@ -619,25 +652,48 @@ Item {
       return
     var raw = Math.max(0, Math.min(80, dtMs))
 
-    // PIECE F -- THE EFFECT CLOCK RUNS EVEN WHEN THE WORLD DOES NOT.
+    // ROUND 6 -- THE HIT-STOP HOLDS THE EFFECT LAYER TOO, AND THAT IS THE
+    // WHOLE OF WHY IT WAS INVISIBLE.
     //
-    // Two things below hold the world still and neither may hold the effects
-    // still with it:
+    // Rounds 2 to 5 read the design's "the FrameAnimation delta is held at
+    // zero; input is not" as freezing the WORLD and letting the effects play
+    // over it, and wrote the argument down: "a freeze that also froze the spark
+    // burst would be a dropped frame, not a hit-stop". A blind critic then
+    // measured it the only way a hit-stop can be measured -- inter-frame
+    // difference across the impact -- and found a held frame on five of
+    // eighteen strips and NONE AT ALL on Pile-Up and Turbo, whose specified
+    // values are the longest in the table, 120 and 90 ms. Round 3's own report
+    // had already noticed that the freeze stopped being separable "once the
+    // impact played over it".
     //
-    //   * a hit-stop. Design v4: "the world freezes for 60 to 120 ms at the
-    //     moment of impact ... The FrameAnimation delta is held at zero; input
-    //     is not." A freeze that also froze the spark burst would be a dropped
-    //     frame, not a hit-stop -- the point of the trick is that the impact
-    //     plays while the road holds.
-    //   * reduced motion, under which nothing about the camera moves at all,
-    //     but a flash still has to fade and a `+8` tag still has to appear and
-    //     go. Those are exactly the substitutes the design names.
+    // That is the diagnosis, and it is decisive: the world froze and the
+    // loudest layer in the picture kept animating over exactly the frames the
+    // freeze occupied, so nothing on screen looked stopped. A hit-stop that
+    // nobody can see is a property, not a feeling. The eye notices a hit-stop
+    // because THE PICTURE stops, and the picture is the effects too.
     //
-    // So the effect clock is advanced first, unconditionally, and every effect
-    // in this file is a pure function of it. That is also what makes a frame
-    // strip reproducible: `dev/Harness.qml --strip` steps this clock by a fixed
-    // number of milliseconds per frame instead of letting a FrameAnimation
-    // sample the wall clock, and the same strip written twice is the same bytes.
+    // So a hit-stop now holds everything this file draws: the clock does not
+    // advance, and every effect in the file is a pure function of it. `input is
+    // not` still holds -- the answer field, the key handling and the engine's
+    // own pulse are `ui/Race.qml`'s and are not touched by this function.
+    //
+    // The freeze is counted in REAL milliseconds rather than against a clock
+    // reading, because the clock it would be compared with is the one it is
+    // stopping.
+    //
+    // Reduced motion is the other thing that holds the world still, and it must
+    // NOT hold the effects: a flash still has to fade and a `+8` tag still has
+    // to appear and go, which are the substitutes the design names. It takes
+    // the hit-stop out entirely (`fxHold` refuses it), so the branch below is
+    // the only one that stops the effect clock.
+    if (freezeLeft > 0) {
+      freezeLeft = Math.max(0, freezeLeft - raw)
+      return
+    }
+
+    // The effect clock. `dev/Harness.qml --strip` steps it by a fixed number of
+    // milliseconds per frame instead of letting a FrameAnimation sample the
+    // wall clock, which is what makes a strip written twice the same bytes.
     fxClock += raw
     fxAdvance()
 
@@ -673,10 +729,10 @@ Item {
       return
     }
 
-    // The hit-stop itself. The road, the karts, the camera and the shake all
-    // hold exactly where they were; `fxClock` above has already moved on, so
-    // the impact that caused the freeze is playing over a still world.
-    if (fxClock < freezeUntil)
+    // The impact frame itself is drawn and then held: `fxAdvance` above has
+    // just fired `fxImpact`, which set the freeze, so this frame is the last
+    // one the world moves on before the picture stops.
+    if (freezeLeft > 0)
       return
 
     var dt = raw / 1000
@@ -1306,8 +1362,13 @@ Item {
       // times -- an undefined stacking order that can flicker between frames.
       // The child's own kart wins the tie; the rest fall back on their seat.
       z: 1000 - zed + (isHuman ? 0.002 : kartSeat * 0.0004)
-      visible: zed > view.nearDistance && zed < view.drawDistance
-               && x > -view.width * 0.6 && x < view.width * 1.6
+      // ROUND 6: `passDistance`, and a box test on both axes. A kart sweeping
+      // past the lens leaves through the side or the bottom of the frame; it is
+      // culled when it has left, not when it got close. See `passDistance`.
+      visible: zed > view.passDistance && zed < view.drawDistance
+               && x + kartArt.drawnWidth * 0.5 > -view.width * 0.2
+               && x - kartArt.drawnWidth * 0.5 < view.width * 1.2
+               && y - kartArt.drawnHeight < view.height * 1.2
 
       // The car: a sheet cell at the anchor, which is this item's origin --
       // the point the projection put on the road. A ghost is the same car,
@@ -1823,6 +1884,8 @@ Item {
           model: chaser.smoking ? 5 : 0
 
           PointLight {
+            // ROUND 6: the road's own pixel grid. See `fxPixel`.
+            pixel: view.fxPixel
             readonly property real ph: view.reducedMotion
                                        ? (0.12 + index * 0.20)
                                        : (((view.fxClock / 900) + index * 0.2) % 1)
@@ -1958,14 +2021,15 @@ Item {
   // never read from the wall clock or the date -- the same rule the race clock
   // is held to in ui/Race.qml.
   property real fxClock: 0
-  // The reading at which a hit-stop lets the world go again.
-  property real freezeUntil: 0
+  // How many real milliseconds of hit-stop are left. Not a clock reading: the
+  // clock it would be read against is the one the hit-stop stops.
+  property real freezeLeft: 0
   // ... and the same for Pile-Up's "then 300 at half speed".
   property real slowUntil: 0
   property real slowScale: 1.0
   // Exposed so a test can assert the freeze rather than infer it from a
   // position that happened not to change.
-  readonly property bool worldFrozen: fxClock < freezeUntil
+  readonly property bool worldFrozen: freezeLeft > 0
   readonly property bool worldSlowed: fxClock < slowUntil
 
   // Design v4: "hit-stop | the world freezes for 60 to 120 ms at the moment of
@@ -1974,7 +2038,7 @@ Item {
   function fxHold(ms) {
     if (reducedMotion || ms <= 0)
       return
-    freezeUntil = Math.max(freezeUntil, fxClock + ms)
+    freezeLeft = Math.max(freezeLeft, ms)
   }
   function fxSlowMo(ms, scale) {
     if (reducedMotion || ms <= 0)
@@ -2030,7 +2094,7 @@ Item {
     if (k.isGhost)
       return none
     var z = fxKartZ(i)
-    if (z <= nearDistance || z >= drawDistance)
+    if (z <= passDistance || z >= drawDistance)
       return none
     var fit = kartCell(z)
     var step = CarMeta.scaleStep(fit.sheetScale)
@@ -2706,7 +2770,7 @@ Item {
     cueImpacted = false
     cuePending = []
     hitCard = ""
-    freezeUntil = 0
+    freezeLeft = 0
     slowUntil = 0
     flashBorn = -1e9
     flashShape = "full"
@@ -2714,6 +2778,7 @@ Item {
     flashAnchor2 = -1
     shakeAxis = 0
     boostBorn = -1e9
+    shimmerBorn = -1e9
     bloomBorn = -1e9
     stretchBorn = -1e9
     cageBorn = -1e9
@@ -3081,6 +3146,7 @@ Item {
       boostMs = b.impact + b.aftermath
       boostPower = b.speedLines
       stretchBorn = fxClock
+      shimmerBorn = fxClock
       lampChaseBorn = fxClock
       lampChaseCount = b.lampChase
       lampChaseMs = b.lampChaseMs
@@ -3435,6 +3501,21 @@ Item {
 
   property real boostBorn: -1e9
   property real boostMs: 0
+  // ROUND 6. Turbo's aftermath row, and Turbo's alone: "Aftermath 1200:
+  // afterimages AND A HEAT SHIMMER AT THE EXHAUST." Nitro's row is "an
+  // afterimage trail behind the kart fading out" and nothing else, so this is
+  // the one thing in the two cards' specs that only one of them has. It has
+  // been in every round's "not covered" list since round two.
+  property real shimmerBorn: -1e9
+  readonly property real shimmerNow: {
+    var b = CardFx.BEATS.turbo
+    var t = fxClock - shimmerBorn
+    if (reducedMotion || t < 0 || t > b.impact + b.aftermath)
+      return 0
+    // Full through the road stretch, then fading over the aftermath, which is
+    // what "aftermath 1200" means for a thing that is still there.
+    return t < b.impact ? 1 : (1 - CardFx.phase(t - b.impact, b.aftermath))
+  }
   property real boostPower: 0
   readonly property real boostNow: (reducedMotion || (fxClock - boostBorn) > boostMs)
                                    ? 0
@@ -3823,6 +3904,8 @@ Item {
       visible: age >= 0 && u < 1 && d > 1 && view.fxKartOnRoad(pKart)
 
       Puff {
+        // ROUND 6: the road's own pixel grid. See `fxPixel`.
+        pixel: view.fxPixel
         anchors.centerIn: parent
         tone: pTone
         size: parent.d
@@ -3898,6 +3981,8 @@ Item {
       visible: age >= 0 && u < 1 && view.fxKartOnRoad(sKart)
 
       Sparks {
+        // ROUND 6: the road's own pixel grid. See `fxPixel`.
+        pixel: view.fxPixel
         x: parent.width / 2
         y: parent.height / 2
         t: parent.u
@@ -4004,6 +4089,8 @@ Item {
         // of `hit-wrench-14` shows the smoke as a bullseye. One radial gradient
         // has no steps in it at any size. See `ui/parts/PointLight.qml`.
         PointLight {
+          // ROUND 6: the road's own pixel grid. See `fxPixel`.
+          pixel: view.fxPixel
           // Under reduced motion the plume is still: the same puffs at a fixed
           // phase, so the victim is still visibly smoking and nothing moves.
           // That is the design's "flashes and tag changes" rule applied to a
@@ -4177,6 +4264,72 @@ Item {
     }
   }
 
+  // ------------------------------------------------------ the heat shimmer
+  //
+  // ROUND 6, AND IT IS THE ONE BEAT TURBO HAS THAT NITRO DOES NOT.
+  //
+  // The verdict: "Turbo must be a launch, not a louder Nitro. The two cards now
+  // differ only in amplitude." The investigation is in the report and its short
+  // form is that the spec's own distinguishing sentence -- "rivals ahead stream
+  // past both sides of the frame as they fall behind" -- cannot distinguish
+  // them, because a Nitro passes the same two rivals in the same way: measured
+  // on the strips, `nitro` f05-f07 and `turbo` f05-f07 both put BOLT and PISTON
+  // through 384 px and 576 px and out of the bottom corners. Skipping four
+  // questions passes a rival who is one question up exactly as skipping ten
+  // does. That is the engine's truth and no view change alters it.
+  //
+  // So the distinguishing beat is taken from the other end of Turbo's row,
+  // where the two cards' specs genuinely differ: "Aftermath 1200: afterimages
+  // AND A HEAT SHIMMER AT THE EXHAUST". Nitro has no shimmer.
+  //
+  // HOW A SHIMMER IS DRAWN WITHOUT A SHADER. Hot air over an exhaust bends the
+  // light behind it, and this renderer cannot bend anything: the road is one
+  // precompiled ShaderEffect and nothing may sample it. What it can do is what
+  // pixel art has always done for heat -- short horizontal slivers of the
+  // scene's own warm rim colour, sliding sideways out of phase with each other
+  // as they climb, so the column behind the kart reads as air that is moving
+  // rather than as smoke. They are drawn at the ROAD's own resolution and
+  // upscaled with it (see `fxPixel`), so they are made of the same pixels as
+  // everything else.
+  Item {
+    id: shimmer
+    objectName: "fx.heatShimmer"
+    readonly property real span: view.kartSheetPixels(view.playerZ)
+    readonly property real heroX: view.uAt(view.heroLane, view.playerZ) * view.width
+                                  + view.shakeX
+    readonly property real heroY: view.vAt(view.playerZ) * view.height + view.shakeY
+    visible: view.shimmerNow > 0.02 && view.heroIndex >= 0
+    width: span * 0.62
+    height: span * 0.52
+    x: heroX - width / 2
+    y: heroY - span * 0.30 - height
+    // Between the child's kart and the camera, which is where the air off its
+    // exhaust is.
+    z: 1000 - view.playerZ + 0.004
+
+    Repeater {
+      model: shimmer.visible ? 9 : 0
+
+      Rectangle {
+        // Up the column, evenly, so the bars are a texture rather than a stack.
+        readonly property real up: (index + 0.5) / 9
+        // Each bar slides on its own phase; the whole column is one wave with a
+        // twist in it, which is what rising air looks like.
+        readonly property real wob: Math.sin(view.fxClock / 105 + index * 1.9)
+        width: shimmer.width * (0.72 - up * 0.28)
+        height: Math.max(2, Math.round(view.height * 0.0045))
+        x: shimmer.width / 2 - width / 2 + wob * shimmer.width * (0.06 + up * 0.16)
+        y: shimmer.height - up * shimmer.height - height / 2
+        radius: 0
+        antialiasing: false
+        color: Theme.duskRim
+        // Faint by design: it is air, and it is over the child's own kart at
+        // the bottom of the frame for a second and a fifth.
+        opacity: view.shimmerNow * (0.20 - up * 0.13)
+      }
+    }
+  }
+
   // ------------------------------------------- the Tow Hook's motion blur
   //
   // Design v4, Tow Hook, impact: "the line goes taut and the two karts zip past
@@ -4339,6 +4492,8 @@ Item {
   // the sun. One radial gradient has no steps to show. See
   // `ui/parts/PointLight.qml`.
   PointLight {
+    // ROUND 6: the road's own pixel grid. See `fxPixel`.
+    pixel: view.fxPixel
     objectName: "fx.sunBloom"
     visible: view.bloomNow > 0.01
     tone: Theme.duskSun
@@ -4686,6 +4841,8 @@ Item {
       // inside the clipping box, so the clip takes a bite out of the top of it
       // when the fact is overhead and the light itself never moves.
       PointLight {
+        // ROUND 6: the road's own pixel grid. See `fxPixel`.
+        pixel: view.fxPixel
         tone: view.flashTone
         amount: pointFlash.amount
         // A strike's light is tighter than a lamp's: most of it is within half

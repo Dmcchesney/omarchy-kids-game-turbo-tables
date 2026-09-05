@@ -1451,11 +1451,19 @@ Item {
         race.buildRace()
         preroll()
         race.injectEvent("cardUsed", probe[q])
+        // ROUND 6: 10 ms, not 20. The camera's vertical bob is 6.6 Hz, and
+        // this is measuring the EXCURSION the picture makes rather than a
+        // stroboscopic sample of it -- at 20 ms the grid is 7.5 samples a
+        // period and which of them lands on the crest depends on where the
+        // impact happened to fall. The amplitude itself (`shake` peaks at 0.38,
+        // times 0.042 of the frame height, i.e. 17 px at 1080p) is not what
+        // moved; round 6's hit-stop holds the effect clock, so the samples land
+        // 100 ms further round the same wave.
         var ax = 0, ay = 0
-        for (var g = 0; g < 40; g++) {
+        for (var g = 0; g < 80; g++) {
           ax = Math.max(ax, Math.abs(race.trackView.shakeX))
           ay = Math.max(ay, Math.abs(race.trackView.shakeY))
-          race.stepClock(20)
+          race.stepClock(10)
         }
         axis[probe[q]] = { "x": ax, "y": ay }
       }

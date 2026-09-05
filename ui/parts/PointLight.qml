@@ -46,13 +46,40 @@ Item {
   // where a stop is visible in an upscaled 256 px disc.
   readonly property int stops: 16
 
+  // ROUND 6 OF PIECE F -- THE LIGHT IS MADE OF THE ROAD'S OWN PIXELS.
+  //
+  // The verdict, and it is the same complaint the maintainer made about the
+  // game before this piece started: "Soft 1080p Gaussian glows over a 480x270
+  // nearest-neighbour scene. The world is a low-resolution, hard-edged,
+  // dithered picture and the effects are smooth modern blooms floating above
+  // it. They must be drawn at the internal resolution and upscaled with the
+  // rest, so they are made of the same pixels as the road."
+  //
+  // `pixel` is how many screen pixels one internal pixel is -- four, at 1080p
+  // on a 480-wide plane. Given it, the gradient is painted into a canvas of
+  // exactly `width / pixel` logical pixels and blown up by `pixel` with
+  // NEAREST-NEIGHBOUR filtering and no antialiasing, so every block it puts on
+  // the screen is the size of a block of road and lines up with the same ladder
+  // of sizes. It also paints far less: a 216 px plume is a 54 x 54 fill instead
+  // of a 256 x 256 one.
+  //
+  // At `pixel` 0 (the default) nothing changes and the light is the smooth
+  // 256 px disc it was -- `CountdownScene` and `GarageStall` draw the sun with
+  // this item on screens that are not the 480 x 270 plane.
+  property real pixel: 0
+  readonly property bool blocky: pixel > 1.05 && width > pixel * 3
+  readonly property int grid: blocky
+                              ? Math.max(4, Math.min(256, Math.round(width / pixel)))
+                              : 256
+
   Canvas {
     id: face
     anchors.centerIn: parent
-    width: 256
-    height: 256
-    scale: light.width > 0 ? light.width / 256 : 1
-    smooth: true
+    width: light.grid
+    height: light.grid
+    scale: light.width > 0 ? light.width / light.grid : 1
+    smooth: !light.blocky
+    antialiasing: !light.blocky
     opacity: Math.max(0, Math.min(1, light.amount))
     visible: opacity > 0.004 && light.width > 1
     renderTarget: Canvas.Image
@@ -65,19 +92,21 @@ Item {
     onToneChanged: requestPaint()
     onFalloffChanged: requestPaint()
     onAvailableChanged: if (available) requestPaint()
+    onWidthChanged: requestPaint()
     Component.onCompleted: requestPaint()
 
     onPaint: {
       var ctx = getContext("2d")
       ctx.reset()
-      var g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128)
+      var r = width / 2
+      var g = ctx.createRadialGradient(r, r, 0, r, r, r)
       for (var i = 0; i <= light.stops; i++) {
         var u = i / light.stops
         g.addColorStop(u, Qt.rgba(face.tone.r, face.tone.g, face.tone.b,
                                   Math.pow(1 - u, face.falloff)))
       }
       ctx.fillStyle = g
-      ctx.fillRect(0, 0, 256, 256)
+      ctx.fillRect(0, 0, width, height)
     }
   }
 }
