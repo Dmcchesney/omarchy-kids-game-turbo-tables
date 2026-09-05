@@ -96,3 +96,36 @@ Note the constraints this has to live inside, none of which the design changes:
 Neither of these is a bug. Both are art and motion direction, and both should
 be briefed as their own pieces with their own bars rather than folded into a
 defect round.
+
+## 4. The Pile-Up's photosensitivity margin — a decision only the maintainer can make
+
+Raised 2026-09-05 by piece F round 3, which measured it rather than asserting
+it, and flagged it instead of acting because the remedy is a design number and
+build agents may not change the design.
+
+The design gives the Pile-Up a 600 ms telegraph in which "the sky flashes amber
+twice", then an impact flash. Measured on the shipped frames, whole-frame mean
+luma, Rec.601 on 8-bit sRGB as stored:
+
+- three crossings of a tint a child would notice inside **580 ms**;
+- two of the three are amber **hue** swings that move whole-frame luma by about
+  8 %, which is not a luminance flash on any reading of the standard I know;
+- the third is a real **2.19×** whole-frame flash at +660 ms (round 2's was
+  1.17×, and round 3 raised it deliberately, because two critics in a row said
+  the legendary card was the quietest thing in the game).
+
+So the letter of the rule — "nothing flashes faster than 3 Hz" — is met on the
+luminance reading, and three noticeable changes in 580 ms is nevertheless
+exactly the shape of the pattern the rule exists to prevent. The margin is not
+comfortable and this is a game for six-year-olds.
+
+Three ways out, all of them one number, none of them a builder's to pick:
+
+1. **Lengthen the Pile-Up's telegraph** from 600 ms, which separates the two
+   amber swings from the impact flash.
+2. **Drop one of the two sky flashes**, keeping the telegraph as it is.
+3. **Accept it as measured**, on the grounds that two of the three are hue and
+   not luminance.
+
+Whichever is chosen belongs in `docs/design.md` as an amendment, so the piece F
+critic can judge against it rather than around it.
