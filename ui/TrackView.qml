@@ -1627,7 +1627,11 @@ Item {
           // is: an invisible Repeater with a model still holds delegates whose
           // bindings re-run every frame, and there are a hundred and thirty-
           // eight of these.
-          model: propShade.visible ? (propShade.piers ? 4 : 2) : 0
+          // The second, wider tier only where it is more than a block deep:
+          // under twenty pixels of span the two slabs round to the same
+          // rectangle and the outer one is a quad drawn for nothing.
+          model: propShade.visible
+                 ? (propShade.piers ? 4 : (propShade.span > 20 ? 2 : 1)) : 0
 
           Rectangle {
             readonly property int tier: index % 2

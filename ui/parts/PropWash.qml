@@ -41,7 +41,11 @@ ColorImage {
   property var host: null
   readonly property var cell: host ? host.cell : null
 
-  visible: cell !== null && host.washAmount > 0.004
+  // Not drawn once the haze has taken the prop: at clarity 0.10 the wash is
+  // three hundredths of an alpha over a sprite that is itself a tenth there, and
+  // it is a full-size textured quad either way. See the note in PropKey.qml on
+  // what these cost and how that was measured.
+  visible: cell !== null && host.washAmount > 0.004 && host.clarity > 0.10
   source: cell ? host.sheetRoot + host.kind + ".png" : ""
   sourceClipRect: cell ? Qt.rect(cell.x, cell.y, cell.width, cell.height)
                        : Qt.rect(0, 0, 1, 1)

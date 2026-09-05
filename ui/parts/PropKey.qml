@@ -38,7 +38,8 @@ Item {
   // The rim's reach, in screen pixels. A share of the prop's drawn width, so a
   // rock wall and the same rock wall four times further away are lit the same.
   readonly property real reach: Math.max(1, drawnW * (host ? host.keyReach : 0.030))
-  readonly property real lit: host ? host.clarity * host.keyAmount : 0
+  readonly property real lit: (host && host.clarity > 0.12)
+                              ? host.clarity * host.keyAmount : 0
 
   Repeater {
     model: 2
@@ -47,7 +48,19 @@ Item {
       // Step 0 is the outer, softer reach; step 1 is the bright edge against
       // the prop itself.
       readonly property real step: index === 0 ? 1.0 : 0.34
-      visible: key.cell !== null && key.lit > 0.004 && key.drawnW > 3
+      // WHAT EACH STEP IS WORTH, AND WHERE IT STOPS BEING WORTH ANYTHING.
+      // Every silhouette here is a full-size textured quad the cell is then
+      // drawn over, so the rim is paid for in FILL and the bill is proportional
+      // to the prop's drawn area. Measured with `npm run perf`, the tint took
+      // TrackView at 1920x1080 from 3.68 to 5.77 cpu ms a frame, and effectively
+      // all of it is render: the 480x270 delta was a fourteenth of the 1080p
+      // one, which is what pixel-bound work looks like. So the outer, softer
+      // step is drawn only where its two-tone gradient can be seen at all -- a
+      // prop under about ninety pixels wide has a rim under three pixels deep
+      // and the two steps land on the same block -- and neither is drawn on a
+      // prop the haze has nearly taken.
+      visible: key.cell !== null && key.lit > 0.004
+               && key.drawnW > (index === 0 ? 90 : 12)
       source: key.cell ? key.host.sheetRoot + key.host.kind + ".png" : ""
       sourceClipRect: key.cell
                       ? Qt.rect(key.cell.x, key.cell.y, key.cell.width, key.cell.height)
