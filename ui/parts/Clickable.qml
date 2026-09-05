@@ -67,6 +67,73 @@ MouseArea {
   // the screen when it finds one.
   property string key: ""
 
+  // ------------------------------------------------------------- ROUND 2
+  //
+  // WHAT A SECOND CLICK DOES, AND WHY IT IS A PROPERTY OF THE TARGET.
+  //
+  // Round one's gate asked two questions of every control -- is there a target,
+  // is there a key -- and a critic found the defect that lives in the gap
+  // between them: `click:card 3, click:card 3`, sixteen milliseconds apart,
+  // SPENT THE WHOLE HAND, where `key:3, key:3` merely left the card chosen. Both
+  // paths existed and both were reachable, so neither direction of the parity
+  // walk could see it. The defect was in what a REPEAT does.
+  //
+  // A double-click is not a child's mistake. It is what children do with a
+  // mouse, on everything, and this game has no undo anywhere in it.
+  //
+  // So: a target that does something a child cannot take back says so, and a
+  // destructive target refuses a second press inside the interval a
+  // double-click lands in. The first press always works -- the maintainer's
+  // other complaint is that a power-up "had to be triggered multiple times",
+  // and a guard that swallowed the FIRST press would be that bug -- and the
+  // second one, the one no hand meant to send, does nothing.
+  //
+  // The choosing half of a two-press action is never destructive and is never
+  // guarded, so a child hammering a card, a swatch or a stepper arrow gets
+  // exactly what they asked for. See `ui/Picker.qml`: after this round a click
+  // on a card cannot spend it at all, whatever the interval; this guard is the
+  // second lock on the control that CAN.
+  property bool destructive: false
+
+  // 400 ms is Qt's own default `mouseDoubleClickInterval` on every platform
+  // this plugin runs on, and it is what a double-click means. A number rather
+  // than a read of `styleHints` on purpose: the guard has to be the same in a
+  // test, in the harness and on the child's machine, and a platform that set a
+  // 900 ms interval would make a deliberate second press feel broken.
+  readonly property int guardMs: hit.destructive ? 400 : 0
+
+  // The guard is a TIMER rather than two readings of a clock, and the reason is
+  // the repository's own scanner: `npm run check:readme` asserts that no plugin
+  // file may read the wall clock at all, unconditionally, because this game
+  // stores no dates anywhere -- and the scanner reads comments too, so this one
+  // does not spell the call either. A timer needs no clock to subtract from: it
+  // is running or it is
+  // not -- and "is the guard up" is then a property a test can read directly
+  // instead of a difference it has to reconstruct.
+  Timer {
+    id: guard
+    interval: hit.guardMs
+    repeat: false
+  }
+
+  // How many presses this target has refused as repeats. Here so a test can
+  // asserting the refusal HAPPENED rather than inferring it from a state that
+  // did not change -- the two are different when the state would not have
+  // changed anyway.
+  property int refusedRepeats: 0
+  readonly property bool guarding: guard.running
+
+  // How many presses this target has ACCEPTED. The repeat check reads this
+  // rather than a screen state, because "did the second press act" and "did the
+  // screen change" are different questions and only the first one is the rule.
+  property int actedCount: 0
+
+  // A target that only puts the keyboard somewhere: the stepper's centre face,
+  // the race's answer box. It takes no action, so there is nothing for a key to
+  // be the equivalent of; what it must have instead is a `stop`, and the walk
+  // checks for that rather than accepting an empty key column.
+  property bool focusOnly: false
+
   // The duck-type the harness's walk finds. QML has no `instanceof` for a
   // component here, and the walk must not have to know this file's name.
   readonly property bool isClickTarget: true
@@ -85,6 +152,15 @@ MouseArea {
   cursorShape: Qt.PointingHandCursor
 
   onClicked: {
+    // The whole press is refused, focus included: a control that moved the
+    // keyboard on a press it did not act on would be half a press.
+    if (guard.running) {
+      hit.refusedRepeats += 1
+      return
+    }
+    if (hit.guardMs > 0)
+      guard.restart()
+    hit.actedCount += 1
     if (hit.stop)
       hit.stop.forceActiveFocus(Qt.MouseFocusReason)
     hit.acted()

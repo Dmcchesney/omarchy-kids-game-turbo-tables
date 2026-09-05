@@ -59,13 +59,28 @@ FocusScope {
   // allowed to be small; the instructions are not.
   function fsFloor(v, floor) { return Math.max(floor, Math.round(v * s)) }
 
-  // The key rail as it is actually RENDERED, read straight off the item that
-  // draws it. A round of this project shipped the claim that "the panel prints
-  // the way back" over a key that appeared in no string a child could see, so
-  // the spec that makes that claim now reads the drawn string rather than
-  // rebuilding the expression it came from -- a second copy of a string is not
-  // evidence that the first one is on screen.
-  readonly property string footerText: footerLine.text
+  // The key rail as it is actually RENDERED. A round of this project shipped
+  // the claim that "the panel prints the way back" over a key that appeared in
+  // no string a child could see, so this may never be a second copy of the
+  // footer's words.
+  //
+  // ROUND 2: it is not one. `footerHints` below is the model the footer's chips
+  // are BUILT from -- each chip's printed line is `keys + "  " + action` off one
+  // of these objects -- so joining them is reading the same thing the panel
+  // draws, one step earlier. And the claim is now checked from outside as well:
+  // `dev/Harness.qml --print-controls` walks the rendered item tree, finds every
+  // visible Text that is shaped like a printed key hint, and fails the screen
+  // when one of them has no click target over it.
+  readonly property string footerText: {
+    var line = ""
+    var hints = picker.footerHints
+    for (var i = 0; i < hints.length; i++) {
+      if (i > 0)
+        line += "      "
+      line += hints[i].keys + "  " + hints[i].action
+    }
+    return line
+  }
   // The same, for the one-beat line above it: "" whenever it is not showing.
   readonly property string letGoLineText: letGoLine.visible ? letGoLine.text : ""
 
@@ -138,26 +153,96 @@ FocusScope {
   property string pendingDigit: ""
   readonly property bool deferred: picker.pendingDigit.length > 0
 
-  // The deferred footer is the longest line this panel ever prints, and it is
-  // the one line a child must be able to read. It goes on one row where the
-  // panel is wide enough for it and breaks between two of its three groups
-  // where it is not -- measured in the face the shell handed down rather than
-  // guessed, and broken by hand rather than by `WordWrap`, which put `ANSWER`
-  // and its digit on separate rows at 1366 x 768.
-  readonly property int footerWidth: picker.dockWidth - picker.px(30)
-  readonly property string deferredHead: "⌫  BACK TO THE CARD      ⏎  ANSWER " + picker.pendingDigit
-  readonly property string deferredFooter: (deferredProbe.advanceWidth > 0
-                                            && deferredProbe.advanceWidth <= picker.footerWidth)
-                                           ? (picker.deferredHead + "      ESC  BACK")
-                                           : (picker.deferredHead + "\nESC  BACK")
+  // ======================================================== PIECE M ROUND 2
+  //
+  // THE FOOTER, AS THE LIST OF CONTROLS IT IS.
+  //
+  // Every group of the printed key rail -- the keys, and what they do -- with
+  // the mouse's own route to the same thing beside it. The `Flow` at the foot
+  // of the panel renders one `KeyHint` per entry and `footerText` joins them,
+  // so there is one place a footer state is written down and the words a child
+  // reads are the words the click acts on.
+  //
+  // `act` is a name rather than a closure because a `var` model of closures is
+  // rebuilt on every binding change and each rebuild would hand the delegates
+  // new functions; `footerAct` below is the switch, and it calls the same
+  // functions the panel's own key handler calls.
+  //
+  // The deferred line used to need a `TextMetrics` probe to decide whether it
+  // fitted on one row. The `Flow` wraps between groups on its own, at any panel
+  // width, which is what the probe was approximating.
+  readonly property var footerHints: {
+    if (picker.chosen < 0)
+      return [{ "keys": "1 2 3", "action": "CHOOSE A CARD", "act": "chooseFirst",
+                "name": "choose a card", "does": "choose the first card",
+                "key": "1", "warn": false, "destructive": false,
+                "help": "Choose the first card. The 1, 2 and 3 keys choose a card each." }]
+    if (picker.deferred)
+      return [{ "keys": "⌫", "action": "BACK TO THE CARD", "act": "undoDigit",
+                "name": "back to the card",
+                "does": "take the digit back out of the answer and keep the card",
+                "key": "Backspace", "warn": false, "destructive": false,
+                "help": "Takes the " + picker.pendingDigit + " back out of the answer"
+                        + " box and keeps the card chosen. Backspace does it too." },
+              { "keys": "⏎", "action": "ANSWER " + picker.pendingDigit, "act": "submit",
+                "name": "answer " + picker.pendingDigit,
+                "does": "send " + picker.pendingDigit + " as the answer",
+                "key": "Enter", "warn": false, "destructive": true,
+                "help": "Sends " + picker.pendingDigit + " as the answer instead."
+                        + " Enter does it too." },
+              picker.backHint()]
+    if (picker.strandedTarget)
+      return [picker.backHint(true)]
+    if (!picker.enterSpends)
+      return [{ "keys": "⏎", "action": "SEND THE ANSWER", "act": "submit",
+                "name": "send the answer", "does": "send what is in the answer box",
+                "key": "Enter", "warn": false, "destructive": true,
+                "help": "Sends what is in the answer box. Enter does it too." },
+              picker.backHint()]
+    if (picker.targeting)
+      return [{ "keys": "◀ ▶", "action": "RIVAL", "act": "nextRival",
+                "name": "next rival", "does": "aim at the next rival",
+                "key": "Left, Right", "warn": false, "destructive": false,
+                "help": "Aims at the next rival. Left and right do it too." },
+              picker.useHint("USE"),
+              picker.backHint()]
+    return [picker.useHint("USE IT"), picker.backHint()]
+  }
 
-  TextMetrics {
-    id: deferredProbe
-    font.family: Theme.mono
-    font.bold: true
-    font.pixelSize: picker.fsFloor(14, 15)
-    font.letterSpacing: picker.px(1)
-    text: picker.deferredHead + "      ESC  BACK"
+  // `USE` after the rival picker, `USE IT` without one: the two strings this
+  // panel has always printed, and the one control that spends a hand.
+  function useHint(word) {
+    return { "keys": "⏎", "action": word, "act": "use", "name": "use the card",
+             "does": "use " + (picker.chosenCard.length > 0 && Engine.isCard(picker.chosenCard)
+                               ? String(Engine.CARDS[picker.chosenCard].label)
+                               : "the card"),
+             "key": "Enter", "warn": false, "destructive": true,
+             "help": "Uses the chosen card. Using one spends all three."
+                     + " Enter does it too." }
+  }
+
+  function backHint(warn) {
+    return { "keys": "ESC", "action": "BACK", "act": "back",
+             "name": "put the card back", "does": "put the chosen card back",
+             "key": "Escape", "warn": warn === true, "destructive": false,
+             "help": "Puts the chosen card back. All three cards are still yours."
+                     + " Escape does it too." }
+  }
+
+  function footerAct(act) {
+    if (act === "chooseFirst")
+      picker.tapCard(0)
+    else if (act === "use")
+      picker.useChosen()
+    else if (act === "back") {
+      picker.handTouched()
+      picker.back()
+    } else if (act === "nextRival")
+      picker.stepTarget(1)
+    else if (act === "submit")
+      picker.submitRequested()
+    else if (act === "undoDigit")
+      picker.undoDigitRequested()
   }
 
   // ======================================================== PIECE F: FEEL
@@ -343,6 +428,20 @@ FocusScope {
   // there is no arbitration to undo.
   signal handTouched()
 
+  // PIECE M ROUND 2. The two footer keys that belong to the ANSWER rather than
+  // to the hand, asked of the host because the answer is the race's.
+  //
+  // `⏎  SEND THE ANSWER` and `⏎  ANSWER n` are printed on this panel in the two
+  // states where Enter is not the hand's key, and `⌫  BACK TO THE CARD` is the
+  // press that takes a parked digit out of the field. All three are the race
+  // screen's arbitration, not this panel's -- see the deferred-digit block
+  // above -- so the chip asks and `ui/Race.qml` answers through the same
+  // `submitKey()` and `dropPending()` a real key press reaches. Standing alone
+  // in the harness neither state can arise: both need an entry, and an entry
+  // needs a race.
+  signal submitRequested()
+  signal undoDigitRequested()
+
   visible: picker.hand.length > 0 || picker.slamming
 
   // Two invariants the previous version did not keep, and both were reachable
@@ -424,19 +523,51 @@ FocusScope {
   // into it -- the card, the harness's drive script and a screen reader's press
   // action -- cannot drift apart.
   //
-  // A card that is not chosen is chosen; a card that IS chosen is used. That is
-  // the keyboard's own two presses (`2`, then Enter) collapsed onto the control
-  // they are both about, and it is why the card says `USE` on its second press
-  // rather than needing a separate button somewhere else on the panel. A
-  // targeted card with nobody left to aim at cannot be used by either route --
-  // `confirm()` refuses it and the panel already prints why.
+  // ================================================================== ROUND 2
+  //
+  // A CLICK ON A CARD CHOOSES IT, AND CANNOT SPEND IT. THAT IS THE WHOLE FIX.
+  //
+  // Round one collapsed the keyboard's two presses onto the card: an unchosen
+  // card was chosen, and a card that was already chosen was USED. A critic
+  // drove two real clicks sixteen milliseconds apart -- `click:card 3,
+  // click:card 3` -- and the hand was gone. The same key twice, `key:3, key:3`,
+  // merely left the card chosen.
+  //
+  // Everything about that is wrong in the same direction. Spending a card costs
+  // all three and there is no undo anywhere in this plugin. A double-click is
+  // not a child's mistake; it is what children do with a mouse. Nothing on
+  // screen ever said "click it again to use it" -- the second press was
+  // discoverable only from the screen reader's description -- so the gesture
+  // was undiscoverable AND destructive, which is the worst pair. And it was on
+  // the one mechanic the maintainer has already complained about: "launching a
+  // power up feels weird, I had to attempt to trigger it multiple times."
+  //
+  // The keyboard has always spent a card with a SECOND, DIFFERENT press --
+  // Enter, not the digit again -- and the panel has always printed that key.
+  // The mouse now has the same shape: the card chooses, and the footer's
+  // `⏎  USE IT` is the control that spends. It is a separate target, it says
+  // what it does in the words already on the screen, and it is marked
+  // `destructive`, so `ui/parts/Clickable.qml` refuses a second press inside
+  // the double-click interval as well.
+  //
+  // A repeat is therefore harmless on both halves: clicking a card five times
+  // chooses it five times, and the second click of a double-click on `USE IT`
+  // is refused by the guard and lands, in any case, on a footer that no longer
+  // offers it.
   function tapCard(index) {
     picker.handTouched()
-    if (picker.chosen === index) {
-      picker.confirm()
-      return
-    }
     picker.choose(index)
+  }
+
+  // Spending the chosen card, from the footer's `⏎  USE IT`. `handTouched()`
+  // first for the same reason a card click sends it: a click is not a digit, so
+  // whatever the keyboard's digit arbitration parked in the answer field has to
+  // come back out before the hand is spent.
+  function useChosen() {
+    if (picker.slamming)
+      return false
+    picker.handTouched()
+    return picker.confirm()
   }
 
   // Clicking a rival is the Left/Right arrow landing on that rival, and nothing
@@ -850,28 +981,46 @@ FocusScope {
       // and it says what Enter would actually send -- `⏎  ANSWER 1`, with the
       // digit in it -- so the child can read the cost off the panel while the
       // fact is still on screen above them.
-      Text {
-        id: footerLine
-        textFormat: Text.PlainText
+      // PIECE M ROUND 2 -- THE FOOTER IS THE CONTROLS, NOT A PICTURE OF THEM.
+      //
+      // This was one `Text`. It printed `⏎  USE IT      ESC  BACK` in the same
+      // grey mono type the race's `ESC  LEAVE` is printed in, and the race's
+      // line was a click target while this one was paint. It is the only place
+      // in the game that tells a child how to put a card back, and the only
+      // place that names the key which spends the hand -- and a mouse could
+      // press neither.
+      //
+      // Every group of the line is now a `KeyHint`: the same words, the same
+      // grammar, in the same order, each one a control that does what it says.
+      // `footerHints` below is the single model both the chips and `footerText`
+      // are built from, so the string the panel publishes cannot say something
+      // the panel does not draw. The wrapping the deferred line needed a
+      // `TextMetrics` probe for is now the `Flow`'s own.
+      Flow {
+        id: footerFlow
         width: parent.width
-        wrapMode: Text.WordWrap
-        text: picker.chosen < 0
-              ? "1 2 3  CHOOSE A CARD"
-              : (picker.deferred
-                 ? picker.deferredFooter
-                 : (picker.strandedTarget
-                    ? "ESC  BACK"
-                    : (!picker.enterSpends
-                       ? "⏎  SEND THE ANSWER      ESC  BACK"
-                       : (picker.targeting
-                          ? "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
-                          : "⏎  USE IT      ESC  BACK"))))
-        color: (picker.strandedTarget && !picker.deferred) ? Theme.hazard : Theme.text
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: picker.fsFloor(14, 15)
-        font.letterSpacing: picker.px(1)
-        lineHeight: 1.25
+        spacing: picker.px(18)
+
+        Repeater {
+          model: picker.footerHints
+
+          KeyHint {
+            keys: modelData.keys
+            action: modelData.action
+            textSize: picker.fsFloor(14, 15)
+            letterSpacing: picker.px(1)
+            idleColor: modelData.warn ? Theme.hazard : Theme.text
+            liveColor: Theme.textBright
+            padWidth: picker.px(14)
+            padHeight: picker.px(8)
+            name: modelData.name
+            does: modelData.does
+            key: modelData.key
+            destructive: modelData.destructive === true
+            help: modelData.help
+            onTapped: picker.footerAct(modelData.act)
+          }
+        }
       }
     }
   }

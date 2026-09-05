@@ -3,6 +3,7 @@ import QtQuick.Window
 import qs.Commons
 import "../ui"
 import "../ui/parts"
+import "KeyHints.js" as KeyHints
 
 // The layer-2 harness: a window that loads one screen out of ui/ with the
 // mock theme and an in-memory save file, on a Mac with no shell anywhere near
@@ -312,6 +313,25 @@ Window {
     return "#" + hex2(c.r) + hex2(c.g) + hex2(c.b) + " a=" + c.a.toFixed(3)
   }
 
+  // PIECE M ROUND 2 -- ENABLED, WALKED, FOR THE SAME REASON OPACITY IS.
+  //
+  // `item.enabled` reads the item's OWN flag, not the effective one: the
+  // settings screen disables its whole page while the reset question is open
+  // (`ui/Settings.qml`, `enabled: !settings.confirming`), and every row under it
+  // went on reporting `enabled: yes` to the walk while no click could reach it.
+  // The behaviour was right -- a critic drove a click at the Sound row behind
+  // the modal and it did not toggle -- and the TABLE was wrong about it, which
+  // is worse than it sounds for a gate whose whole claim is enumeration.
+  function effectiveEnabled(item) {
+    var node = item
+    while (node && node !== harness.contentItem) {
+      if (!node.enabled)
+        return false
+      node = node.parent
+    }
+    return true
+  }
+
   // Is the item drawn at all? An invisible ancestor hides a visible child, so
   // opacity and visibility are both walked up to the screen root.
   function effectiveOpacity(item) {
@@ -434,6 +454,129 @@ Window {
     }
   }
 
+  // ======================================================================
+  // PIECE M ROUND 2 -- THE KEY COLUMN, CHECKED RATHER THAN READ.
+  // ======================================================================
+  //
+  // Round one's gate asked only that `Clickable.key` was non-empty, and a critic
+  // pointed out what that is worth: `key: "banana"` passes. The column is the
+  // whole claim of the click -> key direction, so it is now PARSED against the
+  // very table `--do key:<name>` presses. A key string is a list of key names
+  // separated by `,`, ` or `, ` and ` and ` then `; every name in it has to be
+  // one this harness can actually post as a QKeyEvent. `banana` is not.
+  //
+  // It is not proof that the key does the same thing -- that is what the drive
+  // pairs and tests 10 to 17 are for -- but it is the difference between a
+  // column of prose and a column of keys, and a later round that rewrites the
+  // key scheme cannot leave a name behind that no keyboard has.
+  /** Can this harness press every key the string names? See dev/KeyHints.js. */
+  function keyIsPressable(spec) {
+    return KeyHints.pressable(spec)
+  }
+
+  // ======================================================================
+  // PIECE M ROUND 2 -- THE THIRD ORACLE: A PRINTED KEY IS AN AFFORDANCE.
+  // ======================================================================
+  //
+  // The hole round one's gate could not see, and the critic found by reading
+  // the screens rather than the tables: this game prints key hints -- `ESC
+  // BACK`, `H  PIT CREW`, a keycap beside a word -- and piece M made SOME of
+  // them clickable. The picker's `ESC  BACK` and the confirm sheet's
+  // `ESC  KEEP` stayed dead. Both are plain `Text` with no `Accessible.role`,
+  // so the control oracle above is structurally blind to them: it can only see
+  // items that DECLARE themselves controls, and a label never does.
+  //
+  // A child who learns that the little ESC line is pressable on one screen will
+  // press it on the next. So the walk now reads the STRINGS, in the grammar the
+  // game prints them in, and asks the same question of every one: is there a
+  // click target over it? Two forms, both taken off the screens as they are:
+  //
+  //   a hint line   a key name, two or more spaces, then what it does --
+  //                 "ESC  LEAVE", "H  PIT CREW", "1 2 3  CHOOSE A CARD",
+  //                 "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
+  //   a keycap      a Text that is NOTHING but a key name -- "ESC", "S",
+  //                 "◀ ▶", "TAB  ↑ ↓" -- sitting beside a Text that says what
+  //                 it does, which is how the settings rail and the garage
+  //                 door are drawn
+  //
+  // Bare digits are deliberately not keycaps here: a lap number, a place and a
+  // typed answer are all single digits, and a table full of those would bury
+  // the rows that matter. The digit keys reach the game through hint lines
+  // ("1 2 3  CHOOSE A CARD"), which this does see.
+  function isKeycap(text, allowDigits) {
+    return KeyHints.isKeycap(text, allowDigits)
+  }
+
+  function isHintLine(text) {
+    return KeyHints.isHintLine(text)
+  }
+
+  /** The nearest ancestor that has another visible Text under it. */
+  function keycapIsLabelled(item) {
+    var node = item.parent
+    for (var depth = 0; depth < 3 && node; depth++) {
+      var found = false
+      harness.walk(node, function (other) {
+        if (other === item || found)
+          return
+        if (harness.isText(other) && String(other.text).trim().length >= 3
+            && !harness.isKeycap(other.text, true)
+            && harness.effectiveOpacity(other) > 0.02)
+          found = true
+      })
+      if (found)
+        return true
+      node = node.parent
+    }
+    return false
+  }
+
+  /** Is this Text a printed key hint -- a promise that a key does something? */
+  function isPrintedKeyHint(item) {
+    if (!harness.isText(item) || String(item.text).trim().length === 0)
+      return false
+    if (harness.effectiveOpacity(item) <= 0.02 || !harness.effectiveEnabled(item))
+      return false
+    if (harness.isHintLine(item.text))
+      return true
+    return harness.isKeycap(item.text, false) && harness.keycapIsLabelled(item)
+  }
+
+  /**
+   * Is this item inside a KEY LEGEND -- the rail in a title band that states
+   * the whole screen's keyboard, rather than a hint offered where the action
+   * is? The garage's and the settings screen's rails are the only two, they are
+   * marked `keyLegend` on the Row that holds them, and the walk prints them as
+   * `legend` rather than failing them. See `ui/parts/KeyHint.qml`.
+   */
+  function inKeyLegend(item) {
+    var node = item
+    while (node && node !== harness.contentItem) {
+      if (node.keyLegend === true)
+        return true
+      node = node.parent
+    }
+    return false
+  }
+
+  /** The first click target at or above this item in the tree. */
+  function clickTargetOver(item) {
+    var node = item
+    while (node && node !== harness.contentItem) {
+      var found = null
+      var kids = node.children
+      for (var i = 0; kids && i < kids.length; i++) {
+        if (harness.isClickTarget(kids[i]) && harness.effectiveEnabled(kids[i])
+            && harness.effectiveOpacity(kids[i]) > 0)
+          found = kids[i]
+      }
+      if (found)
+        return found
+      node = node.parent
+    }
+    return null
+  }
+
   /**
    * Does this item's Accessible role declare it a CONTROL -- something a child
    * or a screen reader can act on -- as opposed to a pane, a grouping or a
@@ -452,7 +595,8 @@ Window {
   function clickTargetUnder(item) {
     var found = null
     harness.walk(item, function (node) {
-      if (found === null && harness.isClickTarget(node) && node.enabled
+      if (found === null && harness.isClickTarget(node)
+          && harness.effectiveEnabled(node)
           && harness.effectiveOpacity(node) > 0)
         found = node
     })
@@ -482,19 +626,37 @@ Window {
     })
 
     var mouseOnly = 0
-    console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey")
+    var unpressableKey = 0
+    var destructive = 0
+    console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey\tkind")
     for (var i = 0; i < clicks.length; i++) {
       var hit = clicks[i]
       var box = hit.mapToItem(harness.contentItem, 0, 0, hit.width, hit.height)
-      var live = hit.enabled && harness.effectiveOpacity(hit) > 0
+      var live = harness.effectiveEnabled(hit) && harness.effectiveOpacity(hit) > 0
       // A target that is not drawn at all is not a path either way; a DRAWN,
-      // ENABLED target with no key behind it is a mouse-only path.
-      if (live && String(hit.key).length === 0)
+      // ENABLED target with no key behind it is a mouse-only path -- UNLESS it
+      // only moves the keyboard. A focus-only target takes no action at all, so
+      // there is nothing for a key to be equivalent to; what it must have
+      // instead is a stop to move the keyboard ONTO, and the walk checks that
+      // rather than accepting an empty column.
+      var focusOnly = hit.focusOnly === true
+      if (live && focusOnly && !hit.stop)
         mouseOnly += 1
+      else if (live && !focusOnly && String(hit.key).length === 0)
+        mouseOnly += 1
+      // PIECE M ROUND 2. The key column is parsed, not merely counted.
+      else if (live && String(hit.key).length > 0 && !harness.keyIsPressable(hit.key))
+        unpressableKey += 1
+      if (live && hit.destructive === true)
+        destructive += 1
+      var kind = (hit.destructive === true ? "destructive" : "")
+                 + (focusOnly ? (hit.destructive === true ? "+focusOnly" : "focusOnly") : "")
       console.log("click\t" + hit.label + "\t" + Math.round(box.x) + "\t"
                   + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
                   + Math.round(box.height) + "\t" + (live ? "yes" : "no")
-                  + "\t" + hit.does + "\t" + (String(hit.key).length > 0 ? hit.key : "NONE"))
+                  + "\t" + hit.does + "\t"
+                  + (String(hit.key).length > 0 ? hit.key : (focusOnly ? "(focus only)" : "NONE"))
+                  + "\t" + (kind.length > 0 ? kind : "-"))
     }
 
     // ------------------------------------------- the walk's own premise
@@ -525,7 +687,9 @@ Window {
     harness.walk(screen, function (item) {
       if (!harness.isDeclaredControl(item))
         return
-      if (harness.effectiveOpacity(item) <= 0)
+      // Not drawn, or under an ancestor that is switched off -- the settings
+      // page behind the reset question -- is not a keyboard path either.
+      if (harness.effectiveOpacity(item) <= 0 || !harness.effectiveEnabled(item))
         return
       controls += 1
       var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
@@ -549,6 +713,11 @@ Window {
       console.log("stop\tindex\tname\thasClick")
       for (var s = 0; s < screen.stops.length; s++) {
         var stop = screen.stops[s]
+        // A stop the keyboard cannot reach right now -- every one of them while
+        // the reset question is open -- is not a keyboard path the mouse is
+        // missing. Skipped rather than failed, and the count says how many.
+        if (stop && (!harness.effectiveEnabled(stop) || harness.effectiveOpacity(stop) <= 0))
+          continue
         stopCount += 1
         var stopHit = stop ? harness.clickTargetUnder(stop) : null
         if (!stopHit)
@@ -560,15 +729,48 @@ Window {
       }
     }
 
+    // ------------------------------------------------- key -> click, oracle 3
+    // THE PRINTED KEY HINTS. Every visible Text that promises a key does
+    // something, and whether a click over it does that thing too. Neither of
+    // the oracles above can see one of these: a hint is a label, and a label
+    // never declares `Accessible.role` or appears in a `stops` array. See the
+    // block above `isPrintedKeyHint`.
+    var hints = 0
+    var hintsWithoutClick = 0
+    var legendHints = 0
+    console.log("hint\ttext\tx\ty\tw\th\thasClick")
+    harness.walk(screen, function (item) {
+      if (!harness.isPrintedKeyHint(item))
+        return
+      hints += 1
+      var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
+      var over = harness.clickTargetOver(item)
+      var legend = harness.inKeyLegend(item)
+      if (legend)
+        legendHints += 1
+      else if (!over)
+        hintsWithoutClick += 1
+      console.log("hint\t" + String(item.text).replace(/\n/g, " | ") + "\t"
+                  + Math.round(box.x) + "\t" + Math.round(box.y) + "\t"
+                  + Math.round(box.width) + "\t" + Math.round(box.height) + "\t"
+                  + (legend ? "legend" : (over ? "yes" : "NO")))
+    })
+
     console.log("parity\tscreen\t" + harness.screenName)
     console.log("parity\tclickTargets\t" + clicks.length)
     console.log("parity\tdeclaredControls\t" + controls)
     console.log("parity\tfocusStops\t" + stopCount)
+    console.log("parity\tprintedKeyHints\t" + hints)
+    console.log("parity\tlegendKeyHints\t" + legendHints)
+    console.log("parity\tdestructiveTargets\t" + destructive)
     console.log("parity\tmouseOnly\t" + mouseOnly)
+    console.log("parity\tunpressableKey\t" + unpressableKey)
     console.log("parity\tcontrolsWithoutClick\t" + keyOnly)
     console.log("parity\tstopsWithoutClick\t" + stopsWithoutClick)
+    console.log("parity\thintsWithoutClick\t" + hintsWithoutClick)
     console.log("parity\tstrayMouseHandlers\t" + strays)
     var bad = mouseOnly + keyOnly + stopsWithoutClick + strays
+              + unpressableKey + hintsWithoutClick
     console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
     Qt.exit(bad === 0 ? 0 : 1)
   }
@@ -598,7 +800,7 @@ Window {
     var targets = harness.allClickTargets()
     for (var i = 0; i < targets.length; i++) {
       var hit = targets[i]
-      if (!hit.enabled || harness.effectiveOpacity(hit) <= 0)
+      if (!harness.effectiveEnabled(hit) || harness.effectiveOpacity(hit) <= 0)
         continue
       if (String(hit.label).toLowerCase().indexOf(wanted) >= 0)
         return hit
@@ -656,6 +858,33 @@ Window {
     }
 
     var pointer = pointerLoader.item
+    // PIECE M ROUND 2 -- A REPEAT PRESS LANDS ON A PIXEL, NOT ON A NAME.
+    //
+    // `click:<label>` resolves the label to a target every time, which is right
+    // for a drive script that reads as English -- and wrong for the one thing
+    // this round is about. A child's second click of a double-click goes to the
+    // same COORDINATE, whatever is under it by then: the target may have moved,
+    // changed its label, been replaced by a different control, or gone. So the
+    // repeat sweep drives `clickat:<x>x<y>`, which posts a press at a fixed
+    // point exactly as a hand resting on a mouse does. `x` rather than a comma
+    // because `--do` is comma-separated.
+    if (kind === "clickat" || kind === "hoverat") {
+      var parts = String(value).toLowerCase().split("x")
+      if (parts.length !== 2) {
+        console.log("do: " + raw + " -> NOT A POINT (want clickat:<x>x<y>)")
+        Qt.exit(4)
+        return
+      }
+      var px = parseInt(parts[0], 10)
+      var py = parseInt(parts[1], 10)
+      if (kind === "clickat")
+        pointer.clickAt(px, py)
+      else
+        pointer.moveTo(px, py)
+      console.log("do: " + raw + " -> " + kind + " " + px + "," + py)
+      driveNext.restart()
+      return
+    }
     if (kind === "click" || kind === "hover") {
       var hit = harness.findClickTarget(value)
       if (!hit) {
@@ -697,6 +926,27 @@ Window {
       console.log("do: unhover")
     } else if (kind === "wait") {
       console.log("do: wait")
+    } else if (kind === "settle") {
+      // A whole `--settle` of the screen's own time, for a state that ARRIVES
+      // rather than being there: a hand is dealt over 570 ms, and a drive that
+      // reached for a card on the frame after `--inject handDealt` found three
+      // cards still under the panel with an opacity of zero.
+      //
+      // A DRIVE RUNS ON THE EXTERNAL CLOCK, so waiting on the wall clock alone
+      // advances nothing: `driving` sets `externalClock`, which stops the race
+      // screen's FrameAnimation dead, and the deal is a pure function of that
+      // clock. The milliseconds are handed over in the same 16 ms slices the
+      // strips use, so the state a drive walks is one the world integrated its
+      // way into rather than one it jumped to.
+      console.log("do: settle")
+      var toSettle = screenLoader.item
+      if (toSettle && typeof toSettle.stepClock === "function") {
+        var slices = Math.max(0, Math.round(harness.settleMs / 16))
+        for (var slice = 0; slice < slices; slice++)
+          toSettle.stepClock(16)
+      }
+      driveLongWait.restart()
+      return
     } else {
       console.log("do: " + raw + " -> NO SUCH STEP")
       Qt.exit(4)
@@ -728,6 +978,10 @@ Window {
     var screen = screenLoader.item
     if (screen && typeof screen.focusedName === "function")
       console.log("do focus:\t" + screen.focusedName())
+    if (harness.printControls) {
+      harness.runControlWalk()
+      return
+    }
     if (harness.dumpText || harness.dumpRects)
       harness.runDump()
     if (harness.shotPath.length > 0) {
@@ -750,7 +1004,18 @@ Window {
     id: driveNext
     // One turn of the event loop between steps, so a binding the last step
     // changed has been evaluated before the next one reads a geometry off it.
+    //
+    // SIXTEEN MILLISECONDS IS THE POINT, NOT AN ACCIDENT. Two `click:` steps in
+    // a row are therefore a real double-click -- two presses inside any
+    // double-click interval -- which is how the round-one defect was found and
+    // how the repeat sweep drives every destructive control now.
     interval: 16
+    onTriggered: harness.driveStep()
+  }
+
+  Timer {
+    id: driveLongWait
+    interval: harness.settleMs
     onTriggered: harness.driveStep()
   }
 
@@ -1073,6 +1338,12 @@ Window {
   }
 
   Timer {
+    id: controlWalkSettle
+    interval: harness.settleMs
+    onTriggered: harness.runControlWalk()
+  }
+
+  Timer {
     id: startup
     interval: 60
     onTriggered: {
@@ -1091,15 +1362,52 @@ Window {
       if (harness.hideText)
         harness.applyHideText()
 
+      // PIECE M ROUND 2 -- ENUMERATE THE STATES, NOT ONLY THE SCREENS.
+      //
+      // The critic's finding, and it is the same class as the quarantined
+      // reset round one named: `--print-controls --screen Race` printed five
+      // targets and ZERO cards, every time, because no walk was ever run in a
+      // state where the child is holding a hand. The most interesting controls
+      // on the busiest screen were in no table at all -- not because the walk
+      // could not see them, but because they did not exist in the one state the
+      // walk was ever run in.
+      //
+      // `--inject` was applied only on the shot and strip paths, so
+      // `--print-controls --warmup 11 --inject handDealt` quietly walked a race
+      // with no hand. It is applied here too now, so any state a strip can be
+      // taken of is a state the parity gate can be run in.
+      if (harness.injectArg.length > 0 && screen
+          && typeof screen.injectEvent === "function"
+          && (harness.printControls || harness.driving))
+        console.log("harness: inject " + harness.injectArg + " -> "
+                    + screen.injectEvent(harness.injectKind, harness.injectValue))
+
       // PIECE M. The control walk and the drive both come BEFORE the dump: the
       // walk quits on its own, and a drive's dump has to be taken after the
       // drive has finished rather than before it started.
-      if (harness.printControls) {
-        harness.runControlWalk()
-        return
-      }
+      //
+      // ROUND 2 -- A DRIVE IS HOW THE WALK REACHES A STATE. `--do` and
+      // `--print-controls` together drive the screen first and walk it after,
+      // so the gate can be run on a picker with a card chosen, a settings
+      // screen with the reset question open, or a race with a hand in it, and
+      // not only on the state a screen happens to open in. That is the general
+      // form of the hole the critic found: a control only reachable in a state
+      // the harness never seeds is in no table at all.
       if (harness.driving) {
         harness.driveBegin()
+        return
+      }
+      if (harness.printControls) {
+        // ROUND 2 -- THE WALK SETTLES FIRST, AND IT HAS TO.
+        //
+        // A hand arrives by being DEALT: the three cards slide up from below
+        // the panel over 570 ms and fade in as they come. Walking the tree on
+        // the frame after `--inject handDealt` therefore found three cards at
+        // the same off-screen y with an opacity of zero and printed all three
+        // as not drawn -- the state was real and the photograph was taken
+        // before it existed. The drive path has always waited `--settle` before
+        // reading anything for exactly this reason; the walk does now too.
+        controlWalkSettle.restart()
         return
       }
 

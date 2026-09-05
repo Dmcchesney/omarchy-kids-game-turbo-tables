@@ -199,14 +199,71 @@ FocusScope {
         }
       }
 
-      Text {
-        textFormat: Text.PlainText
+      // PIECE M ROUND 2. The same three groups, each one a control.
+      //
+      // This line printed the dialog's keyboard in the idiom the race screen
+      // makes clickable, and it was paint -- and `ESC  KEEP` is the sentence a
+      // child reads when they want out of a question they did not mean to open.
+      // Each group now does what it says: CHOOSE moves the armed answer the way
+      // the arrows do, ANSWER gives the armed one the way Enter does, KEEP is
+      // Escape. ANSWER is marked destructive, so a double-click cannot answer
+      // twice, and it can only ever give the answer that is already armed and
+      // marked `▸` on screen -- which starts, every time, on KEEP.
+      Flow {
         width: parent.width
-        text: "◀ ▶  CHOOSE      ⏎  ANSWER      ESC  KEEP"
-        color: Theme.textLabel
-        font.family: Theme.mono
-        font.pixelSize: confirm.fs(15)
-        font.letterSpacing: confirm.px(1)
+        spacing: confirm.px(20)
+
+        KeyHint {
+          keys: "◀ ▶"
+          action: "CHOOSE"
+          textSize: confirm.fs(15)
+          letterSpacing: confirm.px(1)
+          bold: false
+          padWidth: confirm.px(14)
+          padHeight: confirm.px(8)
+          name: "choose the other answer"
+          does: "arm the other answer"
+          key: "Left, Right"
+          help: "Moves to the other answer. Left and right do it too."
+          onTapped: confirm.choice = confirm.choice === 0 ? 1 : 0
+        }
+        KeyHint {
+          keys: "⏎"
+          action: "ANSWER"
+          textSize: confirm.fs(15)
+          letterSpacing: confirm.px(1)
+          bold: false
+          padWidth: confirm.px(14)
+          padHeight: confirm.px(8)
+          name: "give the armed answer"
+          does: "answer " + (confirm.choice === 1 ? confirm.confirmLabel
+                                                  : confirm.cancelLabel)
+          key: "Enter"
+          destructive: true
+          help: "Gives the answer marked with the arrow, which is "
+                + (confirm.choice === 1 ? confirm.confirmLabel : confirm.cancelLabel)
+                + ". Enter does it too."
+          onTapped: {
+            if (confirm.choice === 1)
+              confirm.confirmed()
+            else
+              confirm.cancelled()
+          }
+        }
+        KeyHint {
+          keys: "ESC"
+          action: confirm.cancelLabel
+          textSize: confirm.fs(15)
+          letterSpacing: confirm.px(1)
+          bold: false
+          padWidth: confirm.px(14)
+          padHeight: confirm.px(8)
+          name: "keep it"
+          does: "answer " + confirm.cancelLabel
+          key: "Escape"
+          help: "Keeps everything and closes the question. Escape does it too."
+          onTapped: confirm.cancelled()
+        }
       }
     }
   }

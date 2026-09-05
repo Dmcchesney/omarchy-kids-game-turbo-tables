@@ -128,8 +128,13 @@ Item {
   Accessible.role: Accessible.Button
   Accessible.name: "Card " + card.index + ", " + card.cardLabel + ", " + card.effect
                    + ", " + card.tier + (card.selected ? ", chosen" : "")
+  // PIECE M ROUND 2. Pressing a chosen card again does NOT use it, and this no
+  // longer says it does. Using a card spends all three and cannot be undone, so
+  // it belongs on a control of its own with the cost printed on it -- the
+  // footer's `⏎  USE IT` -- and not on the second press of the control that
+  // merely chose it. See `ui/Picker.qml`, `tapCard`.
   Accessible.description: card.selected
-                          ? "Chosen. Press it again, or Enter, to use it."
+                          ? "Chosen. Use it with the USE button below, or Enter."
                           : "Press it, or the " + card.index + " key, to choose it."
   Accessible.onPressAction: card.tapped()
 
@@ -301,8 +306,12 @@ Item {
     // See the note at the top of this file.
     stop: null
     label: "card " + card.index + " " + card.cardLabel
-    does: card.selected ? ("use " + card.cardLabel) : ("choose " + card.cardLabel)
-    key: String(card.index) + ", then Enter"
+    // ROUND 2: one meaning, in both columns. The click chooses, the digit
+    // chooses, and neither of them spends the hand -- so the key column is the
+    // digit alone, and it is no longer a two-press claim with `Enter` in it
+    // that only one of the two routes actually honoured.
+    does: "choose " + card.cardLabel
+    key: String(card.index)
     onActed: card.tapped()
   }
 }

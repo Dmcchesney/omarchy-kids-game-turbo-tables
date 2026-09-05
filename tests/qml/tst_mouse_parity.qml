@@ -4,6 +4,7 @@ import qs.Commons
 import "../../ui"
 import "../../ui/parts"
 import "../../dev"
+import "../../dev/KeyHints.js" as KeyHints
 
 // PIECE M. THE MOUSE, WITH REAL MOUSE EVENTS, AND THE PARITY AS A GATE.
 //
@@ -148,13 +149,34 @@ Item {
       // clock, so `slamming` stays true for ever and every later click on a
       // card is refused as a click on a card that is already flying off. In the
       // game the clock advances and the beat ends; here nothing advances it.
-      picker.clearChoice()
-      picker.slamBorn = -1e9
+      suite.resetScreens()
       // The pointer starts in the top-left corner, off every control on every
       // screen in this game: each keeps a page margin and a title band above
       // anything pressable. A pointer left on a control from the previous test
       // is a hover state leaking between tests.
       mouseMove(root, 0, 0)
+    }
+
+    /**
+     * Put every screen back to the state it opens in.
+     *
+     * The picker keeps two pieces of state a host would normally clear for it.
+     * `slamBorn` is the one that bites: `confirm()` sets it to `fxNow`, which is
+     * zero on a panel standing on its own with no race driving its clock, so
+     * `slamming` stays true for ever and every later click on a card is refused
+     * as a click on a card that is already flying off. In the game the clock
+     * advances and the beat ends; here nothing advances it.
+     *
+     * ROUND 2 adds the settings screen's open question, for the same class of
+     * reason and a sharper edge: a state list that DRIVES a screen into a state
+     * leaves it there, and an open reset question switches the whole settings
+     * page off underneath it -- so a question left open by one state made every
+     * control on that screen unclickable for the next.
+     */
+    function resetScreens() {
+      picker.clearChoice()
+      picker.slamBorn = -1e9
+      settings.pending = ""
     }
 
     // ------------------------------------------------------------------
@@ -187,6 +209,42 @@ Item {
         node = node.parent
       }
       return true
+    }
+
+    /**
+     * Switched on at all. `item.enabled` reads the item's OWN flag, not the
+     * effective one, so a row under `ui/Settings.qml`'s `enabled:
+     * !settings.confirming` page went on reporting `enabled: true` while the
+     * reset question was open and nothing could click it. Round one's tables
+     * were wrong about that in both the harness and here.
+     */
+    function switchedOn(item, screen) {
+      var node = item
+      while (node && node !== screen.parent) {
+        if (!node.enabled)
+          return false
+        node = node.parent
+      }
+      return true
+    }
+
+    /** Drawn, and switched on: a path a child could actually take right now. */
+    function usable(item, screen) {
+      return suite.drawn(item, screen) && suite.switchedOn(item, screen)
+    }
+
+    /**
+     * Connect `bump` to `acted()` on every destructive target under `screen`
+     * that is not already in `armed`, and remember it there.
+     */
+    function armDestructive(screen, armed, bump) {
+      var targets = suite.clickTargetsIn(screen)
+      for (var i = 0; i < targets.length; i++) {
+        if (!targets[i].destructive || armed.indexOf(targets[i]) >= 0)
+          continue
+        targets[i].acted.connect(bump)
+        armed.push(targets[i])
+      }
     }
 
     function clickTargetsIn(screen) {
@@ -224,18 +282,48 @@ Item {
     function hasClickTargetUnder(item, screen) {
       var targets = suite.clickTargetsIn(item)
       for (var i = 0; i < targets.length; i++) {
-        if (targets[i].enabled && suite.drawn(targets[i], screen))
+        if (suite.usable(targets[i], screen))
           return true
       }
       return false
     }
 
-    function screens() {
+    // ------------------------------------------------------------------
+    // THE STATES, NOT ONLY THE SCREENS.
+    //
+    // ROUND 2, and it is the same class of hole as the quarantined reset round
+    // one named honestly: a control only reachable in a state the harness never
+    // seeds is in no table at all. The picker's `⏎  USE IT` and `ESC  BACK`
+    // exist only once a card is CHOSEN; the confirm sheet's three answers exist
+    // only once a reset has been asked for. Every gate below therefore walks a
+    // list of STATES, each one reached by driving the screen into it with the
+    // mouse, and not a list of screens in whatever state they happen to open in.
+    //
+    // `prepare` is a drive, not a poke: it clicks its way in, so a state that
+    // cannot be reached with a mouse cannot be walked either.
+    function states() {
       return [{ "name": "Garage", "item": garage, "showing": "garage" },
               { "name": "Settings", "item": settings, "showing": "settings" },
+              { "name": "Settings, reset asked", "item": settings, "showing": "settings",
+                "prepare": "RESET SETTINGS" },
               { "name": "Results", "item": results, "showing": "results" },
               { "name": "Picker", "item": picker, "showing": "picker" },
+              { "name": "Picker, card chosen", "item": picker, "showing": "picker",
+                "prepare": "card 1" },
+              { "name": "Picker, aiming", "item": picker, "showing": "picker",
+                "prepare": "card 3" },
               { "name": "Countdown", "item": countdown, "showing": "countdown" }]
+    }
+
+    /** Show the state's screen and drive it into the state. */
+    function enter(state) {
+      suite.resetScreens()
+      root.showing = state.showing
+      suite.settleFrame()
+      if (state.prepare !== undefined) {
+        suite.clickNamed(state.item, state.prepare)
+        suite.settleFrame()
+      }
     }
 
     // DIRECTION ONE: nothing is reachable by click and not by key.
@@ -244,16 +332,15 @@ Item {
     // an empty `key` is a mouse-only path, which the design forbids exactly as
     // squarely as the keyboard-only ones this piece removes.
     function test_01_no_click_target_is_a_mouse_only_path() {
-      var list = suite.screens()
+      var list = suite.states()
       var checked = 0
       for (var s = 0; s < list.length; s++) {
-        root.showing = list[s].showing
-        wait(1)
+        suite.enter(list[s])
         var targets = suite.clickTargetsIn(list[s].item)
         verify(targets.length > 0, list[s].name + " has no click target at all")
         for (var i = 0; i < targets.length; i++) {
           var hit = targets[i]
-          if (!hit.enabled || !suite.drawn(hit, list[s].item))
+          if (!suite.usable(hit, list[s].item))
             continue
           checked += 1
           verify(String(hit.key).length > 0,
@@ -277,15 +364,14 @@ Item {
     // notices. It caught two on its first run: TRACK and GOAL announced
     // themselves as buttons that could not be pressed or focused.
     function test_02_every_declared_control_can_be_clicked() {
-      var list = suite.screens()
+      var list = suite.states()
       var checked = 0
       for (var s = 0; s < list.length; s++) {
-        root.showing = list[s].showing
-        wait(1)
+        suite.enter(list[s])
         var controls = suite.declaredControlsIn(list[s].item)
         for (var i = 0; i < controls.length; i++) {
           var control = controls[i]
-          if (!suite.drawn(control, list[s].item))
+          if (!suite.usable(control, list[s].item))
             continue
           checked += 1
           var name = ""
@@ -311,15 +397,21 @@ Item {
     // target under it is a control the keyboard reaches by Tab and the mouse
     // cannot reach at all.
     function test_03_every_focus_stop_can_be_clicked() {
-      var list = suite.screens()
+      var list = suite.states()
       var checked = 0
       for (var s = 0; s < list.length; s++) {
         var screen = list[s].item
         if (screen.stops === undefined || screen.stops === null)
           continue
-        root.showing = list[s].showing
-        wait(1)
+        suite.enter(list[s])
         for (var i = 0; i < screen.stops.length; i++) {
+          // A stop the keyboard cannot reach right now -- every one of them
+          // while the reset question is open, because the settings page is
+          // switched off underneath it -- is not a keyboard path the mouse is
+          // missing. `enabled` reads the item's own flag, so the ancestors are
+          // walked.
+          if (!suite.usable(screen.stops[i], screen))
+            continue
           checked += 1
           verify(suite.hasClickTargetUnder(screen.stops[i], screen),
                  list[s].name + ": Tab stop " + i + " (" + screen.focusName(i)
@@ -339,10 +431,9 @@ Item {
     // the source, so it is true of what is running: a MouseArea is duck-typed on
     // the three properties only it has together.
     function test_04_the_only_mouse_handler_in_the_game_is_the_click_target() {
-      var list = suite.screens()
+      var list = suite.states()
       for (var s = 0; s < list.length; s++) {
-        root.showing = list[s].showing
-        wait(1)
+        suite.enter(list[s])
         var all = suite.itemsUnder(list[s].item)
         for (var i = 0; i < all.length; i++) {
           var item = all[i]
@@ -368,6 +459,27 @@ Item {
                       Math.round(box.y + box.height / 2))
     }
 
+    /**
+     * Draw a frame, so a position read afterwards is a position something was
+     * drawn at.
+     *
+     * ROUND 2, and it cost an hour of a round to find: the picker's footer is a
+     * `Flow` of key hints now, so a state change re-flows the panel and moves
+     * the dock's whole contents. `wait(1)` turns the event loop once, which is
+     * not a polish pass, so a click measured on the same turn as the state
+     * change went 161 px from where the control was drawn -- and silently,
+     * because a click that lands on nothing is not an error.
+     *
+     * `grabImage` is the cheap way to force one: it renders synchronously, and
+     * `waitForRendering` on this offscreen software backend waits out its whole
+     * five-second timeout whenever no frame happens to be scheduled, which took
+     * the suite from 1.6 seconds to 72.
+     */
+    function settleFrame() {
+      wait(1)
+      grabImage(root)
+    }
+
     /** The first drawn, enabled click target on `screen` whose label contains
      *  `text`. Named rather than indexed so a reordered screen fails loudly. */
     function targetNamed(screen, text) {
@@ -375,7 +487,7 @@ Item {
       var targets = suite.clickTargetsIn(screen)
       for (var i = 0; i < targets.length; i++) {
         var hit = targets[i]
-        if (!hit.enabled || !suite.drawn(hit, screen))
+        if (!suite.usable(hit, screen))
           continue
         if (String(hit.label).toLowerCase().indexOf(wanted) >= 0)
           return hit
@@ -384,6 +496,16 @@ Item {
     }
 
     function clickNamed(screen, text) {
+      // THE FRAME HAS TO HAVE BEEN DRAWN BEFORE A POSITION IS READ OFF IT.
+      //
+      // ROUND 2, and it cost an hour: the picker's footer is a `Flow` of key
+      // hints now, so a state change re-flows the panel and the dock's height
+      // with it. `wait(1)` turns the event loop once, which is not a polish
+      // pass, so a click measured on the same turn as the state change went to
+      // where the control had been -- 161 px from where it was drawn, and
+      // silently, because a miss is not an error. Every click a test makes is
+      // now measured on a frame that exists.
+      suite.settleFrame()
       var hit = suite.targetNamed(screen, text)
       verify(hit !== null, "no click target named \"" + text + "\"")
       var at = suite.centreOf(hit)
@@ -483,9 +605,17 @@ Item {
     }
 
     // Design v4.1 names "the picker's cards" first among the things the mouse
-    // must reach. Two presses on the keyboard -- the card's number, then Enter --
-    // are two presses on the card itself: choose, then use.
-    function test_15_a_card_is_chosen_by_clicking_it_and_used_by_clicking_again() {
+    // must reach. A click on a card is the card's own key: it CHOOSES it, and
+    // that is all it can ever do.
+    //
+    // ROUND 2. This test used to be called "...and used by clicking again", and
+    // the behaviour it named is the defect a critic found: two clicks sixteen
+    // milliseconds apart spent the whole hand, where the same key twice did
+    // nothing. A double-click is what children do with a mouse and there is no
+    // undo in this plugin. Now the card chooses and the footer's `⏎  USE IT`
+    // spends -- two different controls, exactly as the keyboard has always had
+    // two different keys.
+    function test_15_a_card_is_chosen_by_clicking_it_and_clicking_it_again_cannot_spend_it() {
       root.showing = "picker"
       picker.forceActiveFocus()
       compare(picker.chosen, -1)
@@ -495,9 +625,102 @@ Item {
       compare(picker.chosen, 0, "clicking a card did not choose it")
       compare(root.cardsUsed, 0, "one click spent the hand")
 
+      // The gesture that spent the hand in round one, five times over, as fast
+      // as the test framework can post it.
+      for (var i = 0; i < 5; i++)
+        suite.clickNamed(picker, "card 1")
+      compare(root.cardsUsed, 0,
+              "clicking a chosen card spent the hand -- a double-click on a card"
+              + " must never be able to")
+      compare(picker.chosen, 0, "and the card is still the one that was chosen")
+
+      // The keyboard's own repeat, for the comparison the critic drew: `1`,
+      // `1` leaves the card chosen and spends nothing. So does the mouse now.
+      keyClick(Qt.Key_1)
+      keyClick(Qt.Key_1)
+      compare(root.cardsUsed, 0)
+      compare(picker.chosen, 0)
+    }
+
+    // The control that CAN spend a hand, and what a second press on it does.
+    function test_18_the_hand_is_spent_by_the_footer_key_that_says_so() {
+      root.showing = "picker"
+      picker.forceActiveFocus()
+
       suite.clickNamed(picker, "card 1")
-      compare(root.cardsUsed, 1, "clicking the chosen card did not use it")
-      compare(picker.chosen, -1)
+      compare(picker.chosen, 0)
+      // The panel prints the key that spends it, and the printed line is a
+      // control: this is the same string `footerText` publishes.
+      verify(picker.footerText.indexOf("⏎  USE IT") >= 0,
+             "the panel does not print the key that spends the hand: "
+             + JSON.stringify(picker.footerText))
+      var use = suite.targetNamed(picker, "use the card")
+      verify(use !== null, "the printed `⏎  USE IT` is not a click target")
+      verify(use.destructive, "the control that spends a hand is not marked destructive")
+
+      suite.clickNamed(picker, "use the card")
+      compare(root.cardsUsed, 1, "clicking USE IT did not use the card")
+    }
+
+    // THE CLASS OF CHECK ROUND ONE DID NOT HAVE: what does a REPEAT do?
+    //
+    // Neither direction of the parity walk can see a defect in a repeat, because
+    // both paths exist and both are reachable. So every destructive target on
+    // every screen is pressed three times as fast as the framework can post the
+    // events, and must do exactly what one press did. The list is generated from
+    // the tree -- `Clickable.destructive` -- so a destructive control added
+    // tomorrow is tested tomorrow without a line being added here.
+    function test_19_no_destructive_control_acts_twice_on_a_double_click() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var targets = suite.clickTargetsIn(list[s].item)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (!hit.destructive || !suite.usable(hit, list[s].item))
+            continue
+          checked += 1
+          var at = suite.centreOf(hit)
+          var label = hit.label
+          // COUNTED ON THE SIGNAL, NOT ON A PROPERTY READ AFTERWARDS. A
+          // destructive control usually STOPS EXISTING when it acts -- the
+          // picker's `⏎  USE IT` goes with the hand it spent -- so a count read
+          // off the tree after the clicks reads zero and calls that a pass.
+          //
+          // Re-armed between presses, because the interesting failure is the
+          // repeat that WALKS: press one spends the hand, the footer turns back
+          // into `1 2 3  CHOOSE A CARD` under the same pixel, press two chooses
+          // a card, and press three lands on a brand-new `⏎  USE IT`. Every
+          // destructive control that exists at each press is counted.
+          var acts = 0
+          var armed = []
+          var bump = function () { acts += 1 }
+          suite.armDestructive(list[s].item, armed, bump)
+          mouseMove(root, at.x, at.y)
+          mouseClick(root, at.x, at.y)
+          suite.armDestructive(list[s].item, armed, bump)
+          mouseClick(root, at.x, at.y)
+          suite.armDestructive(list[s].item, armed, bump)
+          mouseClick(root, at.x, at.y)
+          var before = 0
+          var after = acts
+          // ONE. Not "at most one": the first press has to work, because the
+          // maintainer's standing complaint is a power-up that had to be
+          // triggered several times and a guard that swallowed the first press
+          // would be that bug. And not more than one, whatever the second and
+          // third presses landed on -- the count is over EVERY destructive
+          // target on the screen, so a repeat that walks through a changing
+          // panel and reaches a second destructive control is caught too.
+          compare(after - before, 1,
+                  list[s].name + ": three clicks on \"" + label + "\", 16 ms apart,"
+                  + " did " + (after - before) + " destructive things. A double-click"
+                  + " is what a child does with a mouse and there is no undo in this game.")
+          suite.enter(list[s])
+        }
+      }
+      verify(checked >= 3, "only " + checked + " destructive controls were found across"
+             + " every state; the walk is not seeing them")
     }
 
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {

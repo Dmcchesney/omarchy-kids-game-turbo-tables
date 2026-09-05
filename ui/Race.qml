@@ -2205,6 +2205,46 @@ FocusScope {
         }
       }
 
+      // ================================================== PIECE M ROUND 2
+      //
+      // THE ANSWER BOX ANSWERS "IS THIS THING ALIVE", AND NOTHING ELSE.
+      //
+      // The one thing on this screen a child will click first is the biggest
+      // box on it, and until now it took no click at all. It still takes no
+      // ACTION: the design forbids free text anywhere in this game, the answer
+      // is one to three digits, and the piece F rubric forbids anything that
+      // covers the fact -- so there is no keypad here and there is not going to
+      // be one. What a click does is put the keyboard in the box and show the
+      // caret, which is exactly `ui/parts/Stepper.qml`'s inert centre face:
+      // the idiom for "the middle of a control takes focus and stops there" is
+      // already established in this game and this is a second use of it.
+      //
+      // `focusOnly` says so in the parity table rather than inventing a key
+      // that does the same thing, because no key does: the keyboard is already
+      // here. What the walk checks instead is that the target names a `stop` --
+      // a focus-only target that focused nothing would be a press that did
+      // nothing at all, which is the defect this whole piece is against.
+      Clickable {
+        id: fieldHit
+        objectName: "clickAnswerField"
+        stop: keys
+        focusOnly: true
+        label: "answer box"
+        does: "put the keyboard in the answer box"
+        key: ""
+      }
+
+      // And it lights, because that is the rule the whole game keeps: if it
+      // lights up when you point at it, you can press it. Only under the
+      // pointer -- no frame taken without a hover is changed by a pixel.
+      FocusRing {
+        on: fieldHit.hovered
+        hover: true
+        radius: Theme.cornerRadiusSmall
+        wash: false
+        gap: 4
+      }
+
       Text {
         anchors.centerIn: parent
         textFormat: Text.PlainText
@@ -2474,6 +2514,16 @@ FocusScope {
       race.dropPending()
       race.takeBackProvisional()
     }
+
+    // PIECE M ROUND 2. The two footer keys that are the ANSWER's, not the
+    // hand's. `⏎  SEND THE ANSWER` and `⏎  ANSWER n` go through `submitKey()`,
+    // which is the one place Enter means something on this screen, and
+    // `⌫  BACK TO THE CARD` through `dropPending()`, which is Backspace's own
+    // branch for a parked digit. Neither is a second copy of the rule: they are
+    // the same two functions the key handler calls, so a click and a press
+    // cannot mean different things.
+    onSubmitRequested: race.submitKey()
+    onUndoDigitRequested: race.dropPending()
   }
 
   // The charge sits directly above the picker's dock, so the two read as one
@@ -2537,108 +2587,71 @@ FocusScope {
     anchors.bottomMargin: race.px(28)
     spacing: race.px(6)
 
-    Item {
+    KeyHint {
       id: pitCrewHint
-      width: pitCrewText.implicitWidth + race.px(16)
-      height: pitCrewText.implicitHeight + race.px(9)
-
-      Accessible.role: Accessible.Button
-      Accessible.name: "Pit crew"
-      Accessible.description: "Shows the answer and moves on. The H key does it too."
-      Accessible.onPressAction: pitCrewHit.acted()
-
-      Rectangle {
-        anchors.fill: parent
-        radius: Theme.cornerRadiusSmall
-        visible: pitCrewHit.hovered
-        color: Theme.hoverFill
-        border.width: 1
-        border.color: Theme.hoverRing
-      }
-
-      Text {
-        id: pitCrewText
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        text: "H  PIT CREW"
-        color: pitCrewHit.hovered ? Theme.textBright : Theme.textLabel
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: race.fs(17)
-        font.letterSpacing: 2
-      }
-
-      Clickable {
-        id: pitCrewHit
-        objectName: "clickPitCrew"
-        stop: null
-        label: "pit crew"
-        does: "show the answer and move on"
-        key: "H"
-        // The same three calls the `H` branch of `keys` makes, in the same
-        // order and for the same reason: the hint moves the fact on, so every
-        // claim on the old fact's field has to die with it.
-        onActed: {
-          if (!race.state)
-            return
-          race.dropPending()
-          race.clearProvisional()
-          race.send({ "kind": "hint" })
-        }
+      keys: "H"
+      action: "PIT CREW"
+      textSize: race.fs(17)
+      letterSpacing: 2
+      padWidth: race.px(16)
+      padHeight: race.px(9)
+      name: "pit crew"
+      does: "show the answer and move on"
+      key: "H"
+      help: "Shows the answer and moves on. The H key does it too."
+      // The same three calls the `H` branch of `keys` makes, in the same
+      // order and for the same reason: the hint moves the fact on, so every
+      // claim on the old fact's field has to die with it.
+      onTapped: {
+        if (!race.state)
+          return
+        race.dropPending()
+        race.clearProvisional()
+        race.send({ "kind": "hint" })
       }
     }
 
-    Item {
+    // PIECE M ROUND 2 -- THE LABEL FOLLOWS THE BEHAVIOUR.
+    //
+    // This control read `ESC  LEAVE` and, with a card chosen, put the card back
+    // instead of leaving. The overload is Escape's own and it is right -- back
+    // one is back one, at every moment of the game -- but on the keyboard the
+    // picker's footer prints `ESC  BACK` while the card is chosen and says so.
+    // The mouse user reads the button, and the button said the other thing. So
+    // the words change with the meaning, and so does the parity table's `does`
+    // column, and so does whether this is a control that throws something away:
+    // putting a card back costs nothing and is not guarded; leaving a race
+    // cannot be undone and is.
+    KeyHint {
       id: leaveHint
-      width: leaveText.implicitWidth + race.px(16)
-      height: leaveText.implicitHeight + race.px(9)
-
-      Accessible.role: Accessible.Button
-      Accessible.name: "Leave the race"
-      Accessible.description: "Back to the garage. The Escape key does it too."
-      Accessible.onPressAction: leaveHit.acted()
-
-      Rectangle {
-        anchors.fill: parent
-        radius: Theme.cornerRadiusSmall
-        visible: leaveHit.hovered
-        color: Theme.hoverFill
-        border.width: 1
-        border.color: Theme.hoverRing
-      }
-
-      Text {
-        id: leaveText
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        text: "ESC  LEAVE"
-        color: leaveHit.hovered ? Theme.textBright : Theme.textLabel
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: race.fs(17)
-        font.letterSpacing: 2
-      }
-
-      Clickable {
-        id: leaveHit
-        objectName: "clickRaceLeave"
-        stop: null
-        label: "leave the race"
-        does: "go back to the garage"
-        key: "Escape"
-        // Escape's own branch, with its one meaning: back out of a card choice
-        // if there is one, and otherwise leave.
-        onActed: {
-          race.clearRevealQueue()
-          if (picker.chosen >= 0) {
-            race.dropPending()
-            race.takeBackProvisional()
-            picker.reset()
-            return
-          }
+      readonly property bool putsCardBack: picker.chosen >= 0
+      keys: "ESC"
+      action: leaveHint.putsCardBack ? "BACK" : "LEAVE"
+      textSize: race.fs(17)
+      letterSpacing: 2
+      padWidth: race.px(16)
+      padHeight: race.px(9)
+      name: leaveHint.putsCardBack ? "put the card back" : "leave the race"
+      does: leaveHint.putsCardBack ? "put the chosen card back"
+                                   : "go back to the garage"
+      key: "Escape"
+      destructive: !leaveHint.putsCardBack
+      help: leaveHint.putsCardBack
+            ? "Puts the chosen card back. All three cards are still yours."
+              + " The Escape key does it too."
+            : "Back to the garage. The Escape key does it too."
+      // Escape's own branch, with its one meaning: back out of a card choice
+      // if there is one, and otherwise leave.
+      onTapped: {
+        race.clearRevealQueue()
+        if (picker.chosen >= 0) {
           race.dropPending()
-          race.leaveRequested()
+          race.takeBackProvisional()
+          picker.reset()
+          return
         }
+        race.dropPending()
+        race.leaveRequested()
       }
     }
   }

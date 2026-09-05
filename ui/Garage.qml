@@ -359,7 +359,26 @@ FocusScope {
 
       // The right half of the rail was empty. This is a keyboard-only game,
       // so what belongs in it is the keyboard.
+      //
+      // PIECE M ROUND 2 -- THIS IS A LEGEND, AND IT SAYS SO.
+      //
+      // Every printed key hint in this game is a control except the ones in a
+      // rail like this: it states the whole screen's keyboard from the title
+      // band rather than offering an action at the place the action happens,
+      // and there is no honest mouse equivalent of "TAB moves" other than
+      // pointing at the thing you want, which is what the mouse already does.
+      // An on-screen Tab key would be a second way to do everything and a
+      // control a child could press that changes nothing they were looking at.
+      //
+      // So it is marked, the harness's hint oracle prints these rows as
+      // `legend` instead of failing them, and the rule the child can actually
+      // learn holds on every screen: IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU
+      // CAN PRESS IT. Nothing in a legend ever lights.
       Row {
+        // Read by `dev/Harness.qml --print-controls`, which walks up from every
+        // hint-shaped Text looking for it.
+        property bool keyLegend: true
+
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: garage.px(22)

@@ -361,7 +361,12 @@ FocusScope {
         }
       }
 
+      // PIECE M ROUND 2. A key LEGEND, not a row of controls: see the note on
+      // the garage's own rail. The oracle prints these as `legend`, and nothing
+      // in a legend ever lights under the pointer.
       Row {
+        property bool keyLegend: true
+
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         spacing: settings.px(18)
