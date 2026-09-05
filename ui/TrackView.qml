@@ -1348,7 +1348,8 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 3
-        color: view.plateGround
+        color: view.fxPlateShowing(index)
+               ? view.fxPlateFace(index, fxPlateTone) : view.plateGround
         border.width: view.fxPlateRing(index) > 0.05 ? 2 : 1
         border.color: view.fxPlateRing(index) > 0.05
                       ? Qt.rgba(1, 1, 1, 0.35 + 0.65 * view.fxPlateRing(index))
@@ -1467,7 +1468,8 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 3
-        color: view.plateGround
+        color: view.fxPlateShowing(index)
+               ? view.fxPlateFace(index, fxPlateTone) : view.plateGround
         // Two pixels of border when the rival is within one question: the
         // child is about to be passed and the plate says so without a word.
         border.width: (view.fxPlateRing(index) > 0.05
@@ -1771,6 +1773,24 @@ Item {
     var k = kartModel.get(index)
     return k.fxPlate !== "" && now < k.fxPlateUntil
   }
+  // The plate's face while it is carrying an effect. A rival's plate normally
+  // reads `PISTON +7`, the gap, in amber -- and a `+5` readout in the same
+  // amber on the same dark face is the same picture, so a still frame could not
+  // tell "they are five questions up" from "you just cost them five". The face
+  // takes the effect's own tone at a fifth over the plate ground, which with
+  // the white ring makes the two unmistakable at a glance.
+  function fxPlateFace(index, tone) {
+    // `fxPlateTone` is a ListModel role and a role is typed by the first value
+    // put in it, so it arrives as a STRING. `Qt.darker` at factor 1 is the
+    // shortest honest string-to-colour conversion QML offers inside a function.
+    var c = Qt.darker(tone, 1.0)
+    var lit = 0.26
+    return Qt.rgba(plateGround.r * (1 - lit) + c.r * lit,
+                   plateGround.g * (1 - lit) + c.g * lit,
+                   plateGround.b * (1 - lit) + c.b * lit,
+                   Math.max(plateGround.a, 0.94))
+  }
+
   function fxPlateRing(index) {
     var now = fxClock
     if (index < 0 || index >= kartModel.count)

@@ -192,7 +192,21 @@ FocusScope {
     return out
   }
 
-  function clockNow() { return clockBase + frames.elapsedTime * 1000 }
+  // UNDER AN EXTERNAL CLOCK THE FRAME ANIMATION CONTRIBUTES NOTHING.
+  //
+  // ROUND 2. `frames` is stopped when `externalClock` is set, but a stopped
+  // FrameAnimation keeps whatever `elapsedTime` it had reached before it was
+  // stopped -- a fraction of a millisecond, on the frame between the screen
+  // loading and the harness setting the flag. That fraction reached the race
+  // clock, and one strip in eighteen came back different bytes: the answer
+  // field's lock tint is a lerp on `stallProgress`, so a sub-millisecond
+  // difference in `nowMs` moved a blend by one part in 255 over the field's
+  // box and nowhere else. 1236 pixels, all inside (853,309,214,98). A strip
+  // that differs run to run is not evidence, so the residue is cut off at the
+  // source rather than rounded away downstream.
+  function clockNow() {
+    return race.externalClock ? clockBase : clockBase + frames.elapsedTime * 1000
+  }
 
   function nameOf(racerId) {
     if (!state)
@@ -2107,8 +2121,15 @@ FocusScope {
         border.color: reveal.active ? Theme.teal
                                     : (race.stalled ? Theme.hazard : Theme.focusRing)
 
+        // The field's border going blue to amber as the lock lands. ROUND 2:
+        // this is a WALL-CLOCK animation, the third one on this screen, and it
+        // is the one the external clock did not switch off -- so two runs of
+        // the same strip landed at different points in its 160 ms and the two
+        // `hit` strips came back different bytes, by one part in 255, over the
+        // field's box and nowhere else. A strip that differs run to run is not
+        // evidence. Cut here, like the caret's blink and the callouts' fade.
         Behavior on border.color {
-          enabled: !race.reducedMotion
+          enabled: !race.reducedMotion && !race.externalClock
           ColorAnimation { duration: 160 }
         }
 
