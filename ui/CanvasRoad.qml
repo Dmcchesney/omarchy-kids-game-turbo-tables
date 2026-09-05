@@ -115,6 +115,10 @@ Canvas {
   property color glowColor: "#f0956e"
   property color waterColor: "#3a1c46"
   property color waterLit: "#f2c68a"
+  // The wet sand and foam where the lake meets the land: road.frag's
+  // `shoreColor`. Without it the two sample the same colour and there is no
+  // lake for the reflection to be in.
+  property color shoreColor: "#c98a86"
 
   // How far down the track to draw. Past this the haze has closed anyway.
   property real drawDistance: 190
@@ -652,6 +656,35 @@ Canvas {
       // image is under the disc, not at a fixed place on the lake.
       if (row.water > 0.001) {
         var shore = uRoadHalf + uRumbleHalf + 2.6
+        // THE SHORE, FIRST AND UNDER THE WATER. road.frag mixes a pale band
+        // into the floor before it lays the lake over it; four slices across
+        // the same unit and a half, each weighted by the same quadratic, is
+        // what a renderer that fills quads can do with that. Drawn before the
+        // water so the lake's own edge lands on top of it, exactly as the
+        // shader's two mixes compose.
+        for (var e = 0; e < 4; e++) {
+          var ex0 = shore - 0.46 + e * 0.39
+          var ex1 = ex0 + 0.39
+          var em = 1 - Math.abs((ex0 + ex1) * 0.5 - shore - 0.32) / 0.78
+          em = em < 0 ? 0 : em * em * row.water
+          if (em <= 0.02)
+            continue
+          // The ground the band is mixed INTO, at the middle of this slice, on
+          // the same lattice and with the same dusk the rest of the row took.
+          Terrain.rowGround(row, (ex0 + ex1) * 0.5, scratch)
+          var sr = scratch[0] * dmR, sg = scratch[1] * dmG, sb = scratch[2] * dmB
+          ctx.fillStyle = Qt.rgba(
+            fr + ((sr + (shoreColor.r - sr) * em) - fr) * fFloor,
+            fg + ((sg + (shoreColor.g - sg) * em) - fg) * fFloor,
+            fb + ((sb + (shoreColor.b - sb) * em) - fb) * fFloor, 1)
+          ctx.beginPath()
+          ctx.moveTo(screenU(ex0, zFar) + sx, yFar)
+          ctx.lineTo(screenU(ex1, zFar) + sx, yFar)
+          ctx.lineTo(screenU(ex1, zNear) + sx, yNear + 1)
+          ctx.lineTo(screenU(ex0, zNear) + sx, yNear + 1)
+          ctx.closePath()
+          ctx.fill()
+        }
         var ripple = Math.sin(sMid * 2.7 - uClock * 1.9) * 0.5
                      + Math.sin(sMid * 6.1 + uClock * 1.1) * 0.5
         var rungs = ripple >= 0 ? 1 : 0
@@ -666,9 +699,14 @@ Canvas {
             var px0 = xStart + (w - xStart) * q / 8
             var px1 = xStart + (w - xStart) * (q + 1) / 8
             var uc = ((px0 + px1) * 0.5 - sx) / w
-            var colm = Math.max(0, 1 - Math.abs(uc - uSunU) / 0.075)
+            // road.frag's wedge: narrow at the horizon, wide at the eye, with
+            // the rungs losing contrast with distance. A reflection converges
+            // on its source; a constant-width stripe is a bar of light standing
+            // on the water.
+            var nearK = Math.max(0, Math.min(1, (30 - mid) / 26))
+            var colm = Math.max(0, 1 - Math.abs(uc - uSunU) / (0.020 + 0.070 * nearK))
             colm *= colm
-            var ladder = colm * (0.45 + 0.55 * rungs)
+            var ladder = colm * (0.45 + 0.55 * rungs) * (0.55 + 0.45 * nearK)
             ctx.fillStyle = Qt.rgba(
               fr + ((lakeR + (lr0 - lakeR) * ladder) - fr) * fFloor,
               fg + ((lakeG + (lg0 - lakeG) * ladder) - fg) * fFloor,

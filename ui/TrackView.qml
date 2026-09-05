@@ -884,6 +884,22 @@ Item {
     var m = Terrain.sectorMix(travel + playerZ)
     return Terrain.FLAGS[m[0]][3] + (Terrain.FLAGS[m[1]][3] - Terrain.FLAGS[m[0]][3]) * m[2]
   }
+  // AND WHAT COLOUR THAT DUST IS, WHICH WAS TWO CONSTANTS AND SHOULD NEVER HAVE
+  // BEEN. The wheel dust was `#c98a6a` and `#a15a63` everywhere on the circuit,
+  // so a kart threw the same brown up off ochre scrub, off pale salt flat and
+  // off the pit's own grid floor -- and a critic read it as "two flat hard-edged
+  // BROWN RECTANGLES ... they read as missing tiles, not dust". Dust is the
+  // ground in the air, so it is the sector's own scrub tone, lifted toward the
+  // light and dusked with everything else. The same table the shader paints the
+  // ground from, which is what `dustiness` above already does for how MUCH.
+  readonly property color dustTone: {
+    var m = Terrain.sectorMix(travel + playerZ)
+    var c = Terrain.mix3(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2])
+    var d = Terrain.duskMul(nightfall)
+    return Qt.rgba(Math.min(1, c[0] * d[0] * 1.5 + 0.12),
+                   Math.min(1, c[1] * d[1] * 1.5 + 0.08),
+                   Math.min(1, c[2] * d[2] * 1.5 + 0.12), 1)
+  }
 
   // GOLDEN-HOUR PALETTE. Sampled off the bar (plan v2, "Visual direction v3"):
   // near-black purple ground, neon magenta grid, purple-tinted tarmac, the
@@ -946,9 +962,20 @@ Item {
   // The lake. Deep purple water with the sun's own core as the reflected
   // column; both dim with the hour, because a reflection cannot outlive its
   // source.
-  readonly property color waterTone: Qt.rgba(0.196 * (1 - 0.35 * nightfall),
-                                             0.086 * (1 - 0.35 * nightfall),
-                                             0.290 * (1 - 0.25 * nightfall), 1)
+  // COLDER THAN THE LAND, AND THAT IS THE POINT OF THE NUMBER. The lake used to
+  // be (0.196, 0.086, 0.290) against a sector soil of (0.235, 0.086, 0.204):
+  // a critic sampled the frame and found ground left at H 324 and ground right
+  // at H 312, "the water and the land are the same colour ... there is no
+  // shoreline", and concluded there was no lake. Water is the one thing in this
+  // picture the sun does not warm, so it is pulled off the soil's magenta and
+  // toward blue -- H 270 against the land's 320 -- and the shore band between
+  // them says where one stops.
+  readonly property color waterTone: Qt.rgba(0.129 * (1 - 0.35 * nightfall),
+                                             0.078 * (1 - 0.35 * nightfall),
+                                             0.345 * (1 - 0.25 * nightfall), 1)
+  // The wet sand and the foam line. Pale, warm, and the brightest thing on the
+  // ground in that sector, so the eye reads an edge before it reads a colour.
+  readonly property color shoreTone: dimmed(Qt.rgba(0.788, 0.541, 0.525, 1), surfaceDusk)
   readonly property color waterLitTone: Qt.rgba(0.949 * (1 - 0.28 * nightfall),
                                                 0.784 * (1 - 0.36 * nightfall),
                                                 0.494 * (1 - 0.30 * nightfall), 1)
@@ -1028,6 +1055,7 @@ Item {
     // The sky, behind the floor. Inside the plane so it renders at 480 x 270
     // and scales up with the same nearest-neighbour filter as the road.
     SunsetSky {
+      id: skyLayer
       anchors.fill: parent
       // The overscanned plane's own horizon and sun. `unitH` keeps every
       // PROPORTION in the sky -- the gradient's height, the sun's radius, the
@@ -1095,8 +1123,52 @@ Item {
       property color glowColor: view.sunTone
       property color waterColor: view.waterTone
       property color waterLit: view.waterLitTone
+      property color shoreColor: view.shoreTone
 
       onStatusChanged: view.noteShaderStatus(status)
+    }
+
+    // ------------------------------------------------ THE HORIZON IS A JOIN
+    //
+    // "A 3-4 px darker rule is drawn full width at row 428-431, OVER the hill
+    // silhouettes, and the ground begins at row 432 at (215,93,107) against
+    // (94,26,80) above it -- a 120-value jump with no blend ... the atmospheric
+    // perspective the spec calls 'the single biggest step toward the bar' stops
+    // dead at the skyline."
+    //
+    // Both halves of that are true and they are the same defect seen twice. The
+    // ground's haze target is the palette's horizon glow, `#d75d6b`, which is
+    // the colour of the SKY at the horizon -- but what actually stands at the
+    // horizon is the near hill, `#5e1a50`, three times darker, because the hills
+    // are in front of the sky. So the furthest ground was brighter than the land
+    // above it, which is backwards, and the two met at a hard line.
+    //
+    // This is the join: six plane rows of the near hill's own tone, fading out
+    // downward, laid over the last of the ground. It is a QML overlay and not a
+    // change in either ground renderer ON PURPOSE -- it is identical on the
+    // shader path and the fallback path, so it cannot open a gap between them,
+    // and the parity figure in the evidence is measured below it either way.
+    Item {
+      id: horizonJoin
+      width: plane.width
+      height: 6
+      y: Math.round(view.planeHorizon * plane.height)
+      z: 3
+
+      Repeater {
+        model: 6
+
+        Rectangle {
+          width: plane.width
+          height: 1
+          y: index
+          color: skyLayer.hillNear
+          // Strongest against the hills and gone six rows down, which at the
+          // track's four-times upscale is a twenty-four pixel join at 1080p.
+          opacity: 0.80 * (1 - index / 6) * (1 - index / 6)
+          antialiasing: false
+        }
+      }
     }
 
     CanvasRoad {
@@ -1141,6 +1213,7 @@ Item {
       glowColor: view.sunTone
       waterColor: view.waterTone
       waterLit: view.waterLitTone
+      shoreColor: view.shoreTone
 
       // Under reduced motion nothing calls advance(), so the plane repaints
       // only when the camera itself changes -- which is the static plane the
@@ -1512,6 +1585,71 @@ Item {
       visible: inRange && clarity > 0.004
                && x > -view.width * 0.9 && x < view.width * 1.9
 
+      // ------------------------------------- THE PROP'S OWN CONTACT SHADOW
+      //
+      // "No prop in any of the 36 frames casts a shadow. Not the water tower,
+      // not the gantry, not the billboards, not the rock walls ... every prop
+      // looks pasted on rather than standing on the ground, and this is why
+      // several of them read as floating even where they are correctly placed."
+      // The critic's own recommendation was to spend cost here, because one
+      // primitive answers three separate findings -- the overpass's left pier
+      // ending in mid-air, the scrapyard stack hanging clear of the ground, and
+      // the general pasted-on look -- and the primitive already exists under
+      // the karts.
+      //
+      // So it is the karts' shadow, at prop scale: slabs snapped to the road's
+      // own four-pixel lattice rather than a soft ellipse, in the design's
+      // purple, leaning left and lengthening as the sun drops. Two tiers here
+      // and not the karts' three: a prop is bigger and further away, and the
+      // third tier was under a pixel for everything but the rock walls.
+      //
+      // AN ARCH STANDS ON TWO FEET AND THE SHADOW SAYS SO. A road-spanning prop
+      // whose contact shadow was one slab across its whole span would put a dark
+      // bar across the tarmac exactly where the child drives; the piers are what
+      // touch the ground, so that is where the shadow is. `overpass` C0 puts
+      // 21% of its bottom rows in two columns at the edges of the cell, which is
+      // what those two ellipses are under.
+      Item {
+        id: propShade
+        readonly property bool piers: roadside.place.spans
+        readonly property real box: kitCell.boxWidth
+        readonly property real span: piers ? box * 0.30 : box * 1.04
+        readonly property real px: Math.max(1, view.fxPixel)
+        readonly property real lean: span * (0.03 + 0.22 * view.nightfall)
+        readonly property real stretch: 1 + 0.55 * view.nightfall
+        readonly property real mid: kitCell.boxLeft + box * 0.5
+        visible: roadside.visible && box > 3 && roadside.clarity > 0.06
+        opacity: roadside.clarity * 0.92
+        z: -1
+
+        Repeater {
+          // Gated on the shadow's own visibility for the same reason the karts'
+          // is: an invisible Repeater with a model still holds delegates whose
+          // bindings re-run every frame, and there are a hundred and thirty-
+          // eight of these.
+          model: propShade.visible ? (propShade.piers ? 4 : 2) : 0
+
+          Rectangle {
+            readonly property int tier: index % 2
+            readonly property real foot: propShade.piers
+                                         ? (index < 2 ? -1 : 1) * propShade.box * 0.40 : 0
+            readonly property real k: tier === 0 ? 0.66 : 1.0
+            width: Math.max(propShade.px,
+                            Math.round(propShade.span * k * propShade.stretch / propShade.px)
+                            * propShade.px)
+            height: Math.max(propShade.px,
+                             Math.round(propShade.span * (tier === 0 ? 0.070 : 0.046)
+                                        / propShade.px) * propShade.px)
+            x: Math.round((propShade.mid + foot - width / 2 - propShade.lean * k) / propShade.px)
+               * propShade.px
+            y: Math.round((-height * 0.5 - propShade.px * tier * 0.5) / propShade.px) * propShade.px
+            color: "#5f255e"
+            opacity: tier === 0 ? 0.40 : 0.26
+            antialiasing: false
+          }
+        }
+      }
+
       KitProp {
         id: kitCell
         live: roadside.visible
@@ -1553,52 +1691,102 @@ Item {
       // not already answer correctly: `factBoards` is filled by Race.qml from
       // the engine's own history and is empty everywhere else, including in the
       // garage and in the harness, where the boards simply stay blank.
-      Text {
-        id: painted
-        visible: roadside.place.tag.length === 5
-                 && roadside.place.tag.indexOf("fact") === 0
-                 && text.length > 0 && font.pixelSize >= 7
-                 && roadside.clarity > 0.25
-        text: view.factBoardText(roadside.place.tag)
-        textFormat: Text.PlainText
-        color: view.billboardInk
-        opacity: roadside.clarity
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: Math.round(kitCell.boxHeight * 0.19)
-        // FIT, NEVER SPILL. The board is the kit's and its cream panel is a
-        // fixed fraction of the sprite; the string is the child's own fact and
-        // is between five and eleven characters. `HorizontalFit` shrinks the
-        // type to the panel rather than letting a long sum hang off the board,
-        // which is what "painted on" has to mean.
-        fontSizeMode: Text.HorizontalFit
-        minimumPixelSize: 7
-        horizontalAlignment: Text.AlignHCenter
-        // The board's own face, in the sprite's coordinates: the upper two
-        // thirds of the opaque box, inset by a tenth each side, which is the
-        // cream panel above the posts.
-        x: kitCell.boxLeft + kitCell.boxWidth * 0.10
-        y: kitCell.boxTop + kitCell.boxHeight * 0.28
-        width: kitCell.boxWidth * 0.80
+      // EVERY ONE OF THESE IS A LOADER AND THAT IS A MEASUREMENT, NOT A STYLE.
+      //
+      // There are two printed strings on the circuit -- the fact painted on a
+      // billboard and the split on a pit board -- and five placements out of a
+      // hundred and thirty-eight carry one. Declared as plain `Text` items they
+      // were built for ALL of them: 276 QQuickText objects, every one with live
+      // bindings on `roadside.clarity`, `kitCell.boxHeight` and
+      // `view.factBoardText`, re-evaluated as `travel` moves whether or not
+      // anything was ever drawn. Measured by `npm run perf` on the Race screen
+      // at 1920x1080, Text was the most numerous type in the whole scene by a
+      // factor of two over Rectangle.
+      //
+      // `active` is a constant: it reads the placement's own tag and kind,
+      // which never change for the life of the delegate. So the loader resolves
+      // once at construction, five of them build a Text, and a hundred and
+      // thirty-three build nothing and evaluate nothing ever again.
+      Loader {
+        active: roadside.place.tag.length === 5
+                && roadside.place.tag.indexOf("fact") === 0
+        sourceComponent: paintedFact
+      }
+
+      Loader {
+        active: roadside.place.kind === "pitBoard"
+        sourceComponent: paintedSplit
+      }
+
+      // ------------------------------------------------- THE FACT BILLBOARDS
+      //
+      // Design v4, sector 11: "a row of boards that show the last three facts
+      // the child got right, painted on", and the design says of it: "the fact
+      // billboards in sector 11 are the passion-project idea I would fight for:
+      // the environment shows the child their own answers on the way to the
+      // finish. It is decoration that teaches."
+      //
+      // The kit's `billboard` is a BLANK CREAM BOARD, baked that way on purpose
+      // -- `docs/prop-kit.md`: "blank cream board: print the child's last three
+      // correct facts on it". So this is printing, not drawing a prop: the
+      // board is the kit's, and what goes on it is one string in the shell's
+      // own monospace face, sized and placed off the sprite's opaque box so it
+      // lands on the board however far away the board is.
+      //
+      // It is never a name, never free text, and never anything the child did
+      // not already answer correctly: `factBoards` is filled by Race.qml from
+      // the engine's own history and is empty everywhere else, including in the
+      // garage and in the harness, where the boards simply stay blank.
+      Component {
+        id: paintedFact
+
+        Text {
+          id: painted
+          visible: text.length > 0 && font.pixelSize >= 7 && roadside.clarity > 0.25
+          text: view.factBoardText(roadside.place.tag)
+          textFormat: Text.PlainText
+          color: view.billboardInk
+          opacity: roadside.clarity
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: Math.round(kitCell.boxHeight * 0.19)
+          // FIT, NEVER SPILL. The board is the kit's and its cream panel is a
+          // fixed fraction of the sprite; the string is the child's own fact and
+          // is between five and eleven characters. `HorizontalFit` shrinks the
+          // type to the panel rather than letting a long sum hang off the board,
+          // which is what "painted on" has to mean.
+          fontSizeMode: Text.HorizontalFit
+          minimumPixelSize: 7
+          horizontalAlignment: Text.AlignHCenter
+          // The board's own face, in the sprite's coordinates: the upper two
+          // thirds of the opaque box, inset by a tenth each side, which is the
+          // cream panel above the posts.
+          x: kitCell.boxLeft + kitCell.boxWidth * 0.10
+          y: kitCell.boxTop + kitCell.boxHeight * 0.28
+          width: kitCell.boxWidth * 0.80
+        }
       }
 
       // The pit board's split, on the flat teal readout the bake left for it.
-      Text {
-        visible: roadside.place.kind === "pitBoard"
-                 && font.pixelSize >= 7 && roadside.clarity > 0.25
-        text: view.pitBoardText
-        textFormat: Text.PlainText
-        color: view.pitBoardInk
-        opacity: roadside.clarity
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: Math.round(kitCell.boxHeight * 0.20)
-        fontSizeMode: Text.HorizontalFit
-        minimumPixelSize: 7
-        horizontalAlignment: Text.AlignHCenter
-        x: kitCell.boxLeft + kitCell.boxWidth * 0.14
-        y: kitCell.boxTop + kitCell.boxHeight * 0.21
-        width: kitCell.boxWidth * 0.72
+      Component {
+        id: paintedSplit
+
+        Text {
+          visible: font.pixelSize >= 7 && roadside.clarity > 0.25
+          text: view.pitBoardText
+          textFormat: Text.PlainText
+          color: view.pitBoardInk
+          opacity: roadside.clarity
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: Math.round(kitCell.boxHeight * 0.20)
+          fontSizeMode: Text.HorizontalFit
+          minimumPixelSize: 7
+          horizontalAlignment: Text.AlignHCenter
+          x: kitCell.boxLeft + kitCell.boxWidth * 0.14
+          y: kitCell.boxTop + kitCell.boxHeight * 0.21
+          width: kitCell.boxWidth * 0.72
+        }
       }
     }
   }
@@ -1934,28 +2122,48 @@ Item {
         z: -0.5
 
         Repeater {
-          model: beam.visible ? 9 : 0
+          // TWO TIERS PER DEPTH, WHICH IS WHAT MAKES IT A LIGHT. One rectangle
+          // per depth is uniform right across its width, so the pool had hard
+          // vertical sides and stacked into a stepped tan carpet -- the
+          // "hard-edged trapezoid with a stair-stepped left edge, no falloff"
+          // a critic measured. A beam is hot in the middle and dies at its
+          // edges, so each depth is a wide dim slab with a narrow bright one
+          // inside it, and the two together give the pool a section as well as
+          // a length.
+          model: beam.visible ? 14 : 0
 
           Rectangle {
-            readonly property real t: index / 9
-            readonly property real zHere: slot.zed + 0.9 + t * 8.4
+            readonly property int tier: index % 2
+            readonly property real t: Math.floor(index / 2) / 7
+            readonly property real zHere: slot.zed + 0.45 + t * 7.6
             readonly property real px: Math.max(1, view.fxPixel)
             // The pool spreads a little in WORLD units and shrinks a lot in
             // SCREEN units, which is what a beam does: the light goes further
             // out the further it travels, and the perspective takes more back
             // than the spread gives. So it converges on the road ahead instead
             // of being a rectangle laid over the lane.
-            readonly property real half: view.sizeAt(view.roadHalf * (0.20 + t * 0.34), zHere)
+            readonly property real half: view.sizeAt(
+                view.roadHalf * (tier === 0 ? 0.30 + t * 0.46 : 0.14 + t * 0.22), zHere)
             width: Math.max(px, Math.round(half * 2 / px) * px)
-            height: Math.max(px, Math.round(view.sizeAt(1.1, zHere) * 0.5 / px) * px)
+            height: Math.max(px, Math.round(view.sizeAt(1.1, zHere) * 0.62 / px) * px)
             x: Math.round((view.uAt(view.laneOf(kartSeat), zHere) * view.width
                            + view.shakeX - slot.x - width / 2) / px) * px
             y: Math.round((view.vAt(zHere) * view.height + view.shakeY - slot.y
                            - height) / px) * px
-            color: "#f5a524"
+            // PALER AND STRONGER THAN THE PIT'S AMBER, AND THAT IS THE FIX.
+            // `#f5a524` at 0.19 over a tarmac of (35,20,33) composites to
+            // (75,48,32), which is why a critic sampled the pool at (83,54,39)
+            // and called it "a hard-edged muddy brown trapezoid ... it reads as
+            // a stain on the tarmac". A light is bright and near-white at its
+            // core; the amber belongs to the LAMP, not to the pool it throws. So
+            // the tone is lifted toward the sun's own core and the strength is
+            // most of double, and the pool now starts half a metre off the nose
+            // rather than a car's length up the road.
+            color: tier === 0 ? "#f7b45c" : "#ffe6bc"
             // Brightest a car's length ahead, gone by the end of the throw: a
             // pool with a hard bright edge at both ends is a decal, not a light.
-            opacity: 0.19 * Math.min(1, t * 6) * (1 - t) * (1 - t)
+            opacity: (tier === 0 ? 0.17 : 0.30)
+                     * Math.min(1, t * 5 + 0.35) * (1 - t) * (1 - t * 0.4)
             antialiasing: false
           }
         }
@@ -2022,21 +2230,28 @@ Item {
         readonly property real span: view.kartSheetPixels(slot.zed)
 
         Repeater {
-          model: wheelDust.visible ? 4 : 0
+          model: wheelDust.visible ? 6 : 0
 
           Rectangle {
             readonly property real phase: {
-              var p = (view.travel * 0.33 + index * 0.29 + kartSeat * 0.17) % 1
+              var p = (view.travel * 0.33 + index * 0.171 + kartSeat * 0.17) % 1
               return p < 0 ? p + 1 : p
             }
             readonly property real px: Math.max(1, view.fxPixel)
             readonly property real side: (index % 2 === 0 ? -1 : 1) * 0.34
-            width: Math.max(px, Math.round(wheelDust.span * (0.035 + phase * 0.05) / px) * px)
+            // A PUFF, NOT A TILE. Round, so nothing about it says "a square of
+            // ground is missing"; it starts AT the contact point rather than a
+            // fifth of a car above it, and it grows and rises as it falls
+            // behind. Still on the road's four-pixel lattice and still
+            // aliased: a soft gaussian over a nearest-neighbour world is the
+            // defect the piece before this one closed.
+            width: Math.max(px, Math.round(wheelDust.span * (0.028 + phase * 0.072) / px) * px)
             height: width
-            x: Math.round((wheelDust.span * side * (1 + phase * 0.5) - width / 2) / px) * px
-            y: Math.round((-wheelDust.span * 0.02 - Math.sin(phase * Math.PI) * wheelDust.span * 0.09) / px) * px
-            color: index % 2 === 0 ? "#c98a6a" : "#a15a63"
-            opacity: 1 - phase
+            radius: width * 0.5
+            x: Math.round((wheelDust.span * side * (1 + phase * 0.75) - width / 2) / px) * px
+            y: Math.round((-Math.sin(phase * 2.4) * wheelDust.span * 0.11 - height * 0.5) / px) * px
+            color: view.dustTone
+            opacity: (1 - phase) * (1 - phase) * 0.85
             antialiasing: false
           }
         }

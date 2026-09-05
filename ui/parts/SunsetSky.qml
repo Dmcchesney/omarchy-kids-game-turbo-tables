@@ -1,4 +1,5 @@
 import QtQuick
+import "Terrain.js" as Terrain
 
 // The sky at golden hour: what the track, the garage door and the countdown
 // all look out onto.
@@ -374,10 +375,20 @@ Item {
         ctx.moveTo(0, h)
         // A ridge line: the max of a few bell-shaped bumps, sampled every two
         // pixels and stepped, so the silhouette is a hill and not a wave.
+        // THE FLOOR IS BROKEN, AND THAT IS WHAT REMOVES THE RULED LINE. It
+        // used to be the constant 0.18, so between the bumps every one of the
+        // three layers had a perfectly flat top -- and three stacked flat tops
+        // over the whole width is a hard horizontal rule across the frame, which
+        // a critic measured as "a 3-4 px darker rule drawn full width at row
+        // 428-431, over the hill silhouettes". The floor is now a low-frequency
+        // step: a hash on a lattice sixteen samples wide, so the land between
+        // the peaks rises and falls in blocks instead of running dead level.
+        // Blocks and not a wave, for the reason the ground's noise is blocks:
+        // nothing else in this picture has a smooth edge.
         var step = 2
         for (var px = 0; px <= w; px += step) {
           var u = px / sky.width
-          var ridge = 0.18
+          var ridge = 0.10 + 0.13 * Terrain.hashCell(Math.floor(px / 32), index * 7 + 3)
           for (var b = 0; b < bumps.length; b++) {
             var d = (u - bumps[b][0]) / bumps[b][2]
             ridge = Math.max(ridge, bumps[b][1] * Math.max(0, 1 - d * d * 0.5) * Math.exp(-d * d * 0.35))

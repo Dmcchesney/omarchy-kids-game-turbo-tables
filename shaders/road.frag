@@ -94,6 +94,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 glowColor;
     vec4 waterColor;    // the lake, away from the reflection
     vec4 waterLit;      // the sun's column on the water
+    vec4 shoreColor;    // the pale strip where the lake meets the land
 };
 
 // ---------------------------------------------------- Terrain.js, mirrored
@@ -334,17 +335,37 @@ void main()
     // under the disc, so the lake has to be under it or there is nothing to
     // reflect. The column is in SCREEN u -- that is what a reflection is -- and
     // the ripples break it into horizontal rungs that stretch with distance.
+    //
+    // AND IT NEEDS A SHORE, WHICH IS THE HALF THAT WAS MISSING. A critic
+    // sampled `sector04-lake` and found ground left (79,31,60) at H 324 and
+    // ground right (80,36,71) at H 312: the water and the land were the same
+    // colour and there was no edge between them, so "there is no lake" -- and
+    // with no lake, the reflection the design asks for has nothing to be in. The
+    // strip below is the wet sand and the foam line, a pale band a unit and a
+    // half wide centred a third of a unit out from the bank, and it is what
+    // makes the two read as two things.
     float shore = roadHalf + rumbleHalf + 2.6;
     float water = flags.y * step(shore, x);
+    if (flags.y > 0.001) {
+        float edge = 1.0 - clamp(abs(x - shore - 0.32) / 0.78, 0.0, 1.0);
+        floorCol = mix(floorCol, shoreColor.rgb, flags.y * edge * edge);
+    }
     if (water > 0.001) {
         float ripple = sin(s * 2.7 - clock * 1.9) * 0.5 + sin(s * 6.1 + clock * 1.1) * 0.5;
         float rungs = step(0.0, ripple);
         vec3 lake = mix(waterColor.rgb, waterColor.rgb * 1.18, rungs);
-        float column = clamp(1.0 - abs(u - sunU) / 0.075, 0.0, 1.0);
+        // THE COLUMN IS A WEDGE, NOT A STRIPE. It used to be a constant
+        // 0.075 of the frame wide at every depth, which is a vertical bar of
+        // light standing on the water; a reflection converges on its source, so
+        // it is narrow at the horizon and wide at the eye. The rungs lose their
+        // contrast with distance for the same reason the fine octave does: a
+        // rung four world units long is under a pixel out there, and alternating
+        // it produced the "chunky offset horizontal blocks that read as a torn
+        // texture" a critic measured.
+        float near = clamp((30.0 - z) / 26.0, 0.0, 1.0);
+        float column = clamp(1.0 - abs(u - sunU) / mix(0.020, 0.090, near), 0.0, 1.0);
         column *= column;
-        // The rungs cut the column into a ladder rather than a smooth beam,
-        // and the ladder widens toward the eye.
-        float ladder = column * (0.45 + 0.55 * rungs);
+        float ladder = column * (0.45 + 0.55 * rungs) * mix(0.55, 1.0, near);
         lake = mix(lake, waterLit.rgb, ladder);
         floorCol = mix(floorCol, lake, water * smoothstep(shore, shore + 1.1, x));
     }
