@@ -1308,5 +1308,113 @@ Item {
                     + Math.round(widest) + "px|peak alpha " + strongest.toFixed(2))
       }
     }
+
+    // ---------------------------------------------------------------- ROUND 5
+    //
+    // EIGHT CARDS, EIGHT GESTURES -- AND THE TEST IS "WHICH SURFACE LIT UP".
+    //
+    // A blind critic reduced four rounds of this piece to one sentence: "seven
+    // of eight cards resolve at impact to the same gesture -- tint the whole
+    // framebuffer, different hue. The props do all the distinguishing work."
+    // The answer is in `ui/parts/CardFx.js`'s `flashShape`, and this is the
+    // check that the table and the picture agree.
+    //
+    // For every card it walks the whole sequence and records which of the four
+    // surfaces actually took paint: the full-frame rectangles, the point light
+    // on a kart, the band on the tarmac, the tow line's own gain. Then:
+    //
+    //   * the set of cards that light the WHOLE FRAME is exactly Turbo and the
+    //     Pile-Up -- the two the design writes that way -- and that is the
+    //     assertion the critic's sentence turns into;
+    //   * every card's surface is the one its own row names, so the table
+    //     cannot drift from the picture in either direction;
+    //   * the Pothole's camera goes DOWN and the Wrench's goes round, which is
+    //     the fifth tool being mixed differently rather than a sixth tool.
+    function test_19_eight_cards_eight_gestures() {
+      var cards = ["nitro", "turbo", "oilSlick", "wrench", "pothole", "pileUp",
+                   "rollCage", "towHook"]
+      var lit = ({})
+      var fullFrame = []
+      var report = []
+      for (var c = 0; c < cards.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cards[c])
+        var full = 0, point = 0, road = 0, line = 0
+        // 1200 ms at 30 ms: long enough to cover the Pile-Up's 600 ms
+        // telegraph and still land inside every card's 120-to-260 ms flash.
+        for (var f = 0; f < 40; f++) {
+          var boxes = root.effectBoxes()
+          for (var i = 0; i < boxes.length; i++) {
+            var n = boxes[i].name
+            if (n === "fx.worldFlash" || n === "fx.worldFlashUnder")
+              full = Math.max(full, boxes[i].opacity)
+            if (n === "fx.pointFlash" || n === "fx.pointFlashOver")
+              point = Math.max(point, boxes[i].opacity)
+            if (n === "fx.groundFlash")
+              road = Math.max(road, boxes[i].opacity)
+          }
+          line = Math.max(line, race.trackView.flashLineNow)
+          race.stepClock(30)
+        }
+        var surfaces = []
+        if (full > 0.02) { surfaces.push("full"); fullFrame.push(cards[c]) }
+        if (point > 0.02) surfaces.push("point")
+        if (road > 0.02) surfaces.push("road")
+        if (line > 0.02) surfaces.push("line")
+        lit[cards[c]] = surfaces
+        report.push(cards[c] + " " + (surfaces.length ? surfaces.join("+") : "none"))
+      }
+
+      // THE CRITIC'S SENTENCE, AS AN ASSERTION.
+      compare(fullFrame.join(","), "turbo,pileUp",
+              "exactly two cards put light on the whole frame, and they are the"
+              + " two the design writes that way (got: " + fullFrame.join(",") + ")")
+
+      // And each card lights the surface its own row names.
+      var want = ({ "nitro": "", "turbo": "full", "oilSlick": "road",
+                    "wrench": "point", "pothole": "point",
+                    "pileUp": "full+road", "rollCage": "", "towHook": "point+line" })
+      for (var w = 0; w < cards.length; w++) {
+        var shape = CardFx.flashOf(cards[w])
+        compare(lit[cards[w]].join("+"), want[cards[w]],
+                cards[w] + " lights " + want[cards[w]] + " and nothing else"
+                + " (its row says shape \"" + (shape ? shape.shape : "none")
+                + "\")")
+      }
+
+      // The Pothole's camera falls in with the kart. Measured as the ratio of
+      // the two axes over the whole impact, against the Wrench's round wobble.
+      var axis = ({})
+      var probe = ["pothole", "wrench"]
+      for (var q = 0; q < probe.length; q++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", probe[q])
+        var ax = 0, ay = 0
+        for (var g = 0; g < 40; g++) {
+          ax = Math.max(ax, Math.abs(race.trackView.shakeX))
+          ay = Math.max(ay, Math.abs(race.trackView.shakeY))
+          race.stepClock(20)
+        }
+        axis[probe[q]] = { "x": ax, "y": ay }
+      }
+      verify(axis["pothole"].y > root.height * 0.010,
+             "the Pothole drops the camera by " + Math.round(axis["pothole"].y)
+             + " px, which the eye can follow")
+      verify(axis["pothole"].x < axis["pothole"].y * 0.35,
+             "and it is a DROP, not a wobble: " + Math.round(axis["pothole"].x)
+             + " px across against " + Math.round(axis["pothole"].y) + " down")
+      verify(axis["wrench"].x > axis["wrench"].y * 0.9,
+             "while the Wrench's is the round wobble every other card has ("
+             + Math.round(axis["wrench"].x) + " across, "
+             + Math.round(axis["wrench"].y) + " down)")
+
+      console.log("FX-GESTURE|" + report.join(" · ")
+                  + "|pothole camera " + Math.round(axis["pothole"].x) + "x/"
+                  + Math.round(axis["pothole"].y) + "y · wrench "
+                  + Math.round(axis["wrench"].x) + "x/"
+                  + Math.round(axis["wrench"].y) + "y")
+    }
   }
 }
