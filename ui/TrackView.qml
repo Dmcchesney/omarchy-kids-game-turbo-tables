@@ -1650,6 +1650,30 @@ Item {
   // ranks the field, never says who is last and never labels the child; it
   // states, of one named rival, how far back that rival is -- which is exactly
   // and only what the plate on the road already states for a rival in front.
+  // ------------------------------------------------ THE SMOKE IS NOT GREY
+  //
+  // ROUND 6. The visual-style section is one sentence and it is not a
+  // suggestion: "Shadow: purple `#5f255e`, never grey." A blind critic measured
+  // the shipped plume and called it grey, and the measurement agrees -- the
+  // base of the hood plume comes out at rgb(99, 79, 82) over the road, which is
+  // twenty units of chroma, i.e. none. This project has been caught by
+  // achromatic fill more often than by any other single mistake.
+  //
+  // The cause was the BASE, not the crown. Round 5 ramped from `#fff1da` -- a
+  // cream that is 255, 241, 218, thirty-seven units of chroma -- to a deep
+  // indigo, and reasoned about the crown at length while the hot end of the
+  // ramp was doing the greying. The base is the theme's own amber glow now,
+  // a hundred and eighteen units of chroma, and the crown is the design's own
+  // shadow colour, said in the design's own words. Both ends are named palette
+  // entries and every mix between them is chromatic.
+  readonly property color plumeHot: Theme.amberGlow
+  readonly property color plumeCool: Theme.duskShadow
+  function plumeTone(ph) {
+    return Qt.rgba(plumeHot.r + (plumeCool.r - plumeHot.r) * ph,
+                   plumeHot.g + (plumeCool.g - plumeHot.g) * ph,
+                   plumeHot.b + (plumeCool.b - plumeHot.b) * ph, 1)
+  }
+
   readonly property real chaserSize: Math.max(13, Math.round(height * 0.017))
 
   // ROUND 6. The rail's geometry, as two functions, because a plate hauling
@@ -1717,6 +1741,12 @@ Item {
         return rank
       }
 
+      // ROUND 6. While this plate is carrying an effect readout it IS the
+      // aftermath -- the victim's kart is behind the camera and there is
+      // nothing else of them on the screen -- so it is drawn at half again the
+      // rail's own type. It goes back to the rail size when the readout ends.
+      readonly property int railSize: Math.round(
+          view.chaserSize * (view.fxPlateShowing(index) ? 1.55 : 1.0))
       width: chaserRow0.implicitWidth + 14
       height: chaserRow0.implicitHeight + 8
       z: 2000
@@ -1759,36 +1789,53 @@ Item {
       // heights, drawn BEHIND the plate so it can never make the name or the
       // gap harder to read. That is the same bargain the hood smoke strikes
       // with the kart it sits on.
+      // ROUND 6 -- THE AFTERMATH LIVES HERE, AND IT IS THE SIZE OF A KART.
+      //
+      // The verdict measured the third beat and found it absent: "within 180 ms
+      // of the hit the victim is passed and leaves the frame. What remains for
+      // the rest of the effect's life is a 24 px text tag and a soft grey smoke
+      // puff roughly 55 x 90 px in a 1920 x 1080 frame ... an effect too faint
+      // to notice is absent, and this one is."
+      //
+      // Round 4 built this plume off the plate's own height, which is a
+      // consequence of the type size and has nothing to do with how big a
+      // column of smoke reads. It is sized off the FRAME now: a fifth of the
+      // frame height, which at 1080p is 216 px -- taller than the child's own
+      // kart draws (136 to 204 px of car) and about six times the area the
+      // critic measured. The design's word for the Pile-Up's aftermath is
+      // "column" and the critic's ask was "at least a kart-height tall".
+      //
+      // It is drawn BEHIND the plate, which is the same bargain the hood plume
+      // strikes with the kart it sits on, and it is anchored on the plate's top
+      // edge so it stands on the rail rather than floating over the road.
+      readonly property real plumeSpan: view.height * 0.20
+
       Item {
         objectName: "fx.railSmoke"
         visible: chaser.smoking
-        width: chaser.height * 1.9
-        height: chaser.height * 2.6
-        x: -width * 0.10
+        width: chaser.plumeSpan * 0.72
+        height: chaser.plumeSpan
+        x: chaser.width * 0.5 - width * 0.5
         y: -height + chaser.height * 0.40
         z: -1
 
         Repeater {
-          model: chaser.smoking ? 4 : 0
+          model: chaser.smoking ? 5 : 0
 
           PointLight {
             readonly property real ph: view.reducedMotion
-                                       ? (0.16 + index * 0.24)
-                                       : (((view.fxClock / 900) + index * 0.25) % 1)
-            // The same hot-to-cold ramp as the hood plume above, for the same
-            // reason: the crown has to be a hue the sky is not.
-            readonly property color hot: "#fff1da"
-            readonly property color cool: "#242a4e"
-            tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
-                          hot.g + (cool.g - hot.g) * ph,
-                          hot.b + (cool.b - hot.b) * ph, 1)
-            width: chaser.height * (0.95 + ph * 1.05)
+                                       ? (0.12 + index * 0.20)
+                                       : (((view.fxClock / 900) + index * 0.2) % 1)
+            // The same ramp as the hood plume above, from the one definition:
+            // the theme's amber glow to the design's purple shadow.
+            tone: view.plumeTone(ph)
+            width: chaser.plumeSpan * (0.30 + ph * 0.44)
             height: width
             falloff: 1.35
             amount: 0.95 * (1 - ph * 0.55) * Math.min(1, ph * 3.4)
-            x: parent.width * 0.42 - width / 2
-               + Math.sin(ph * 3.1 + index) * chaser.height * 0.26
-            y: parent.height - parent.height * ph * 0.90 - height / 2
+            x: parent.width * 0.5 - width / 2
+               + Math.sin(ph * 3.1 + index) * chaser.plumeSpan * 0.10
+            y: parent.height - parent.height * ph * 0.88 - height / 2
           }
         }
       }
@@ -1820,7 +1867,7 @@ Item {
           color: Qt.rgba(chaser.paintCol.r, chaser.paintCol.g, chaser.paintCol.b, 1)
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: view.chaserSize
+          font.pixelSize: chaser.railSize
         }
 
         Text {
@@ -1830,7 +1877,7 @@ Item {
           color: Theme.textBright
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: view.chaserSize
+          font.pixelSize: chaser.railSize
           font.letterSpacing: 1
         }
 
@@ -1852,7 +1899,7 @@ Item {
           color: view.fxPlateShowing(index) ? fxPlateTone : Theme.teal
           font.family: Theme.mono
           font.bold: true
-          font.pixelSize: view.chaserSize
+          font.pixelSize: chaser.railSize
         }
       }
     }
@@ -3941,11 +3988,7 @@ Item {
           // the purple of the hills, and dark enough to be a silhouette against
           // a bright sky rather than a smudge in it. So the column reads at both
           // ends of the picture, and it reads as damage rather than as haze.
-          readonly property color hot: "#fff1da"
-          readonly property color cool: "#242a4e"
-          tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
-                        hot.g + (cool.g - hot.g) * ph,
-                        hot.b + (cool.b - hot.b) * ph, 1)
+          tone: view.plumeTone(ph)
           width: hood.span * (0.26 + ph * 0.42)
           height: width
           falloff: 1.5
