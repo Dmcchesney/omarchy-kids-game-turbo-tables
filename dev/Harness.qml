@@ -497,6 +497,26 @@ Window {
                   + "\t" + hit.does + "\t" + (String(hit.key).length > 0 ? hit.key : "NONE"))
     }
 
+    // ------------------------------------------- the walk's own premise
+    // Every table here rests on one fact: `ui/parts/Clickable.qml` is the ONLY
+    // mouse handler in `ui/`, so finding every `isClickTarget` finds every click
+    // target. A raw `MouseArea` written somewhere would be a click target none
+    // of the three tables can see -- the enumeration would keep saying PASS while
+    // the thing it exists to enumerate had a hole in it. So the premise is
+    // checked rather than assumed, on the tree rather than on the source: a
+    // MouseArea is duck-typed on the three properties only it has together.
+    var strays = 0
+    harness.walk(screen, function (item) {
+      if (item.containsMouse === undefined || item.hoverEnabled === undefined
+          || item.pressedButtons === undefined)
+        return
+      if (harness.isClickTarget(item))
+        return
+      strays += 1
+      console.log("stray\ta mouse handler that is not a Clickable\t"
+                  + item.objectName)
+    })
+
     // ------------------------------------------------- key -> click, oracle 1
     // Every item that DECLARES itself a control to a screen reader.
     var keyOnly = 0
@@ -547,7 +567,8 @@ Window {
     console.log("parity\tmouseOnly\t" + mouseOnly)
     console.log("parity\tcontrolsWithoutClick\t" + keyOnly)
     console.log("parity\tstopsWithoutClick\t" + stopsWithoutClick)
-    var bad = mouseOnly + keyOnly + stopsWithoutClick
+    console.log("parity\tstrayMouseHandlers\t" + strays)
+    var bad = mouseOnly + keyOnly + stopsWithoutClick + strays
     console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
     Qt.exit(bad === 0 ? 0 : 1)
   }
@@ -657,6 +678,23 @@ Window {
       }
       pointer.pressKey(code, Qt.NoModifier)
       console.log("do: " + raw)
+    } else if (kind === "unhover") {
+      // PIECE M -- WHY A CLICK RUN HAS TO PUT THE POINTER DOWN AGAIN.
+      //
+      // A pointer resting on a control IS a visible state: that is the whole
+      // point of the hover work, and the first click/key comparison of the race
+      // screen differed on exactly one line, `H  PIT CREW`, drawn bright in the
+      // click run because the pointer was still sitting on it. That is the
+      // feature working, and it is not the state the two drives are being
+      // compared on -- so a click run ends by moving the pointer off every
+      // control, and the hover state is photographed separately, on purpose,
+      // where it is the thing being looked at.
+      //
+      // (0, 0) is the top-left corner of the window. No screen in this game has
+      // a control there: every one of them keeps a 16 px page margin and a
+      // title band above anything pressable.
+      pointer.moveTo(0, 0)
+      console.log("do: unhover")
     } else if (kind === "wait") {
       console.log("do: wait")
     } else {
@@ -667,13 +705,35 @@ Window {
     driveNext.restart()
   }
 
+  // THE SAME SETTLE ON BOTH DRIVES, AND THE COMPARISON NEEDS IT.
+  //
+  // A click run reaches a state in six presses and the key run that reaches the
+  // same state takes twenty, so the two dumps are taken at different points of
+  // any wall-clock animation the screen is running -- the settings banner's
+  // fade-in, measured at 0.739 against 0.829 opacity, on a line whose text was
+  // identical. That is the drive lengths differing, not the states. Both runs
+  // therefore wait `--settle` (700 ms by default, longer than any fade in this
+  // game and shorter than every hold) before anything is read off the screen.
+  Timer {
+    id: driveSettle
+    interval: harness.settleMs
+    onTriggered: harness.driveRead()
+  }
+
   function driveFinish() {
+    driveSettle.restart()
+  }
+
+  function driveRead() {
     var screen = screenLoader.item
     if (screen && typeof screen.focusedName === "function")
       console.log("do focus:\t" + screen.focusedName())
     if (harness.dumpText || harness.dumpRects)
       harness.runDump()
     if (harness.shotPath.length > 0) {
+      // `settle` grabs the frame. Its own interval has already been waited out
+      // here, so the shot is one more settle away and that is deliberate: a
+      // shot of a hover state wants the frame the pointer is resting on.
       settle.start()
       return
     }
@@ -872,9 +932,20 @@ Window {
       // was built under a different clock.
       if (harness.warmup > 0 && item.hasOwnProperty("warmup"))
         item.warmup = harness.warmup
-      if (harness.stripMode && item.hasOwnProperty("externalClock"))
+      // PIECE M. A DRIVE IS EXTERNALLY CLOCKED FOR THE SAME REASON A STRIP IS.
+      //
+      // The two drives are compared by diffing their `--dump-text` output, and
+      // that only means something if the dump is a function of the state and of
+      // nothing else. The race screen's readouts are bound to a wall clock --
+      // the elapsed time, the caret's blink -- so two runs a few milliseconds
+      // apart differ in pixels that have nothing to do with which input drove
+      // them, and the diff would be noise on every line. `externalClock` is the
+      // screen's own answer to that and it is already trusted for the piece F
+      // strips.
+      if ((harness.stripMode || harness.driving) && item.hasOwnProperty("externalClock"))
         item.externalClock = true
-      if ((harness.warmup > 0 || harness.stripMode) && typeof item.buildRace === "function")
+      if ((harness.warmup > 0 || harness.stripMode || harness.driving)
+          && typeof item.buildRace === "function")
         item.buildRace()
       if (harness.travelArg.length > 0 && item.hasOwnProperty("travel"))
         item.travel = parseFloat(harness.travelArg)

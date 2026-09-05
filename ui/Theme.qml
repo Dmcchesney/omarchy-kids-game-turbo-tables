@@ -342,9 +342,24 @@ QtObject {
   // It is NOT a general-purpose role: it is only the same pixels while the
   // thing underneath is `ground`. Both callers fill their root with `ground`
   // and draw nothing between; anything else has to compose its own.
-  readonly property color panelOnGround: Qt.rgba(panel.r * 0.55 + ground.r * 0.45,
-                                                 panel.g * 0.55 + ground.g * 0.45,
-                                                 panel.b * 0.55 + ground.b * 0.45, 1)
+  // The alpha is 140/255 rather than 0.55 because that is the number the
+  // renderer actually used: a QColor holds eight bits per channel, so
+  // `Qt.rgba(r, g, b, 0.55)` becomes an alpha BYTE of round(0.55 x 255) = 140.
+  //
+  // IT DID NOT CLOSE THE LAST STEP, and saying so is the point of writing it
+  // down. Measured both ways over the whole 1920 x 1080 frame, the composite
+  // still differs from Qt's own blend by at most ONE 255th of a channel, on 30%
+  // of the settings frame and 85% of the results frame, with 0.55 and with
+  // 140/255 alike -- Qt's raster path rounds through premultiplied integers and
+  // this expression rounds once at the end. One 8-bit step is below the
+  // quantisation the frame is stored in, so nothing on either screen looks
+  // different; the frame diff in this round's report states the bound rather
+  // than claiming the frames are byte-identical, because they are not.
+  readonly property real panelAlpha: 140 / 255
+  readonly property color panelOnGround:
+      Qt.rgba(panel.r * panelAlpha + ground.r * (1 - panelAlpha),
+              panel.g * panelAlpha + ground.g * (1 - panelAlpha),
+              panel.b * panelAlpha + ground.b * (1 - panelAlpha), 1)
 
   readonly property int cornerRadius: Math.max(10, shellCornerRadius)
   readonly property int cornerRadiusSmall: Math.max(6, shellCornerRadius)

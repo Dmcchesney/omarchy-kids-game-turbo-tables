@@ -177,6 +177,29 @@ button. The design said "every screen operates with the keyboard alone", which
 was read as keyboard-only. It now says keyboard first, mouse always
 (design v4.1, Accessibility), and the plan carries it as piece **M Mouse**.
 
+**Built, piece M round 1.** `ui/parts/Clickable.qml` is the one click target and
+the only mouse handler in `ui/`, so "what can be clicked" is a question the item
+tree can answer rather than a list somebody keeps. Every one names the key that
+does the same thing and calls the same function that key's branch calls.
+Reached by mouse now: the garage's two steppers and eight swatches, the settings
+rows on both screens, every button, the confirmation's two answers, the picker's
+three cards and its rival tags, the race's pit crew and its way out, the
+countdown's way back, and the `S` door to settings and the three resets — which
+was the only route to them at all, so the resets were keyboard-only for a
+parent with a mouse in their hand.
+
+`dev/Harness.qml --print-controls` walks the tree and prints the parity table in
+both directions; `--do click:…` and `--do key:…` drive a screen with real
+synthetic mouse and key events. Seven click/key drive pairs reach byte-identical
+screen state. `tests/qml/tst_mouse_parity.qml` holds it there.
+
+**Two gaps, named rather than hidden.** There is no on-screen keypad anywhere:
+the answer is typed, on every screen that takes one, and a mouse cannot enter a
+digit. And the picker has no mouse way to put a chosen card *back* — a second
+click on the chosen card uses it, which is what the panel prints. Both are in
+the round's report with the reasoning; the second dissolves when §5.2 lands,
+because a card will no longer be choosable by accident.
+
 ### 5.2 The hand is unreliable to fire, and the cause is the design's own key choice
 
 `1`, `2` and `3` are both card keys and digits. The build handled the collision

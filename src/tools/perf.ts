@@ -577,14 +577,55 @@ function passthrough(): string[] {
 // Commands
 // ---------------------------------------------------------------------------
 
+// PIECE M -- TWO OPTIONS THAT WERE ACCEPTED AND DID NOTHING.
+//
+// `--frames N` and `--budget-ms N` were parsed here and handed to `measure()`
+// as `frames` and `budgetMs`. `MeasureOptions` has neither field, and
+// `measure()` reads neither: it builds its argument list with the constant
+// `FRAME_CAP` and with `HIGH_WINDOW_MS`. So both flags were silently ignored,
+// and a run that asked for a hundred frames got the same four-million-frame cap
+// as every other run and reported a number the caller believed was about a
+// hundred frames.
+//
+// They are not wired up, because the frame count IS NOT A KNOB ON THIS
+// INSTRUMENT and making it one would break the thing the block above this
+// function explains at length: the WINDOW is what is held fixed and the frame
+// count is the READING. `--frames` asks to hold the reading fixed, which is the
+// design this file was rewritten to get away from; `--budget-ms` is the window
+// under another name, and its old default (2500) does not even agree with
+// `HIGH_WINDOW_MS` (1500), so honouring it would quietly change the length of
+// every measurement anybody has ever taken with this tool.
+//
+// So they fail, loudly, and say why. A flag that does nothing is worse than a
+// flag that does not exist: it produces numbers somebody trusts for a reason
+// that was never true.
+const REFUSED: { flag: string; why: string }[] = [
+  {
+    flag: "--frames",
+    why: "the frame count is this instrument's READING, not its input: the window is what is held fixed."
+      + " Use --arms to run more passes, or --size to change how much work a frame is.",
+  },
+  {
+    flag: "--budget-ms",
+    why: "the measured window is fixed at HIGH_WINDOW_MS so that two screens are comparable."
+      + " Changing it per run makes two numbers in one report incomparable.",
+  },
+];
+
+function refuseIgnoredOptions(): void {
+  for (const { flag: name, why } of REFUSED) {
+    if (!argv.includes(name)) continue;
+    console.error(`perf: ${name} is not supported, and was silently ignored until piece M.\n  ${why}`);
+    process.exit(2);
+  }
+}
+
 function commandRun(): void {
+  refuseIgnoredOptions();
   const screen = option("--screen", "Garage");
   const size = option("--size", "480x270");
-  const frames = option("--frames", "");
   const item = measure({
     screen, size, passthrough: passthrough(),
-    frames: frames ? Number(frames) : undefined,
-    budgetMs: Number(option("--budget-ms", "2500")),
     gc: flag("--gc"), phases: flag("--phases"),
     arms: Number(option("--arms", String(DEFAULT_ARMS))),
   });
@@ -602,6 +643,7 @@ function commandRun(): void {
 }
 
 function commandNoise(): void {
+  refuseIgnoredOptions();
   const screen = option("--screen", "TrackView");
   const size = option("--size", "1920x1080");
   const repeat = Number(option("--repeat", "7"));
@@ -638,6 +680,7 @@ function commandNoise(): void {
 
 /** The battery. An instrument nobody has tried to break is not an instrument. */
 function commandFalsify(): void {
+  refuseIgnoredOptions();
   const screen = option("--screen", "TrackView");
   say(`# Falsification — does the instrument move with the load?`);
   say();
@@ -757,6 +800,7 @@ function commandFalsify(): void {
 }
 
 function commandBaseline(): void {
+  refuseIgnoredOptions();
   say(`# Baseline — the game as it stands`);
   say();
   say(`Taken with \`npm run perf -- baseline\`. Every figure is wall milliseconds per`);

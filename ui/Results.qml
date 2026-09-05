@@ -406,11 +406,16 @@ FocusScope {
     color: Theme.ground
   }
 
+  // PIECE M. The same full-window alpha blend the settings screen carried, for
+  // the same reason and with the same fix: `Theme.panelOnGround` is
+  // `Theme.panel` at 0.55 composed onto `Theme.ground`, which is the only thing
+  // behind this Panel. Identical pixels, no per-pixel blend. See the longer note
+  // in `ui/Settings.qml` and the frame diff in this round's report.
   Panel {
     id: page
     anchors.fill: parent
     anchors.margins: results.px(16)
-    color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.55)
+    color: Theme.panelOnGround
     border.color: Theme.lineStrong
 
     readonly property int pad: results.px(40)

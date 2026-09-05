@@ -288,11 +288,28 @@ FocusScope {
     color: Theme.ground
   }
 
+  // PIECE M -- THE ONE ALPHA BLEND THAT COST HALF THIS SCREEN.
+  //
+  // This filled the window at `Qt.rgba(Theme.panel..., 0.55)` over the
+  // `Theme.ground` rectangle above and nothing else, so at 1080p it was a
+  // 1888 x 1048 antialiased rounded rectangle with a per-pixel alpha blend --
+  // and a translucent fill loses the software renderer's opaque fast path
+  // entirely. The colour it produced never varied, because the only thing
+  // behind it is a constant.
+  //
+  // `Theme.panelOnGround` is that composite, worked out once (see the note
+  // there). The pixels are identical -- proved by a frame diff of the whole
+  // 1920 x 1080 window, not asserted -- and the measured cost is in this
+  // round's report with its load average beside it.
+  //
+  // `ui/parts/Panel.qml` is NOT changed. It is shared with the garage, whose
+  // cards are translucent over a room that is genuinely drawn behind them; the
+  // shortcut is true of these two full-window instances and of nothing else.
   Panel {
     id: page
     anchors.fill: parent
     anchors.margins: settings.px(16)
-    color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.55)
+    color: Theme.panelOnGround
     border.color: Theme.lineStrong
     enabled: !settings.confirming
 

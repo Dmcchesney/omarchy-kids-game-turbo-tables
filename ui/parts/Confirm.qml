@@ -155,6 +155,17 @@ FocusScope {
               font.letterSpacing: confirm.px(2)
             }
 
+            // PIECE M. Named as a button, not only drawn as one. The parity
+            // walk finds controls the click list might have missed by reading
+            // `Accessible.role`, so a control that is silent there is invisible
+            // to the very check that would catch it being forgotten -- and
+            // these two were silent: the dialog announced itself and its two
+            // answers did not.
+            Accessible.role: Accessible.Button
+            Accessible.name: modelData.label + (answer.chosen ? ", chosen" : "")
+            Accessible.description: confirm.question + " " + confirm.detail
+            Accessible.onPressAction: answerHit.acted()
+
             // PIECE M -- A CLICK ON AN ANSWER IS THE ANSWER, AND ONLY ITS OWN.
             //
             // The keyboard reaches this dialog in two presses: an arrow to arm
