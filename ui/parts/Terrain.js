@@ -57,8 +57,16 @@ var CURVE_AMPLITUDE = 0.0255
 // the scrub, the quarry, the lake, the pines, the roller door, the dunes, the
 // overpass, the scrapyard, the billboards, the finish. `SOIL` is the ground's
 // base and `SCRUB` what the coarse octave lifts it to -- dry grass out of town,
-// ochre in the scrub, rock dust in the quarry, needles in the pines, sand in
-// the dunes, rust in the scrapyard, and a pale salt flat under the billboards.
+// ochre in the scrub, rock dust in the quarry, needles in the pines, a pale
+// CONCRETE APRON at the roller door, sand in the dunes, blue GRAVEL under the
+// overpass, rust in the scrapyard, and a pale salt flat under the billboards.
+//
+// The apron and the gravel are round 2's, and they are the answer to "6 and 8 --
+// the roller door and the overpass are the same grey-blue slab spanning the
+// road". Two of the twelve sectors stood on the same ground within 0.02 of every
+// channel; a garage forecourt is swept concrete and a bridge stands on ballast,
+// so one is now the second palest ground on the circuit and the other the
+// bluest, and the two sectors no longer share a floor as well as a silhouette.
 // Every one of them is a golden-hour tone: nothing here is grey, because the
 // design's shadow is purple and never grey.
 var SOIL = [
@@ -68,9 +76,9 @@ var SOIL = [
   [0.2980, 0.1412, 0.2196],
   [0.2353, 0.0863, 0.2039],
   [0.2000, 0.0902, 0.2039],
-  [0.2471, 0.1176, 0.1961],
+  [0.3255, 0.2118, 0.2745],
   [0.4784, 0.2510, 0.2824],
-  [0.2353, 0.1020, 0.1804],
+  [0.2196, 0.1098, 0.2196],
   [0.2824, 0.1333, 0.1804],
   [0.5412, 0.3294, 0.3765],
   [0.2353, 0.0706, 0.1569]
@@ -82,9 +90,9 @@ var SCRUB = [
   [0.4196, 0.2275, 0.3216],
   [0.3216, 0.1412, 0.2667],
   [0.1490, 0.0784, 0.1804],
-  [0.3412, 0.1882, 0.2510],
+  [0.4157, 0.2902, 0.3529],
   [0.6353, 0.3529, 0.3451],
-  [0.3059, 0.1490, 0.2196],
+  [0.2941, 0.1725, 0.2902],
   [0.4314, 0.2118, 0.2039],
   [0.6549, 0.4157, 0.4392],
   [0.2902, 0.1020, 0.1882]
@@ -106,9 +114,9 @@ var FLAGS = [
   [0.0, 0.0, 0.0, 0.66],
   [0.0, 1.0, 0.0, 0.54],
   [0.0, 0.0, 0.0, 0.88],
-  [0.0, 0.0, 0.0, 0.40],
+  [0.0, 0.0, 0.0, 0.30],
   [0.0, 0.0, 1.0, 0.58],
-  [0.0, 0.0, 0.0, 0.62],
+  [0.0, 0.0, 0.0, 0.74],
   [0.0, 0.0, 0.0, 0.94],
   [0.0, 0.0, 0.0, 0.30],
   [1.0, 0.0, 0.0, 0.22]

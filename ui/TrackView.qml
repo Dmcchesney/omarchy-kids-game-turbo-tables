@@ -1718,6 +1718,28 @@ Item {
         sourceComponent: paintedSplit
       }
 
+      // A LAMP THAT IS ACTUALLY LIT, IN THE TWO SECTORS A STRANGER COULD NOT
+      // TELL APART.
+      //
+      // "6 and 8 -- the roller door and the overpass are the same grey-blue slab
+      // spanning the road ... Not a garage, no roller door, no lamps"; and of
+      // the pit and the finish, "twelve sectors and the first and last are the
+      // same room". The design gives sector 7 "the long garage from the design,
+      // roller door open, LAMPS FLICKERING" and sector 12 "the finish gantry
+      // LIT" -- and neither had a lit lamp anywhere, so the roller door's
+      // two-frame bake had nothing to flicker and the finish gantry was the
+      // start gantry with chequers on it.
+      //
+      // What lights them is what a garage and a finish line are: a warm interior
+      // behind an open door, and lamps on a crossbar. Three of the hundred and
+      // thirty-eight placements carry this, so it is behind a Loader whose
+      // `active` reads a kind that never changes -- see the note on the printed
+      // strings above.
+      Loader {
+        active: roadside.place.kind === "rollerDoor" || roadside.place.kind === "gantry"
+        sourceComponent: propLamps
+      }
+
       // ------------------------------------------------- THE FACT BILLBOARDS
       //
       // Design v4, sector 11: "a row of boards that show the last three facts
@@ -1764,6 +1786,61 @@ Item {
           x: kitCell.boxLeft + kitCell.boxWidth * 0.10
           y: kitCell.boxTop + kitCell.boxHeight * 0.28
           width: kitCell.boxWidth * 0.80
+        }
+      }
+
+      // The garage's own light and the finish gantry's, from the kit's own
+      // geometry: the doorway is the middle two fifths of the roller door's
+      // opaque box and the lamps hang at the ends of a crossbar.
+      Component {
+        id: propLamps
+
+        Item {
+          readonly property bool door: roadside.place.kind === "rollerDoor"
+          readonly property real span: kitCell.boxWidth
+          readonly property real tall: kitCell.boxHeight
+          // The roller door's lamp is the one the design says flickers, and the
+          // bake's second frame is the one with a lamp out; `Circuit.frameOf`
+          // already picks between them on a hash of the second, so the light
+          // dips with the frame instead of on a clock of its own.
+          readonly property real flicker: door && kitCell.viewIndex === 1 ? 0.45 : 1
+          visible: roadside.visible && span > 26 && roadside.clarity > 0.10
+          opacity: roadside.clarity * flicker
+
+          // THE BAY BEHIND THE DOOR. Warm, dim and rectangular, because it is a
+          // rectangular opening with a work light somewhere inside it; the
+          // design's garage is lit by exactly that. Only the door has one -- a
+          // gantry is a frame with the sunset behind it.
+          Rectangle {
+            visible: parent.door
+            color: "#f5a524"
+            opacity: 0.20 + 0.16 * view.nightfall
+            x: kitCell.boxLeft + parent.span * 0.31
+            width: parent.span * 0.38
+            y: kitCell.boxTop + parent.tall * 0.46
+            height: parent.tall * 0.46
+            antialiasing: false
+          }
+
+          Repeater {
+            model: parent.visible ? 2 : 0
+
+            PointLight {
+              // The road's own pixel grid: a lamp is made of the same blocks
+              // the road is, which is the rule every light in this file follows.
+              pixel: view.fxPixel
+              tone: "#ffc961"
+              falloff: 1.9
+              // Brighter as the hour passes: a work light reads as a light once
+              // the sun stops out-shining it.
+              amount: (0.34 + 0.42 * view.nightfall)
+              width: Math.max(4, kitCell.boxWidth * 0.30)
+              height: width
+              x: kitCell.boxLeft + kitCell.boxWidth * (index === 0 ? 0.20 : 0.80) - width / 2
+              y: kitCell.boxTop + kitCell.boxHeight * (parent.parent.door ? 0.30 : 0.16)
+                 - height / 2
+            }
+          }
         }
       }
 

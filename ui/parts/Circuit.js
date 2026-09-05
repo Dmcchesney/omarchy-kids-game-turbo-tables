@@ -205,18 +205,42 @@ var PLACEMENTS = [
   // -------------------------------------------------- 2  OUT OF TOWN
   // "sponsor-style banners with the game's own marks, hay bales". The banners
   // carry the kit's own baked TURBO mark; nothing is printed on them.
+  //
+  // ROUND 2 FILLED IT. A critic looking at the twelve unlabelled read this one
+  // as "a sponsor straight ... two big TURBO boards and some hay bales in an
+  // empty plain. NO TOWN ANYWHERE", and measured roughly 60% of the frame as
+  // unbroken flat ground with nothing in it. There is no building in the kit and
+  // a builder may not add one, so what makes an edge-of-town out of twenty-five
+  // baked props is DENSITY and DEPTH: banners at three distances rather than one
+  // -- 4.8 units, 9.5 and 15 -- so the middle distance has something in it, hay
+  // bales in rows the way they are stacked at a circuit's edge, tyre walls,
+  // drums and cones. It is now the most furnished sector on the circuit outside
+  // the pit, which is what being near a town looks like from a road.
   at("banner", "R", 40, 4.8, "still", 0, 0),
+  at("banner", "L", 41, -9.5, "still", 0, 0),
   at("hayBale", "L", 43, -2.9, "still", 0, 0),
   at("hayBale", "L", 45, -2.9, "still", 0, 0),
+  at("hayBale", "L", 44, -4.3, "still", 0, 0),
   at("markerPost", "R", 46, 2.6, "still", 0, 0),
+  at("drum", "R", 47, 3.4, "still", 0, 0),
+  at("drum", "R", 47.8, 4.3, "still", 0, 0),
+  at("tireWall", "L", 49, -3.7, "still", 0, 0),
   at("banner", "L", 50, -4.8, "still", 0, 0),
+  at("banner", "R", 52, 15.0, "still", 0, 0),
   at("hayBale", "R", 53, 2.9, "still", 0, 0),
   at("hayBale", "R", 55, 2.9, "still", 0, 0),
+  at("hayBale", "R", 54, 4.3, "still", 0, 0),
   at("markerPost", "L", 56, -2.6, "still", 0, 0),
+  at("cone", "L", 57, -2.5, "still", 0, 0),
+  at("tireWall", "R", 58, 3.7, "still", 0, 0),
   at("banner", "R", 60, 4.8, "still", 0, 0),
+  at("banner", "L", 61, -11.0, "still", 0, 0),
   at("hayBale", "L", 63, -2.9, "still", 0, 0),
+  at("hayBale", "L", 62, -4.3, "still", 0, 0),
+  at("drum", "L", 65, -3.4, "still", 0, 0),
   at("markerPost", "R", 64, 2.6, "still", 0, 0),
   at("markerPost", "L", 64, -2.6, "still", 0, 0),
+  at("tireWall", "L", 66, -3.7, "still", 0, 0),
   at("distanceBoard", "R", 68, 3.4, "still", 0, 0),
   at("distanceBoard", "R", 70, 3.4, "still", 1, 0),
 
@@ -325,7 +349,10 @@ var PLACEMENTS = [
   // drawn by TrackView, because it is a soft thing and a hard-edged bake of a
   // soft thing reads as gravel.
   at("pine", "R", 292, 9.0, "still", 0, 0),
+  at("pine", "R", 291, 14.0, "still", 1, 0),
   at("pine", "L", 295, -8.0, "still", 1, 0),
+  at("pine", "L", 293, -13.0, "still", 0, 0),
+  at("drum", "L", 297, -3.2, "still", 0, 0),
   at("tireWall", "R", 298, 3.6, "still", 0, 0),
   at("overpass", "C", 302, 0, "still", 0, 0),
   at("tireWall", "R", 306, 3.6, "still", 0, 0),
