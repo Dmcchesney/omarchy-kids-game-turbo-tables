@@ -26,6 +26,15 @@ Item {
   property real horizon: 0.40
   property real lateral: 0
   property real sunX: 0.68
+  // THE HEIGHT EVERY PROPORTION IN THIS SKY IS MEASURED AGAINST.
+  //
+  // Normally the item's own height, and every caller but one leaves it there.
+  // `ui/TrackView.qml` draws this into an OVERSCANNED plane -- taller than the
+  // frame, so a camera shake has somewhere to move without uncovering the void
+  // behind the scene -- and passes 270, the frame's own height. Without it the
+  // sun, the cloud bands and the three hill silhouettes would all grow with the
+  // margin, which is a change to the picture and not to the camera.
+  property real unitH: height
   // Radius of the sun disc, as a fraction of the item's height.
   property real sunRadius: 0.18
   // How much of the disc sits above the horizon line: 0.5 is a disc bisected
@@ -46,7 +55,7 @@ Item {
   readonly property real horizonY: Math.round(horizon * height)
   // How tall the sky canvas is: enough to reach the top of the item at the
   // lowest horizon the track ever draws, and the gradient is fitted to that.
-  readonly property int skyH: Math.ceil(height * 0.56)
+  readonly property int skyH: Math.ceil(sky.unitH * 0.56)
 
   clip: true
 
@@ -83,7 +92,7 @@ Item {
       ctx.fillStyle = g
       ctx.fillRect(0, 0, w, h)
 
-      var r = sky.sunRadius * sky.height
+      var r = sky.sunRadius * sky.unitH
       var cx = Math.round(sky.sunX * w)
       var cy = Math.round(h - r * (sky.sunLift * 2 - 1))
 
@@ -142,7 +151,7 @@ Item {
       var cuts = [[0.06, 1], [0.20, 1], [0.34, 2], [0.48, 2], [0.62, 3], [0.76, 3], [0.90, 4]]
       for (var i = 0; i < cuts.length; i++) {
         var yy = Math.round(cy + r * cuts[i][0])
-        var t = Math.max(1, Math.round(cuts[i][1] * sky.height / 270))
+        var t = Math.max(1, Math.round(cuts[i][1] * sky.unitH / 270))
         // the sky colour at this row, so the cut reads as sky through the disc
         var f = Math.max(0, Math.min(1, yy / h))
         ctx.fillStyle = f < 0.66 ? sky.skyMid : sky.skyLow
@@ -163,7 +172,7 @@ Item {
 
     Canvas {
       readonly property real par: [0.15, 0.30, 0.50][index]
-      readonly property real tall: [0.105, 0.070, 0.044][index] * sky.height
+      readonly property real tall: [0.105, 0.070, 0.044][index] * sky.unitH
       readonly property color tone: [sky.hillFar, sky.hillMid, sky.hillNear][index]
       readonly property var bumps: [
         [[0.05, 0.9, 0.16], [0.30, 0.55, 0.09], [0.52, 1.0, 0.14], [0.78, 0.7, 0.10], [1.05, 0.95, 0.15], [1.35, 0.6, 0.08], [1.62, 0.85, 0.12], [1.90, 0.75, 0.11]],
