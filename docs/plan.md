@@ -303,12 +303,21 @@ doing anything heavy, it is a retro racing game; become obsessed with small
 performance increases."*
 
 **The instrument comes first, because we do not currently have one.**
-`--measure` counts `FrameAnimation` ticks and has returned 62.5–62.8 fps at
-480×270, 1366×768, 1920×1080 *and* 3840×2160 — across a 64× area range, with and
-without a Pile-Up's effects running. A number that does not move when the work
-changes by 64× is measuring the animation driver's cadence, not the cost of a
-frame, and every performance claim ever made in this project from that number is
-void. No optimisation may be reported against it. Build a real one — per-frame
+`--measure` counts `FrameAnimation` ticks. **It saturates**, and that is the
+precise fault: it has returned 62.5–62.8 fps at 480×270, 1366×768, 1920×1080
+*and* 3840×2160, across a 64× area range, with and without a Pile-Up's effects —
+because the driver's cadence is the ceiling and the game was under it every time.
+It does move when the load is heavy enough to miss frames: `CanvasRoad`'s first
+ground pass took the Race screen from 62.8 fps to 23.3 at 1920×1080, and that
+reading is real.
+
+So the honest statement is narrower than "void", and the narrower version is the
+useful one: **the counter can detect a regression bad enough to drop frames, and
+it cannot see headroom at all.** Every "62.5 fps, therefore fast" in this
+project's reports means only "not yet missing frames on this Mac, on the software
+path, at rest" — it is not evidence of margin, and margin is exactly what a weak
+machine needs. No optimisation above 60 fps may be reported against it, because
+it cannot measure one. Build a real one — per-frame
 CPU time over a fixed frame count, scene-graph node and draw-call counts, texture
 bytes resident, allocation per frame — and prove it responds to a deliberate
 change in load before trusting a single reading from it. This is the same rule as
