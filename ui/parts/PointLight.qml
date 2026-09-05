@@ -72,9 +72,26 @@ Item {
                               ? Math.max(4, Math.min(256, Math.round(width / pixel)))
                               : 256
 
+  // Where the drawn face's left edge wants to be, so the light is centred, and
+  // where it may be, which is a whole number of road pixels from the item's own
+  // origin. `anchors.centerIn` gets the first and misses the second by up to
+  // half a block whenever the width is not an even multiple of `pixel`, and a
+  // measurement finds that at once: the sun's bloom scored 0.28 on "runs of
+  // four on the plane's lattice" while its own blocks were four pixels across.
+  readonly property real drawnSpan: grid * (blocky ? pixel : (width / grid))
+  readonly property real drawnLeft: blocky
+                                    ? Math.round((width - drawnSpan) / 2 / pixel) * pixel
+                                    : (width - drawnSpan) / 2
+  readonly property real drawnTop: blocky
+                                   ? Math.round((height - drawnSpan) / 2 / pixel) * pixel
+                                   : (height - drawnSpan) / 2
+
   Canvas {
     id: face
-    anchors.centerIn: parent
+    // The item is scaled about its own centre, so its unscaled x is the wanted
+    // drawn edge pulled back by half of what the scale adds.
+    x: light.drawnLeft - (light.grid - light.drawnSpan) / 2
+    y: light.drawnTop - (light.grid - light.drawnSpan) / 2
     width: light.grid
     height: light.grid
     // Exactly `pixel` screen pixels per drawn pixel when the grid is on, so a
