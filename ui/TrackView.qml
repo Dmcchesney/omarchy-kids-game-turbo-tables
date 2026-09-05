@@ -2403,7 +2403,8 @@ Item {
     fxSound("hit", 0)
     pullBack(Math.min(1, 0.35 + Math.max(0, delta) / 18))
     shake = reducedMotion ? 0 : Math.min(1, 0.85)
-    fxWorldFlash(CardFx.HIT.edgeHot, 0.30, 220)
+    fxWorldFlash(CardFx.HIT.edgeHot,
+                 reducedMotion ? Math.min(0.30 * 0.66, CardFx.FLASH_CAP) : 0.30, 220)
     if (heroIndex >= 0) {
       // "Your own hood smokes until the effect ends." The floor is the stall
       // the engine reported; Race.qml renews it from the lap requirement.
@@ -2420,7 +2421,9 @@ Item {
     // round the child's kart since they played the card, so nothing has to
     // appear: `cageCracked` starts it coming apart.
     var rc = CardFx.BEATS.rollCage
-    fxWorldFlash("#ffffff", reducedMotion ? rc.blockFlash * 0.66 : rc.blockFlash,
+    fxWorldFlash("#ffffff",
+                 reducedMotion ? Math.min(rc.blockFlash * 0.66, CardFx.FLASH_CAP)
+                               : rc.blockFlash,
                  rc.blockFlashMs)
     fxSound("block", 0)
     fxHold(60)
@@ -2687,7 +2690,9 @@ Item {
       fxPuffLater(kart, 0, -span * 0.24, fxMarkSize(span * 0.30, 0.030), 2.2, 280,
                   "#ffffff", 0.06, delay, 1.0)
       fxSound("block", delay)
-      fxWorldFlash("#ffffff", reducedMotion ? rc.blockFlash * 0.66 : rc.blockFlash,
+      fxWorldFlash("#ffffff",
+                   reducedMotion ? Math.min(rc.blockFlash * 0.66, CardFx.FLASH_CAP)
+                                 : rc.blockFlash,
                    rc.blockFlashMs)
       fxShakeBy(rc.blockShake)
       fxHold(60)
@@ -2824,7 +2829,10 @@ Item {
     // Reduced motion keeps the flash -- it is the substitute, not the thing
     // substituted -- but takes a third off it, because a child who has asked
     // for less motion is not asking for a brighter screen.
-    fxWorldFlash(f.tone, reducedMotion ? f.peak * 0.66 : f.peak, f.ms, f.ground, f.over)
+    // ROUND 4: A CEILING AS WELL AS THE MULTIPLIER. See `CardFx.FLASH_CAP`.
+    fxWorldFlash(f.tone,
+                 reducedMotion ? Math.min(f.peak * 0.66, CardFx.FLASH_CAP) : f.peak,
+                 f.ms, f.ground, f.over)
   }
   // "a 200 ms shake with decay". `shake` decays at 2.6 per second in `advance`,
   // so a shake of 1 is about 380 ms of camera and a shake of 0.5 about 190 --
@@ -2908,7 +2916,11 @@ Item {
   // RATE, but a blind critic's note on both builds was that a third is enough
   // and half is more than a child's eyes need. This is the number that was
   // turned down; see `docs/design.md`, Accessibility.
-  readonly property real fxSkyPeak: 0.30
+  // The two amber sky flashes of the Pile-Up's telegraph. Their COUNT and their
+  // SPACING are a recorded maintainer decision (docs/open-questions.md, 4) and
+  // nothing here touches either; what round 4 adds is a ceiling on their HEIGHT
+  // under reduced motion, for the reason `CardFx.FLASH_CAP` sets out.
+  readonly property real fxSkyPeak: reducedMotion ? CardFx.SKY_CAP : 0.30
   readonly property real fxSkyFlash: {
     if (cueCard !== "pileUp" || cueBorn <= 0)
       return 0

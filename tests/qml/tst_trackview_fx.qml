@@ -561,6 +561,57 @@ Item {
       race.buildRace()
     }
 
+    // ROUND 4 -- AND THE SETTING CAPS THE LIGHT AS WELL AS THE MOVEMENT.
+    //
+    // Round three took a third off every flash, which is a multiplier: it made
+    // the quiet cards quieter and left the loudest one loud. A blind critic
+    // measured the reduced Pile-Up at +77% whole-frame against round two's +16%
+    // and named it for what it is -- "the setting most likely to be switched on
+    // by a photosensitive child is the one keeping most of the flash."
+    //
+    // This walks every card with the setting on and holds the two washes that
+    // can cover the whole frame to `CardFx.FLASH_CAP` and `CardFx.SKY_CAP`. It
+    // asserts the INFORMATION survives in the same breath, because a cap that
+    // bought its number by removing the event would be worse than the defect:
+    // every card still puts something on the screen.
+    function test_05c_reduced_motion_caps_the_flash_and_keeps_the_event() {
+      Store.setSetting("reducedMotion", true)
+      var cards = Object.keys(Engine.CARDS)
+      var worstFlash = 0
+      var worstSky = 0
+      var loudest = ""
+      for (var c = 0; c < cards.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cards[c])
+        var sawSomething = false
+        for (var f = 0; f < 26; f++) {
+          if (track.flashNow > worstFlash) {
+            worstFlash = track.flashNow
+            loudest = cards[c]
+          }
+          worstSky = Math.max(worstSky, track.fxSkyFlash * track.fxSkyPeak)
+          if (root.effectBoxes().length > 0)
+            sawSomething = true
+          race.stepClock(60)
+        }
+        verify(sawSomething,
+               cards[c] + " still draws something with reduced motion on")
+      }
+      verify(worstFlash <= CardFx.FLASH_CAP + 0.001,
+             "the loudest reduced-motion flash in the whole deck is "
+             + worstFlash.toFixed(3) + " (" + loudest + "), cap "
+             + CardFx.FLASH_CAP)
+      verify(worstSky <= CardFx.SKY_CAP + 0.001,
+             "and the loudest reduced-motion sky flash is " + worstSky.toFixed(3)
+             + ", cap " + CardFx.SKY_CAP)
+      console.log("FX-REDUCED|flash " + worstFlash.toFixed(3) + " (cap "
+                  + CardFx.FLASH_CAP + ") · sky " + worstSky.toFixed(3) + " (cap "
+                  + CardFx.SKY_CAP + ")|loudest " + loudest)
+      Store.setSetting("reducedMotion", false)
+      race.buildRace()
+    }
+
     // ... AND THE ROAD IS STILL A ROAD.
     //
     // ROUND 2. `TrackView.advance` used to return before `travel` under reduced

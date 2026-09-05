@@ -481,3 +481,43 @@ function reducedOut(name) {
           "speedLines", "afterimage", "flight", "tumble", "squat",
           "shimmer", "bloom"].indexOf(name) >= 0
 }
+
+// ---------------------------------------------------- THE FLASH CEILING
+//
+// ROUND 4, AND IT IS THE ONE THING IN THIS PIECE THE SETTING WAS GETTING
+// BACKWARDS.
+//
+// Reduced motion took a third off every flash, which is a MULTIPLIER: the
+// quietest card came down to nothing and the loudest kept most of itself. A
+// blind critic measured round three's reduced Pile-Up at +77% whole-frame
+// against round two's +16% and said what that means plainly -- "the setting
+// most likely to be switched on by a photosensitive child is the one keeping
+// most of the flash."
+//
+// So there is a CEILING as well as the multiplier, and the ceiling is what
+// binds on the cards that matter:
+//
+//     reduced peak = min(peak * 0.66, FLASH_CAP)
+//
+// 0.085 is chosen against the measurement and not by taste. The washes are
+// composited over a scene whose whole-frame mean luma is about 75 and whose
+// tones are near 200, so an alpha of a moves the frame by roughly 125a; the
+// Pile-Up also lays `groundBias` of the same flash on the tarmac, which is
+// a little over half the frame. 0.085 puts the reduced Pile-Up -- the loudest
+// event in the game -- at about +16% whole-frame, which is round two's figure
+// and the number the round-4 work order named as a reasonable target. Every
+// other card is quieter than that already and the multiplier still governs it.
+//
+// The two amber sky flashes of the Pile-Up's telegraph are capped by the same
+// argument, at `SKY_CAP` against a normal `fxSkyPeak` of 0.30. THE COUNT AND
+// THE SPACING ARE UNTOUCHED -- they are a recorded maintainer decision in
+// docs/open-questions.md section 4 and are not a builder's to change -- and
+// with the setting off nothing here applies at all.
+//
+// WHAT REDUCED MOTION MUST NOT LOSE is the information. The decal, the tags,
+// the plates, the callout, the hood smoke, the debris left on the road and the
+// place change are all still drawn at full strength, and every one of them is
+// still, so a child with the setting on is told exactly what happened without
+// the screen doubling in brightness to say it.
+var FLASH_CAP = 0.085
+var SKY_CAP = 0.10
