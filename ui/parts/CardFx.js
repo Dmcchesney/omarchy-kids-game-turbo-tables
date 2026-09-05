@@ -296,13 +296,13 @@ var BEATS = {
     // mostly under the sprites, so the kart is a hard silhouette standing in
     // its own flare instead of a ghost inside a screen-wide tan wash.
     flashShape: "point",
-    // 0.26 x 1.9 = 0.49 at the centre of a disc about one and a half karts
-    // across. A wash of 0.26 over two million pixels becomes a light of 0.49
-    // over three hundred thousand, and the second one is a thing that happened
-    // to a kart rather than a thing that happened to the screen.
-    pointGain: 1.9,
-    pointSpan: 1.55,
-    pointFloor: 0.19,
+    // 0.26 x 2.3 = 0.60 at the centre of a disc about two karts across. A wash
+    // of 0.26 over two million pixels becomes a light of 0.60 over four hundred
+    // thousand, and the second one is a thing that happened to a kart rather
+    // than a thing that happened to the screen.
+    pointGain: 2.3,
+    pointSpan: 1.90,
+    pointFloor: 0.21,
     flashOver: 0.30,
   },
   // "Pothole (one rival +8)": telegraph 350, hit-stop 100, the kart bounces
@@ -329,9 +329,9 @@ var BEATS = {
     // fell into it -- and the camera drops with the kart rather than shaking
     // sideways. See `dropPx`.
     flashShape: "point",
-    pointGain: 1.8,
-    pointSpan: 1.45,
-    pointFloor: 0.18,
+    pointGain: 2.2,
+    pointSpan: 1.80,
+    pointFloor: 0.20,
     flashOver: 0.26,
     // ROUND 5: THE CAMERA FALLS IN TOO. Every other card shakes; this one
     // drops. A downward kick of 1.8% of the frame that recovers in two
@@ -473,9 +473,9 @@ var BEATS = {
     // the room, which is what a bright event at close range actually does to
     // a picture, and it is a quarter of what round 4 put over the whole frame.
     blockShape: "point",
-    blockPointGain: 1.5,
-    blockPointSpan: 2.1,
-    blockPointFloor: 0.30,
+    blockPointGain: 1.9,
+    blockPointSpan: 2.6,
+    blockPointFloor: 0.32,
     blockOver: 0.58,
     blockShake: 0.55,
     blockRingMs: 420,
@@ -511,9 +511,9 @@ var BEATS = {
     // of its resting two pixels.
     lineGain: 7.0,
     // The flare at each end of it, on the two karts that are trading places.
-    pointGain: 1.6,
-    pointSpan: 1.05,
-    pointFloor: 0.10,
+    pointGain: 1.8,
+    pointSpan: 1.30,
+    pointFloor: 0.11,
     flashOver: 0.62,
   },
 }
