@@ -6,7 +6,7 @@ A times-table kart race for children roughly 7 to 11, shipped as an Omarchy shel
 
 This is the second draft. It replaces the sprint-only first draft with the competitive mechanics of the Zipline bellringer race, rebranded, plus AI racers, a pseudo-3D behind-the-kart view, and a minimap. The last section is unchanged in intent: the shape the plugin must take to be listed under Kids on plugins.omarchy.org.
 
-**Status:** v4, 2026-09-04: power-up feel and the circuit added after the first play session; the prop kit is baked and frozen · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
+**Status:** v4.1, 2026-09-05: hand keys, the answer line, callouts and the mouse amended after the second play session · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
 
 ## What changed from draft one, and why
 
@@ -86,7 +86,7 @@ There are no per-question timers. The race clock runs, and that is the only cloc
 - **At 12 in a row**, one clean lap's worth, the child is dealt a hand of three powerups and the streak resets to zero. If a hand is already held, the streak keeps climbing and the next correct answer after the hand is spent deals a new one.
 - **The hand is dealt round-robin** from a fixed schedule shared by every racer in the race, human and AI alike, exactly as the bellringer does it: Nitro, Oil Slick, Wrench, Pothole, Roll Cage, Pile-Up, Turbo, Tow Hook, then around again. The first hand of a race is always Nitro, Oil Slick, Wrench. Because the cursor is shared, the rarest cards reach whoever earns the fourth and fifth hands of the race. Deterministic, seed-free, testable.
 - **Using a powerup costs the whole hand.** Pick one and the other two are gone. No cooldown. You may hold a hand as long as you like, including across laps.
-- **Keys:** `1`, `2`, `3` choose a card; for a targeted card, left and right pick a rival, Enter confirms, Escape backs out. The picker is a small panel in the lower right, not a modal over the question, so the race stays visible.
+- **Keys (v4.1):** digits never touch the hand; they are always the answer. While a hand is held, one card is highlighted (the first, by default), **Left and Right move the highlight** across the three cards, and **Space fires the highlighted card**. A targeted card fires at the nearest rival ahead; **Up and Down change the target** before firing, and the target's kart is ringed while it is chosen. Enter is only ever the answer key, Escape only ever leaves the race. Nothing is parked, deferred, or confirmed: choosing is a look, spending is one press of a key that can never be a digit. The picker is a small panel in the lower right, not a modal over the question, so the race stays visible. (v4 named `1`, `2`, `3` and Enter; four build rounds showed that a card key that is also a digit cannot be made unambiguous on the 23 single-digit facts, and the maintainer reported the hand as unreliable to fire.)
 
 The charge bar has twelve segments, glows from nine, and reads `POWER-UP READY` at twelve. The threshold is a single constant; the test vectors also carry the bellringer's 15 as a parity case so the engine can be checked against the original.
 
@@ -200,11 +200,11 @@ Behind the kart, looking down the track, in the manner of a 16-bit kart racer: t
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **The fact and the field** sit in the upper center at the largest type on screen, over the horizon, never over the karts.
+- **The fact and the field are one line** (v4.1): `7 × 8 = ▮`, the equals sign and the answer at the same size as the fact, the caret blinking in the empty answer, in the upper centre at the largest type on screen, over the horizon, never over the karts. A separate box below the fact was read as an empty panel, not as the place to type.
 - **Minimap** top right: the circuit as a loop with twelve sector ticks, every kart as a colored dot with its number, the child's dot emphasized. It is the honest picture of the race; the main view is the exciting one.
 - **HUD**: lap and table name top left, place beside it, race clock top right, streak charge and the held hand lower right, Roll Cage count as small icons by the place.
 - **Speed** in the view is effective progress rate: a Turbo throws the road forward, a Pile-Up landing pulls the horizon back and shows the attacker's kart sweeping past. The kart never actually reverses; the road does the telling.
-- **Callouts** for 1.6 s: `PASSED BOLT`, `BOLT SLIPPED PAST`, `ROLL CAGE HELD`, `WRENCH ▸ PISTON`.
+- **Callouts** for 1.6 s, **one at a time** (v4.1): a single slot under the fact line, the newest replacing the last, never stacked over the road. `PASSED BOLT`, `ROLL CAGE HELD`, `WRENCH ▸ PISTON` belong there; `BOLT SLIPPED PAST` does not: a pass by a rival is a tag on that rival's kart and a pulse of its dot on the minimap, not a sentence. The stall after a hit is shown **on the answer field itself**, as the bolts overlay the feel section describes, not as a banner.
 - **Above the horizon is the sky, never black:** the sun straddling the horizon off-centre, its glow, and three silhouette hill layers that parallax with the curve. The floor is the diagnostic grid in neon over near-black purple, fading into the glow.
 
 ### Rendering approach
@@ -414,7 +414,9 @@ Engine idle in the garage and a pitch that rises with effective speed on the tra
 
 ## Accessibility
 
-- Every screen operates with the keyboard alone: digits, Enter, Backspace, `H`, `1` `2` `3`, arrows, Escape.
+- Every screen operates with the keyboard alone: digits, Enter, Backspace, `H`, Space, arrows, Escape. Digits are only ever the answer.
+- **The mouse works everywhere** (v4.1): every control on every screen is clickable with a hover state, including the garage's steppers and swatches, the settings rows, the results buttons, the picker's cards, and a rival's kart tag as a target. Keyboard first, mouse always; there is never a mouse-only path and never a keyboard-only one.
+- Key hints in the race are drawn as key caps, the way the garage draws them: `[H] PIT CREW · shows the answer`, `[SPACE] FIRE`, `[← →] CARD`.
 - The fact and the field are the largest text on screen; digits at least 48 px tall at 1080p.
 - Every state has shape or text as well as color: lit lamps are filled, the ghost is translucent, rival dots carry numbers.
 - Reduced motion removes all shake, lurch, and streak lines.

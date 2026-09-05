@@ -156,3 +156,97 @@ is the one keeping most of the flash. Whatever is decided above, reduced motion
 should cap flash amplitude and not only remove shake and spin — and that is a
 defect the loop can fix without a design change, so it is going into piece F
 round 4 rather than waiting for this decision.
+
+## 5. Maintainer feedback after the second play session, 2026-09-05
+
+Don played the build at `7084222`, piece F round 6 in progress, in the VM as the
+real plugin. His agent then drove every screen and the five card moments through
+the harness at 1080p (`--warmup`, `--inject`, 80 ms strips) to find causes. The
+design is amended to v4.1 and the plan to v3.1 for the items below; the rest are
+piece F rubric additions. In the maintainer's own words the two headline
+findings were: *clicking things did not do much*, and *launching a power up
+feels weird, I had to attempt to trigger it multiple times*.
+
+### 5.1 The mouse does nothing, and it is the game, not the VM
+
+No screen under `ui/` has a `MouseArea`, `TapHandler` or `HoverHandler`. The
+only click areas in the plugin are the overlay's scrim (dismiss) and the bar
+button. The design said "every screen operates with the keyboard alone", which
+was read as keyboard-only. It now says keyboard first, mouse always
+(design v4.1, Accessibility), and the plan carries it as piece **M Mouse**.
+
+### 5.2 The hand is unreliable to fire, and the cause is the design's own key choice
+
+`1`, `2` and `3` are both card keys and digits. The build handled the collision
+honestly and at length: the same press is also a digit, so the digit is parked
+in the answer field; Enter spends the card only if the field is empty, otherwise
+Enter is the answer; on the 23 single-digit facts the digit is deferred and
+Backspace means "it was a card"; mid-answer, the keys are digits and no card can
+be chosen at all. Four rounds went into printing those rules on the panel. From
+the keyboard it reads as a card that sometimes fires and sometimes does not.
+
+The fix is not more explanation. Design v4.1 removes digits from the hand
+entirely: Left and Right move a highlight across the three cards, Up and Down
+change a targeted card's rival, **Space fires**, Enter is only ever the answer,
+Escape only ever leaves. Nothing is parked or deferred. The piece F rubric gains
+a strip that types `1` on `2 × 3` while a hand is held and must get a wrong
+answer and no card. The parked-digit machinery in `ui/Race.qml` and the deferred
+sentences in `ui/Picker.qml` come out with it.
+
+### 5.3 The race screen explains itself in text where the child is reading a fact
+
+Judged from the warmed race and the strips, in priority order. All are piece F.
+
+1. **The answer box does not say it is the answer.** The fact is huge and the
+   input is a dark rectangle floating below it with no equals sign. Design
+   v4.1: one line, `7 × 8 = ▮`, the caret blinking.
+2. **Callouts stack over the road.** After one hit there were four boxes in the
+   child's eye line: `ENGINE HIT · 3s`, `WRENCH ◂ BOLT`, `PISTON SLIPPED PAST`,
+   `GASKET SLIPPED PAST`. Design v4.1: one slot under the fact line, newest
+   replaces oldest; a rival passing is a tag on its kart and a minimap pulse,
+   not a sentence.
+3. **The stall is a banner, not the field.** The design's bolts overlay belongs
+   on the answer line itself.
+4. **Rival names on billboards at the horizon** (`PISTON`, `GASKET`, `BOLT` on
+   sign boards) read as places. Rivals are identified by their kart tags;
+   retire the name boards. The kit's banners replace them in piece T.
+5. **Being hit is weaker than hitting.** The pothole strip shows the lamp row
+   grow and the sky flash, but no dip of the child's kart and no pothole on the
+   road, and 800 ms of near-identical frames. The wrench lands with a `+5` and a
+   ring but no sparks, no jolt, no smoke on the victim. Impact is a tag; the
+   design asks for telegraph, impact, aftermath.
+6. **A billboard fades in and out** while a projectile flies past it, because
+   the near-prop dimming rule fires on the whole board. Dim only what overlaps
+   the fact line.
+7. **`H  PIT CREW`** bottom-left is cryptic. Key caps, as the garage draws them:
+   `[H] PIT CREW · shows the answer`.
+
+What is working and must not regress: the Turbo (flash beat, speed lines, road
+stretch, afterimages, the lap rolling over with two PASSED callouts), the hand
+deal (charge flare, three cards sliding in, tier colours, "using one spends all
+three"), the Tow Hook (line latches, TOWED, the rival slides back past you), the
+HUD, the lamp row growing hollow lamps on a hit.
+
+### 5.4 Words a child will misread
+
+- `OFFLINE` in the garage's corner reads as broken; the rail already says
+  THIS COMPUTER ONLY. Drop the badge.
+- `MIDNIGHT GARAGE` for a sunset track. `GOLDEN HOUR`, or `THE PIT`.
+- `PIT CREW 4` on results means nothing to a child: `ANSWERS SHOWN 4`.
+- `BEST STREAK` on results is `BEST COMBO` (design, and the hub's stance).
+- The `POWER-UPS` line on results is a wall of names that wraps. Icons, or
+  "8 cards played".
+
+### 5.5 Small
+
+- Results cut from golden hour to near-black. The chrome-stays-native rule is
+  right; a thin sunset band behind the headline would keep it the same game.
+- The countdown's gantry and the race's grid floor are the Canvas versions;
+  the kit's gantry and the terrain arrive with piece T and are not counted here.
+
+### 5.6 Open item 4 (the Pile-Up's flashes) still needs the maintainer's number
+
+Recorded here so it is not lost behind the feedback: the maintainer's agent
+recommends option 1, lengthening the telegraph to 900 ms so the two amber swings
+sit more than 333 ms apart and the impact flash stands alone. It is the
+maintainer's call and is not applied until he says so.
