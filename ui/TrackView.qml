@@ -1658,6 +1658,22 @@ Item {
     return (spanning ? 1 : nearFade(worldHeight, z)) * hazeClarity(z)
   }
 
+  // HOW A LANDMARK LEAVES. `Circuit.REACH` says how far a big set piece carries
+  // -- the argument is there, and it is that twelve distinct places beat one
+  // continuous world -- and this is the fade that takes it out. Fourteen world
+  // units, because a landmark that switched off would be worse than one that
+  // bled: at the reach the haze has already taken 60% of it, and the rest goes
+  // over about a second of racing.
+  //
+  // A prop with no entry in that table gets 1000 and this returns 1 on the
+  // first comparison, which is every cone, post, drum and bale on the circuit.
+  function reachFade(reach, z) {
+    if (z < reach - 14)
+      return 1
+    var t = (reach - z) / 14
+    return t <= 0 ? 0 : (t >= 1 ? 1 : t * t * (3 - 2 * t))
+  }
+
   Repeater {
     model: view.propCount
 
@@ -1673,8 +1689,10 @@ Item {
       // the sheet row and the animation frame all short-circuit on it. See the
       // note on `KitProp.live`: this is worth 6.2 ms a frame.
       readonly property bool inRange: zed > view.nearDistance && zed < view.drawDistance
+                                      && zed < place.reach
       readonly property real clarity: inRange
-                                      ? view.propOpacity(place.spans, place.worldH, zed) : 0
+                                      ? view.propOpacity(place.spans, place.worldH, zed)
+                                        * view.reachFade(place.reach, zed) : 0
       readonly property real pxUnit: inRange ? view.sizeAt(1, Math.max(0.05, zed)) : 0
 
       x: inRange ? view.uAt(place.x, zed) * view.width + view.shakeX : 0
@@ -1752,6 +1770,31 @@ Item {
             antialiasing: false
           }
         }
+      }
+
+      // ------------------------------------------------- THE GARAGE'S OWN DARK
+      //
+      // Critic's cut 3: "the roller door's see-through interior -- replace with
+      // a dark bay and two lamp glows. Costs nothing; it gains the sector its
+      // identity as a garage." The measurement behind it is that the aperture
+      // shows a COMPLETE SECOND LANDSCAPE -- hills, sky, road, drums, tyres --
+      // through a hole about 440x200 on screen, "and it is also the reason the
+      // set piece reads as an underpass rather than a garage. Strip the
+      // lettering and it is sector 9's overpass with a hole in it."
+      //
+      // Two quads and a dark one, behind the cell so the bake's own lintel,
+      // lamps and lettering all draw over them. It covers the aperture from
+      // under the lintel down to where the floor would be, which is exactly the
+      // sky and the hills; the road through the door and anything driving on it
+      // stay where they are, because the design's own line for this sector is
+      // "the sevens run under it".
+      //
+      // A Loader whose `active` reads the placement's kind, which never
+      // changes: one of the hundred and seventy-three delegates builds this and
+      // the rest evaluate nothing, ever. Same rule as the fact billboards.
+      Loader {
+        active: roadside.place.kind === "rollerDoor"
+        sourceComponent: garageBay
       }
 
       KitProp {
@@ -1890,6 +1933,31 @@ Item {
           x: kitCell.boxLeft + kitCell.boxWidth * 0.10
           y: kitCell.boxTop + kitCell.boxHeight * 0.28
           width: kitCell.boxWidth * 0.80
+        }
+      }
+
+      // THE DARK INSIDE THE GARAGE. Behind the cell, so the bake's lintel, its
+      // lamps and its `PIT` lettering all draw over it; the warm bay in
+      // `propLamps` below draws over it too, which is the work light inside.
+      // The rectangle is the aperture as the bake left it -- the middle 39% of
+      // the opaque box, from just under the lintel down to where the floor
+      // would be -- and what it covers is precisely the hills and the sky that
+      // made a garage read as a tunnel.
+      Component {
+        id: garageBay
+
+        Rectangle {
+          visible: roadside.visible && kitCell.boxWidth > 24
+                   && roadside.clarity > 0.06
+          x: kitCell.boxLeft + kitCell.boxWidth * 0.305
+          width: kitCell.boxWidth * 0.390
+          y: kitCell.boxTop + kitCell.boxHeight * 0.345
+          height: kitCell.boxHeight * 0.375
+          // The design's near-black purple, taken down: an unlit bay at golden
+          // hour is the darkest thing in the frame, and it is never grey.
+          color: "#1c0819"
+          opacity: roadside.clarity * 0.94
+          antialiasing: false
         }
       }
 
@@ -2320,12 +2388,22 @@ Item {
           // edges, so each depth is a wide dim slab with a narrow bright one
           // inside it, and the two together give the pool a section as well as
           // a length.
-          model: beam.visible ? 14 : 0
+          // ROUND 3 CUT IT TO SIX AND SHORTENED THE THROW, AND THAT IS THE
+          // CRITIC'S OWN ALTERNATIVE. Fourteen slabs over 7.6 world units at
+          // up to 2.9 units wide is not a beam: it is "a rectangular tan slab
+          // down the middle of the road in all twelve lap-12 frames,
+          // hard-edged, untapered, offset from the kart ... the ugliest thing
+          // on screen", and it was ranked first on the cut list, to be cut
+          // outright "or replaced with a narrow warm cone that tapers and
+          // starts at the bumper". This is that: three depths over 3.9 units,
+          // about a car's width at the nose and half of it at the end, at half
+          // the strength. Six quads instead of fourteen.
+          model: beam.visible ? 6 : 0
 
           Rectangle {
             readonly property int tier: index % 2
-            readonly property real t: Math.floor(index / 2) / 7
-            readonly property real zHere: slot.zed + 0.45 + t * 7.6
+            readonly property real t: Math.floor(index / 2) / 2
+            readonly property real zHere: slot.zed + 0.35 + t * 3.55
             readonly property real px: Math.max(1, view.fxPixel)
             // The pool spreads a little in WORLD units and shrinks a lot in
             // SCREEN units, which is what a beam does: the light goes further
@@ -2333,7 +2411,7 @@ Item {
             // than the spread gives. So it converges on the road ahead instead
             // of being a rectangle laid over the lane.
             readonly property real half: view.sizeAt(
-                view.roadHalf * (tier === 0 ? 0.30 + t * 0.46 : 0.14 + t * 0.22), zHere)
+                view.roadHalf * (tier === 0 ? 0.17 + t * 0.13 : 0.075 + t * 0.06), zHere)
             width: Math.max(px, Math.round(half * 2 / px) * px)
             height: Math.max(px, Math.round(view.sizeAt(1.1, zHere) * 0.62 / px) * px)
             x: Math.round((view.uAt(view.laneOf(kartSeat), zHere) * view.width
@@ -2352,7 +2430,7 @@ Item {
             color: tier === 0 ? "#f7b45c" : "#ffe6bc"
             // Brightest a car's length ahead, gone by the end of the throw: a
             // pool with a hard bright edge at both ends is a decal, not a light.
-            opacity: (tier === 0 ? 0.17 : 0.30)
+            opacity: (tier === 0 ? 0.085 : 0.15)
                      * Math.min(1, t * 5 + 0.35) * (1 - t) * (1 - t * 0.4)
             antialiasing: false
           }

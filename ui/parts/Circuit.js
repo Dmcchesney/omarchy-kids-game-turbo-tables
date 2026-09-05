@@ -78,6 +78,14 @@ var SECTOR_NAMES = [
 // The pines are the other end of it. They bake at hue 185, teal, and the design
 // asks sector 6 for "a hillside of SILHOUETTED pines" -- so they take the
 // heaviest wash in the table and become what the design asked for.
+//
+// AND ROUND 3 RAISED EVERY `wash1`, WHICH IS A DIFFERENT CLAIM FROM `wash0`.
+// `wash0` is lap 1 and is untouched, so nothing about the frames that were
+// judged has moved. `wash1` is lap 12, and once the near verge carried
+// foreground furniture a hay bale three units from the lens measured luminance
+// 96 against a ground at 19 -- five times the light of the field it sits in,
+// under a sky that has halved. Paint keeping its own HUE is the design's rule;
+// paint keeping its own VALUE after sunset is the defect the karts had.
 // ROUND 3 RAISED `key0` ON EVERY SET PIECE, AND THE REASON IS A MEASUREMENT.
 // Round 2 moved the kit's BODY hues into the palette, which was right, and
 // stopped short of the light: a critic measured the quarry's lit facets at hue
@@ -102,22 +110,64 @@ var TINT = {
   "pine":       [0.48, 0.78, 0.32, 0.026],
   "waterTower": [0.34, 0.66, 0.58, 0.030],
   "bridge":     [0.22, 0.58, 0.46, 0.018],
-  "scrapyard":  [0.20, 0.56, 0.48, 0.030],
-  "tireWall":   [0.20, 0.54, 0.44, 0.030],
-  "crowd":      [0.36, 0.70, 0.30, 0.022],
-  "billboard":  [0.12, 0.36, 0.24, 0.024],
-  "banner":     [0.12, 0.36, 0.24, 0.024],
-  "pitBoard":   [0.14, 0.40, 0.24, 0.028],
-  "distanceBoard": [0.14, 0.42, 0.26, 0.034],
-  "hayBale":    [0.18, 0.52, 0.30, 0.040],
-  "jetty":      [0.26, 0.60, 0.48, 0.034],
-  "drum":       [0.20, 0.54, 0.34, 0.044],
-  "cone":       [0.16, 0.48, 0.28, 0.050],
-  "markerPost": [0.22, 0.56, 0.30, 0.060]
+  "scrapyard":  [0.20, 0.72, 0.48, 0.030],
+  "tireWall":   [0.20, 0.70, 0.44, 0.030],
+  "crowd":      [0.36, 0.80, 0.30, 0.022],
+  "billboard":  [0.12, 0.54, 0.24, 0.024],
+  "banner":     [0.12, 0.54, 0.24, 0.024],
+  "pitBoard":   [0.14, 0.58, 0.24, 0.028],
+  "distanceBoard": [0.14, 0.60, 0.26, 0.034],
+  "hayBale":    [0.18, 0.74, 0.30, 0.040],
+  "jetty":      [0.26, 0.74, 0.48, 0.034],
+  "drum":       [0.20, 0.72, 0.34, 0.044],
+  "cone":       [0.16, 0.68, 0.28, 0.050],
+  "markerPost": [0.22, 0.72, 0.30, 0.060]
 }
-var TINT_DEFAULT = [0.24, 0.58, 0.30, 0.030]
+var TINT_DEFAULT = [0.24, 0.72, 0.30, 0.030]
 
 function tintFor(kind) { return TINT[kind] || TINT_DEFAULT }
+
+// ------------------------------------------- HOW FAR A LANDMARK CARRIES
+//
+// Round 3. A critic's cut list, item 6: "distant duplicate landmarks (overpass
+// in dunes, PIT in pines, billboards in scrapyard) -- loses a small sense of a
+// continuous world; gains twelve distinct places, which is the point." Every
+// landmark that appears in a sector that is not its own weakens that sector's
+// identity, and the identity of the twelve is what this piece is for.
+//
+// The draw distance is 190 world units and a sector is 36, so at any moment the
+// camera can see five sectors of set pieces. Measured off the frames: the dunes
+// showed the overpass at z = 44, the pines showed the roller door at z = 44,
+// the scrapyard showed the fact billboards at z = 46, and the "grey-lavender
+// smudge along sector 2's left verge" that a critic could not name is the
+// quarry's rock walls at z = 36 to 58.
+//
+// So a big set piece carries 42 units and no further, and `TrackView` fades it
+// out over the last fourteen of those rather than switching it off -- a
+// landmark that popped would be worse than one that bled. Small furniture is
+// not in this table: a cone at forty units is four pixels and costs nothing,
+// and it is the thing that makes the roadside continuous.
+//
+// IT IS ALSO A SAVING. Everything past its reach stops being drawn, tinted,
+// rimmed and shadowed, and these are the largest sprites on the circuit.
+var LANDMARK_REACH = 42
+var REACH = {
+  "rockWall": LANDMARK_REACH,
+  "overpass": LANDMARK_REACH,
+  "rollerDoor": LANDMARK_REACH,
+  "gantry": LANDMARK_REACH,
+  "bridge": LANDMARK_REACH,
+  "billboard": LANDMARK_REACH,
+  "scrapyard": LANDMARK_REACH,
+  "jetty": LANDMARK_REACH,
+  "waterTower": 52
+}
+// Anything not in the table carries as far as the view draws, which is
+// `TrackView.drawDistance`. Written as a number a shade larger so the view's
+// own test is the one that stops it.
+var REACH_DEFAULT = 1000
+
+function reachFor(kind) { return REACH[kind] || REACH_DEFAULT }
 
 function at(kind, side, s, x, anim, frame, phase, tag) {
   var light = tintFor(kind)
@@ -144,6 +194,8 @@ function at(kind, side, s, x, anim, frame, phase, tag) {
     "wash1": light[1],
     "key0": light[2],
     "keyReach": light[3],
+    // How far this landmark carries. See REACH above.
+    "reach": reachFor(kind),
     // Every view this placement can ever show, as {name, idx} pairs, worked out
     // once here. `viewAt` and `viewIndexAt` index this rather than building a
     // string and searching the prop's view list on every frame for every prop.
@@ -205,9 +257,19 @@ var PLACEMENTS = [
   at("tireWall", "L", 8, -3.7, "still", 0, 0),
   at("crowd", "R", 11, 6.6, "crowd", 0, 0.62),
   at("pitBoard", "L", 12, -3.3, "still", 0, 0),
-  at("crowd", "L", 14, -6.6, "crowd", 0, 0.19),
   at("tireWall", "R", 16, 3.7, "still", 0, 0),
-  at("crowd", "R", 17, 6.6, "crowd", 0, 0.81),
+  // ROUND 3, THE NEAR VERGE. Eight of the twelve lap-6 frames had nothing at
+  // all in the bottom third of the picture but road, ground and the child's own
+  // kart -- "the nearest, largest, most visible band of the picture and it is
+  // empty", against a reference that gives its whole lower third to scrub and
+  // dirt. Nothing here is new art: it is the kit's own verge furniture at
+  // 2.4 to 3.4 units off the centreline, which is where a prop is still on
+  // screen at two or three units of depth and therefore still in the bottom
+  // third. Every sector that had none now has one about every eight units, so
+  // the band is never empty however far down the road the camera is.
+  at("drum", "R", 11, 3.1, "still", 0, 0),
+  at("hayBale", "L", 12, -3.0, "still", 0, 0),
+  at("hayBale", "L", 13, -4.2, "still", 0, 0),
   at("drum", "L", 20, -3.0, "still", 0, 0),
   at("drum", "R", 21, 3.0, "still", 0, 0),
   at("markerPost", "R", 24, 2.6, "still", 0, 0),
@@ -267,8 +329,11 @@ var PLACEMENTS = [
   at("waterTower", "R", 88, 15.0, "still", 0, 0),
   at("markerPost", "L", 76, -2.6, "still", 0, 0),
   at("markerPost", "L", 82, -2.6, "still", 0, 0),
+  at("drum", "L", 79, -3.2, "still", 0, 0),
   at("drum", "R", 84, 3.2, "still", 0, 0),
+  at("cone", "R", 87, 2.5, "still", 0, 0),
   at("markerPost", "L", 88, -2.6, "still", 0, 0),
+  at("hayBale", "R", 92, 3.1, "still", 0, 0),
   at("hayBale", "L", 94, -3.1, "still", 0, 0),
   at("hayBale", "L", 96, -3.1, "still", 0, 0),
   at("hayBale", "L", 98, -3.1, "still", 0, 0),
@@ -302,6 +367,8 @@ var PLACEMENTS = [
   at("jetty", "R", 152, 5.6, "still", 0, 0),
   at("markerPost", "L", 154, -2.6, "still", 0, 0),
   at("hayBale", "L", 158, -2.9, "still", 0, 0),
+  at("drum", "L", 150, -3.2, "still", 0, 0),
+  at("cone", "L", 164, -2.5, "still", 0, 0),
   at("jetty", "R", 162, 6.4, "still", 0, 0),
   at("markerPost", "L", 160, -2.6, "still", 0, 0),
   at("markerPost", "L", 166, -2.6, "still", 0, 0),
@@ -321,7 +388,10 @@ var PLACEMENTS = [
   at("pine", "R", 189, 12.5, "still", 0, 0),
   at("pine", "L", 191, -14.0, "still", 1, 0),
   at("pine", "R", 193, 9.5, "still", 0, 0),
+  at("hayBale", "L", 189, -3.0, "still", 0, 0),
+  at("drum", "R", 197, 3.2, "still", 0, 0),
   at("bridge", "C", 198, 0, "still", 0, 0),
+  at("cone", "R", 205, 2.5, "still", 0, 0),
   at("pine", "L", 202, -8.5, "still", 1, 0),
   at("pine", "R", 204, 10.5, "still", 1, 0),
   at("pine", "L", 206, -12.5, "still", 0, 0),
@@ -334,8 +404,10 @@ var PLACEMENTS = [
   // "the long garage from the design, roller door open, lamps flickering". The
   // sevens run under it, which the design names by name. Frame 1 of the bake
   // has one lamp out; `anim: "lamp"` is what makes it flicker.
+  at("hayBale", "L", 221, -3.0, "still", 0, 0),
   at("drum", "R", 222, 3.0, "still", 0, 0),
   at("cone", "L", 224, -2.5, "still", 0, 0),
+  at("drum", "L", 233, -3.2, "still", 0, 0),
   at("rollerDoor", "C", 230, 0, "lamp", 0, 0.00),
   at("drum", "L", 236, -3.0, "still", 0, 0),
   at("drum", "R", 237, 3.0, "still", 0, 0),
@@ -351,7 +423,10 @@ var PLACEMENTS = [
   // keeping the road's edge legible where the sand takes it.
   at("markerPost", "R", 256, 2.5, "still", 0, 0),
   at("markerPost", "L", 258, -2.5, "still", 0, 0),
+  at("markerPost", "R", 261, 2.5, "still", 0, 0),
   at("cone", "R", 264, 2.4, "still", 0, 0),
+  at("cone", "L", 266, -2.4, "still", 0, 0),
+  at("markerPost", "L", 277, -2.5, "still", 0, 0),
   at("markerPost", "R", 268, 2.5, "still", 0, 0),
   at("markerPost", "L", 272, -2.5, "still", 0, 0),
   at("cone", "L", 276, -2.4, "still", 0, 0),
@@ -363,19 +438,23 @@ var PLACEMENTS = [
   // "a bridge over the road, its shadow crossing the tarmac". The shadow is
   // drawn by TrackView, because it is a soft thing and a hard-edged bake of a
   // soft thing reads as gravel.
-  at("pine", "R", 292, 9.0, "still", 0, 0),
-  at("pine", "R", 291, 14.0, "still", 1, 0),
-  at("pine", "L", 295, -8.0, "still", 1, 0),
-  at("pine", "L", 293, -13.0, "still", 0, 0),
+  // THE PINES ARE GONE FROM HERE. Six of them stood in sector 9, which the
+  // design gives "a bridge over the road, its shadow crossing the tarmac" and
+  // no trees at all -- and they are exactly what the DUNES frame was showing at
+  // z = 33 to 37, three sectors' worth of borrowed landmark in the one sector a
+  // stranger could not name. Verge furniture takes their place, which is what
+  // the bottom third of that frame was missing anyway.
+  at("drum", "R", 293, 3.2, "still", 0, 0),
+  at("cone", "L", 296, -2.4, "still", 0, 0),
   at("drum", "L", 297, -3.2, "still", 0, 0),
   at("tireWall", "R", 298, 3.6, "still", 0, 0),
   at("overpass", "C", 302, 0, "still", 0, 0),
   at("tireWall", "R", 306, 3.6, "still", 0, 0),
   at("tireWall", "R", 309, 3.6, "still", 0, 0),
-  at("pine", "R", 312, 11.0, "still", 1, 0),
+  at("tireWall", "L", 313, -3.6, "still", 0, 0),
   at("hayBale", "R", 316, 2.9, "still", 0, 0),
   at("hayBale", "R", 318, 2.9, "still", 0, 0),
-  at("pine", "L", 320, -10.0, "still", 0, 0),
+  at("cone", "R", 321, 2.4, "still", 0, 0),
 
   // -------------------------------------------------- 10  THE SCRAPYARD
   // "old karts stacked, one of the six bodies hidden in the pile". The stack is
@@ -383,7 +462,10 @@ var PLACEMENTS = [
   // stack at s = 331, which is the design's Secrets line and is announced
   // nowhere.
   at("scrapyard", "R", 331, 6.2, "still", 0, 0, "hidden"),
+  at("drum", "L", 325, -3.2, "still", 0, 0),
+  at("cone", "R", 333, 2.5, "still", 0, 0),
   at("drum", "L", 334, -3.0, "still", 0, 0),
+  at("tireWall", "R", 347, 3.6, "still", 0, 0),
   at("scrapyard", "L", 340, -6.2, "still", 0, 0),
   at("drum", "R", 343, 3.0, "still", 0, 0),
   at("drum", "R", 344, 3.9, "still", 0, 0),
@@ -400,6 +482,8 @@ var PLACEMENTS = [
   at("markerPost", "L", 364, -2.6, "still", 0, 0),
   at("billboard", "R", 368, 5.6, "still", 0, 0, "fact0"),
   at("markerPost", "L", 372, -2.6, "still", 0, 0),
+  at("drum", "R", 362, 3.2, "still", 0, 0),
+  at("cone", "L", 379, -2.5, "still", 0, 0),
   at("billboard", "L", 376, -5.6, "still", 0, 0, "fact1"),
   at("markerPost", "R", 380, 2.6, "still", 0, 0),
   at("billboard", "R", 384, 5.6, "still", 0, 0, "fact2"),
@@ -421,8 +505,13 @@ var PLACEMENTS = [
   at("tireWall", "L", 416, -3.7, "still", 0, 0),
   at("crowd", "L", 418, -6.6, "crowd", 0, 0.92),
   at("gantry", "C", 420, 0, "flag", 0, 0.50),
-  at("crowd", "R", 423, 6.6, "crowd", 0, 0.06),
-  at("crowd", "L", 425, -6.6, "crowd", 0, 0.44),
+  // Two crowd ranks fewer at the pit and two fewer here, which is the critic's
+  // cut 4: "the far crowd rank resolves to a 20-pixel mush of coloured
+  // rectangles; the near rank behind the rail carries the entire read on its
+  // own". Four four-frame animated sprites off the circuit.
+  at("markerPost", "L", 403, -2.6, "still", 0, 0),
+  at("drum", "L", 411, -3.2, "still", 0, 0),
+  at("cone", "R", 419, 2.5, "still", 0, 0),
   at("tireWall", "R", 428, 3.7, "still", 0, 0)
 ]
 
