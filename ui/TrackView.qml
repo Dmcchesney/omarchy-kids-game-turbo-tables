@@ -1162,7 +1162,20 @@ Item {
         width: Math.max(6, 26 + phase * 96)
         height: Math.max(1, Math.round(1 + phase * 2))
         color: Theme.cream
-        opacity: (1 - phase) * 0.85
+        // PIECE T -- A SPEED LINE HAS A SOURCE, AND THE SKY IS NOT IT.
+        //
+        // The fan radiates in every direction from the road's vanishing point,
+        // which sits ON the horizon, so half of it went up into the sunset:
+        // measured on the shipped frames, four to six pale diagonal hairlines
+        // crossed the cloud bands in every one, and against
+        // `docs/golden-hour-reference.png` they read as scratches on the lens
+        // rather than as speed. These are the ROAD's streaks; they fade out
+        // over the forty pixels above the horizon instead of being cut at it,
+        // so nothing pops as the fan turns. Below the horizon they are exactly
+        // what they were.
+        readonly property real overSky: Math.max(0, Math.min(1,
+            (y - view.horizon * view.height) / 40))
+        opacity: (1 - phase) * 0.85 * overSky
         antialiasing: false
         transformOrigin: Item.Center
         x: streaks.vx + Math.cos(ang) * reach - width / 2
