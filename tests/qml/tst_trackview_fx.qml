@@ -106,9 +106,28 @@ Item {
   // no flash had fired yet. It is a band from the top of the frame to the
   // horizon, so it is a wash by the same argument the others are: it is inside
   // TrackView, the fact is painted after TrackView, and its alpha is bounded.
+  // ROUND 3 adds `fx.groundFlash`: the Pile-Up's own light on the tarmac, a
+  // band from the horizon to the bottom of the frame. It is a wash by the same
+  // argument, and it is the one that cannot reach the fact at all -- the fact
+  // is above the horizon and this band starts there.
   readonly property var washNames: ["fx.worldFlash", "fx.edges", "fx.sunBloom",
-                                    "fx.skyFlash"]
+                                    "fx.skyFlash", "fx.groundFlash"]
   function isWash(name) { return root.washNames.indexOf(name) >= 0 }
+
+  // The most entries any one-second window of `times` (milliseconds, ascending)
+  // holds. The photosensitivity rule is written per second, so the count that
+  // matters is the busiest second and not the total.
+  function busiestSecond(times) {
+    var worst = 0
+    for (var i = 0; i < times.length; i++) {
+      var n = 0
+      for (var j = i; j < times.length; j++)
+        if (times[j] - times[i] < 1000)
+          n += 1
+      worst = Math.max(worst, n)
+    }
+    return worst
+  }
 
   // Is any callout on the screen saying this, right now. A walk rather than a
   // property, because "the child can read it" is a question about the drawn
@@ -322,32 +341,142 @@ Item {
           race.stepClock(60)
         }
       }
-      // ROUND 2 TIGHTENED THIS AND SPLIT IT, BECAUSE ONE BOUND WAS HIDING TWO
-      // DIFFERENT THINGS.
+      // ROUND 3 REPLACES THE CAP WITH THE THING THE CAP WAS PROTECTING.
       //
-      // The FULL-FRAME TINTS -- Turbo's white frame, Pile-Up's amber sky, the
-      // edge frame -- are the ones a child's eyes pay for, and a blind critic's
-      // reading of both builds in this run was that a third over the base is
-      // enough and half is more than they need. Turbo's white frame used to be
-      // 0.62 and measured whole-frame mean luma 121.6 against a base of 75.2,
-      // which is +62%; it is 0.15 now and measures +29%. Nothing that tints the
-      // whole frame may go above a third.
+      // Round two answered "the flash veils the fact" by turning every flash
+      // down to a third and asserting that here. It also built the real fix in
+      // the same round -- `ui/Race.qml`'s `factGround`, a dark plate that comes
+      // up BEHIND the fact for exactly as long as a wash is up, at three times
+      // the wash's own alpha -- and then a blind critic measured the result and
+      // wrote "nothing in B hits hard": the legendary Pile-Up produced less
+      // screen change at its impact than the common Nitro.
       //
-      // The SUN BLOOM is not one of those. It is a soft disc the size of the
+      // Both cannot be answered by one number, because they are not the same
+      // rule. The design's rule is that nothing ever covers the fact, and its
+      // accessibility rule caps the RATE of flashing, not the height. So:
+      //
+      //   * the height of a full-frame tint is bounded by the loudness ladder
+      //     in `ui/parts/CardFx.js` -- 0.62, the Pile-Up's -- and no card may
+      //     exceed its own row of that table (`tst_cardfx` holds the ordering);
+      //   * the plate must be up whenever the flash is, which is asserted
+      //     directly below and is the seatbelt that buys the amplitude;
+      //   * the RATE is `test_03c`.
+      //
+      // The SUN BLOOM keeps its own bound. It is a soft disc the size of the
       // sun, on the sun, which the design asks for by name ("the sun blooms for
-      // 300") and which is warm rather than white -- so it gets its own bound,
-      // stated rather than smuggled under a looser shared one.
+      // 300") and which is warm rather than white.
       var tints = 0
-      var names = ["fx.worldFlash", "fx.skyFlash", "fx.edges"]
+      var names = ["fx.worldFlash", "fx.skyFlash", "fx.edges", "fx.groundFlash"]
       for (var n = 0; n < names.length; n++)
         if (byName[names[n]] !== undefined)
           tints = Math.max(tints, byName[names[n]])
-      verify(tints <= 0.34,
+      verify(tints <= 0.76,
              "the loudest full-frame tint in the piece measured " + tints.toFixed(3))
       var bloom = byName["fx.sunBloom"] === undefined ? 0 : byName["fx.sunBloom"]
       verify(bloom <= 0.56, "the sun bloom measured " + bloom.toFixed(3))
       console.log("FX-WASH|peak alpha across all eight cards|" + peak.toFixed(3)
                   + "|tints " + tints.toFixed(3) + "|bloom " + bloom.toFixed(3))
+    }
+
+    // THE SEATBELT. The plate behind the fact is what makes a loud flash safe,
+    // so it is not enough that it exists: it has to be up on every frame the
+    // light is, at the strength the light needs, and it has to go away again.
+    //
+    // Measured off the drawn item's own opacity against `fxWashOverFact`, which
+    // is the alpha of the full-frame light actually reaching the middle of the
+    // frame, over every frame of all eight cards and of being hit.
+    function test_03bb_the_plate_behind_the_fact_is_up_whenever_the_light_is() {
+      var cards = ["nitro", "turbo", "oilSlick", "wrench", "pothole", "pileUp",
+                   "rollCage", "towHook"]
+      var worstShort = 0
+      var loudestWithPlate = 0
+      var restingSeen = -1
+      for (var c = 0; c < cards.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cards[c])
+        for (var f = 0; f < 30; f++) {
+          var wash = race.trackView.fxWashOverFact
+          var plate = race.factGroundAlpha
+          if (wash < 0.005) {
+            restingSeen = Math.max(restingSeen, plate)
+          } else {
+            // Three times the wash or the cap, whichever is smaller. A shortfall
+            // is the plate failing to keep up with the light over it.
+            var want = Math.min(0.92, wash * 3.0)
+            worstShort = Math.max(worstShort, want - plate)
+            if (plate >= want - 0.001)
+              loudestWithPlate = Math.max(loudestWithPlate, wash)
+          }
+          race.stepClock(30)
+        }
+      }
+      verify(worstShort <= 0.001,
+             "the plate never lagged the light (worst shortfall "
+             + worstShort.toFixed(4) + ")")
+      verify(loudestWithPlate > 0.40,
+             "and it was up under a flash of at least 0.40 (loudest seen "
+             + loudestWithPlate.toFixed(3) + ")")
+      // And it is not a permanent vignette: with no light over the fact the
+      // plate is at the arches' own yield, which is zero on open road.
+      verify(restingSeen < 0.90,
+             "the plate is not simply always on (resting maximum "
+             + restingSeen.toFixed(3) + ")")
+      console.log("FX-SEATBELT|loudest wash with the plate at full strength|"
+                  + loudestWithPlate.toFixed(3) + "|resting max "
+                  + restingSeen.toFixed(3))
+    }
+
+    // THE RATE, WHICH IS THE RULE THE DESIGN ACTUALLY WRITES.
+    //
+    // Design, Accessibility: "nothing flashes faster than 3 Hz". Round three
+    // made the flashes loud, so the count matters more than it did: this walks
+    // every card at 10 ms and counts the upward crossings of the full-frame
+    // wash through 0.12 (a tint a child would notice) and through 0.35 (a
+    // flash), then asserts the worst one-second window of each.
+    //
+    // WHY 0.35 IS WHERE "A FLASH" STARTS. The photosensitivity rule is about a
+    // change in LUMINANCE, and the piece has two different kinds of wash. The
+    // Pile-Up's two telegraph washes are the design's "the sky flashes amber
+    // twice" and they are a HUE swing at 0.30 into the card's own amber over an
+    // already-amber sunset: measured off the frames, the sky band's mean luma
+    // moves +12% and the whole frame's blue channel goes DOWN. The impact
+    // flashes are white or a full-frame amber and they do move the luma. 0.35
+    // sits above every hue tint in the piece and below every impact flash, so
+    // the count below is a count of flashes and not of colour changes. The
+    // pixel measurements behind that sentence are in the round-3 report.
+    function test_03c_no_more_than_three_flashes_in_any_one_second() {
+      var cards = ["nitro", "turbo", "oilSlick", "wrench", "pothole", "pileUp",
+                   "rollCage", "towHook"]
+      var worstAny = 0
+      var worstLoud = 0
+      var report = []
+      for (var c = 0; c < cards.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cards[c])
+        var seen = []
+        var loud = []
+        var prev = 0
+        for (var t = 0; t <= 2600; t += 10) {
+          var w = race.trackView.fxWashOverFact
+          if (prev < 0.12 && w >= 0.12)
+            seen.push(t)
+          if (prev < 0.35 && w >= 0.35)
+            loud.push(t)
+          prev = w
+          race.stepClock(10)
+        }
+        worstAny = Math.max(worstAny, root.busiestSecond(seen))
+        worstLoud = Math.max(worstLoud, root.busiestSecond(loud))
+        report.push(cards[c] + " " + seen.length + "/" + loud.length)
+      }
+      verify(worstAny <= 3,
+             "no more than three flashes in any second (worst " + worstAny + ")")
+      verify(worstLoud <= 1,
+             "and no more than one LOUD flash in any second (worst " + worstLoud + ")")
+      console.log("FX-RATE|flashes per card, all/loud|" + report.join(" · ")
+                  + "|busiest second " + worstAny + " all, " + worstLoud + " loud")
     }
 
     // ------------------------------------------------------------- hit-stop

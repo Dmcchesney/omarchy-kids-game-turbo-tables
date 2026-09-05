@@ -606,10 +606,20 @@ Item {
     // shake was there and it was below the threshold of a picture. It is a
     // fraction of the frame now, so it is the same shake at every size, and it
     // is about three times what it was.
+    //
+    // ROUND 3: THE PHASE IS TIME, NOT DISTANCE. It was `travel * 3.1`, which
+    // ties how fast the camera shakes to how fast the child is DRIVING -- so a
+    // shake through a hit-stop, through Pile-Up's "300 at half speed", or at
+    // the start of a lap barely oscillated at all, and the strips showed a
+    // camera that had been displaced rather than one that was shaking. A shake
+    // is a frequency in hertz; 9.5 and 12.4 are two of them, close enough to
+    // beat against each other so the motion does not read as a clean circle.
+    // It is still a pure function of the effect clock, so a strip is still
+    // reproducible to the byte.
     if (shake > 0) {
-      var phase = travel * 3.1
-      shakeX = Math.sin(phase * 6.3) * shake * width * 0.0155
-      shakeY = Math.cos(phase * 8.1) * shake * height * 0.0125
+      var phase = fxClock / 1000
+      shakeX = Math.sin(phase * 2 * Math.PI * 9.5) * shake * width * 0.0155
+      shakeY = Math.cos(phase * 2 * Math.PI * 12.4) * shake * height * 0.0125
     } else {
       shakeX = 0
       shakeY = 0
@@ -2293,9 +2303,22 @@ Item {
       // road that says what happened, and the design's substitution rule takes
       // out the hit-stop, the shake and the spin, not the event. What goes is
       // the tumble: the fall time is zero, so the pile is simply there.
-      fxFallingDecal("pileUp", travel + fxKartZ(cueAimed) + 0.8,
-                     laneOf(kartModel.count > cueAimed ? kartModel.get(cueAimed).kartSeat : 0),
+      var pLane = laneOf(kartModel.count > cueAimed ? kartModel.get(cueAimed).kartSeat : 0)
+      fxFallingDecal("pileUp", travel + fxKartZ(cueAimed) + 0.8, pLane,
                      3.0, 7000, reducedMotion ? 0 : b.telegraph)
+      // ROUND 3: "a stack of TYRES, BARRELS AND CRATES tumbles in from the top
+      // of the frame" is three nouns and round two dropped one sprite. These
+      // are the kit's own `tireWall` and `drum` cells -- placed and scaled,
+      // never redrawn -- falling either side of the wreck and landing a beat
+      // apart, so the telegraph is a wall coming down across the road rather
+      // than a single object appearing on it. They are what makes the Pile-Up
+      // the loudest thing in the game without a brighter flash.
+      fxFallingDecal("tireWall", travel + fxKartZ(cueAimed) + 1.6,
+                     pLane - 1.55, 1.9, 6600,
+                     reducedMotion ? 0 : Math.round(b.telegraph * 0.78))
+      fxFallingDecal("drum", travel + fxKartZ(cueAimed) + 1.1,
+                     pLane + 1.5, 1.1, 6600,
+                     reducedMotion ? 0 : Math.round(b.telegraph * 0.92))
     } else if (cueCard === "nitro" || cueCard === "turbo") {
       // "the kart squats one pixel, exhaust flares blue-white" / two pixels.
       // The squat itself is `fxHeroSquat` below; this is the exhaust.
@@ -2320,10 +2343,24 @@ Item {
       return
     fxHold(b.hitStop)
 
+    // ------------------------------------------------- THE LOUDNESS LADDER
+    // ROUND 3. The flash and the shake are the design's fourth tool and they
+    // are now the same two lines for every card, read out of
+    // `CardFx.BEATS[card]`, so the ONE thing a blind critic could measure off
+    // a strip -- how much of the screen changes at the impact -- is ordered by
+    // what the card costs the victim instead of by which branch below happened
+    // to get written first. See the ladder's own block in `ui/parts/CardFx.js`.
+    //
+    // Under reduced motion the shake goes (`fxShakeBy` refuses it) and the
+    // flash stays, which is exactly the design's substitution: "replaces
+    // hit-stop, shake, and spins with FLASHES and tag changes".
+    fxImpactFlash(cueCard)
+    fxShakeBy(CardFx.shakeOf(cueCard))
+
     if (cueCard === "nitro") {
       // "the road throws forward as now but with speed lines from the corners,
       // the sun blooms for 300, the four next lap lamps light in a chase"
-      throwForward(0.55)
+      throwForward(b.throwForward)
       boostBorn = fxClock
       boostMs = b.impact + b.aftermath
       boostPower = b.speedLines
@@ -2331,11 +2368,10 @@ Item {
       lampChaseBorn = fxClock
       lampChaseCount = b.lampChase
       lampChaseMs = b.lampChaseMs
-      fxWorldFlash(b.tone, 0.16, 200)
     } else if (cueCard === "turbo") {
       // "hit-stop 90, one white frame, then the road stretches ... heavy speed
       // lines, the horizon dips ... Ten lap lamps chase in 500."
-      throwForward(1.0)
+      throwForward(b.throwForward)
       boostBorn = fxClock
       boostMs = b.impact + b.aftermath
       boostPower = b.speedLines
@@ -2343,14 +2379,6 @@ Item {
       lampChaseBorn = fxClock
       lampChaseCount = b.lampChase
       lampChaseMs = b.lampChaseMs
-      // ROUND 2: 0.62 measured whole-frame mean luma 121.6 against a base of
-      // 75.2 -- +62% -- and a blind critic's note on both builds was that a
-      // third over the base reads fine and half is more than a child's eyes
-      // need. 0.15 measures 104 against 75.2, which is +38%. Every other beat
-      // of this card (the edge darken, the stretch, the horizon dip, the speed
-      // lines, the ten-lamp chase, the field streaming past) is untouched: the
-      // card did not need the brightness, it needed the consequence.
-      fxWorldFlash("#ffffff", reducedMotion ? 0.10 : 0.15, 120)
     } else if (cueCard === "rollCage") {
       // "a cage frame draws itself around your kart line by line over 300, then
       // settles to a soft amber pulse that stays as long as it is active"
@@ -2358,11 +2386,10 @@ Item {
       fxSound("rollcage", 0)
       cageBorn = fxClock
       cageCracked = 0
-    } else if (cueCard === "towHook") {
-      // The latch. The zip past is the engine's `swap`, which arrives in the
-      // same step and is handled by `fxSwapped`.
-      fxWorldFlash(b.tone, 0.14, 150)
     }
+    // The Tow Hook's latch needs nothing here: the flash above is its own, and
+    // the zip past is the engine's `swap`, which arrives in the same step and
+    // is handled by `fxSwapped`.
 
     // The victims, in the order the engine reported them, staggered by the
     // card's own number (Oil Slick's "three squeals staggered by 120", so a
@@ -2450,11 +2477,26 @@ Item {
       // sideways, and a smoke column rises. Every other racer's tag flashes
       // once so the field reads the event."
       fxSlowMo(b.impact, b.slowMo)
+      // The camera sits back off the wreck. See `pullBack` in the beat table.
+      pullBack(b.pullBack)
       fxMark(kart, "spin", b.spinMs)
       for (var s = 0; s < 4; s++)
         fxPuffLater(kart, 0, -span * (0.10 + s * 0.16), span * (0.36 + s * 0.10),
                     1.9, 2200, s === 0 ? "#c9b0a8" : "#8d7480", 0.30, s * 130)
-      fxWorldFlash(b.tone, 0.14, 220)
+      // ROUND 3 -- THE DUST WALL, AND IT IS SIZED OFF THE ROAD.
+      //
+      // The smoke column above is sized off the victim's own sprite, which is
+      // right for smoke off a hood and wrong for the dust a wall of tyres and
+      // barrels throws when it lands: on a kart at the vanishing point the
+      // column is five dots, and a legendary that lands on the race leader --
+      // the most natural target in the game -- had nothing on the road at all.
+      // This is sized off the ROAD at the wreck's depth, so it is a wall across
+      // the tarmac whether the victim is a kart-length ahead or a horizon away.
+      var roadPx = sizeAt(roadHalf * 2, fxKartZ(kart))
+      for (var d = 0; d < b.dustPuffs; d++)
+        fxPuffLater(kart, (d - (b.dustPuffs - 1) / 2) * roadPx * 0.26,
+                    -roadPx * 0.06, roadPx * 0.38, 2.4, b.dustMs,
+                    b.dustTone, 0.22, d * 40, b.dustPeak)
       for (var o = 0; o < kartModel.count; o++)
         if (o !== kart)
           fxTagFlash(o, b.fieldFlash)
@@ -2480,15 +2522,41 @@ Item {
   property real flashMs: 0
   property real flashPeak: 0
   property color flashTone: "#ffffff"
-  function fxWorldFlash(tone, peak, ms) {
+  // How much of the same flash is laid on the ground as well, from the horizon
+  // down. 0 for every card but the Pile-Up; see `groundBias` in the beat table.
+  property real flashGround: 0
+  function fxWorldFlash(tone, peak, ms, groundBias) {
     flashTone = tone
     flashPeak = peak
     flashMs = ms
+    flashGround = groundBias === undefined ? 0 : groundBias
     flashBorn = fxClock
   }
   readonly property real flashNow: (fxClock - flashBorn) > flashMs
                                    ? 0
                                    : flashPeak * CardFx.bump(CardFx.phase(fxClock - flashBorn, flashMs))
+
+  // The two lines every card's impact runs, off the loudness ladder in
+  // `ui/parts/CardFx.js`. Kept here rather than inline in `fxImpact` so the
+  // block that fires a card and the block that fires a BLOCK can spend the
+  // same two tools without either one restating a number.
+  function fxImpactFlash(card) {
+    var f = CardFx.flashOf(card)
+    if (!f)
+      return
+    // Reduced motion keeps the flash -- it is the substitute, not the thing
+    // substituted -- but takes a third off it, because a child who has asked
+    // for less motion is not asking for a brighter screen.
+    fxWorldFlash(f.tone, reducedMotion ? f.peak * 0.66 : f.peak, f.ms, f.ground)
+  }
+  // "a 200 ms shake with decay". `shake` decays at 2.6 per second in `advance`,
+  // so a shake of 1 is about 380 ms of camera and a shake of 0.5 about 190 --
+  // which is the design's number for the one place it writes one down.
+  function fxShakeBy(amount) {
+    if (reducedMotion || amount <= 0)
+      return
+    shake = Math.min(1, shake + amount)
+  }
 
   // ------------------------------------------- HOW MUCH LIGHT IS OVER THE FACT
   //
@@ -3017,39 +3085,26 @@ Item {
   }
 
   // ------------------------------------------------- the field's tag flash
-  // Pile-Up: "Every other racer's tag flashes once so the field reads the
-  // event." One ring around each other racer's plate, on the plate's own
-  // position, so the flash is on the thing it names.
-  Repeater {
-    model: kartModel
-
-    Rectangle {
-      // Every one of these is short-circuited while the ring is down, for the
-      // reason `Puff` gates its rings: four karts x five projections on every
-      // frame of a whole race, to draw nothing.
-      readonly property real flashLeft: fxFlash - view.fxClock
-      readonly property bool live: flashLeft > 0
-      readonly property real zed: !live ? view.playerZ
-                                  : (isHuman ? view.playerZ
-                                             : view.zForDelta(kartProgress - view.humanProgress))
-      readonly property real cx: live ? view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX : 0
-      readonly property real cy: live ? view.vAt(zed) * view.height + view.shakeY : 0
-      readonly property real d: live ? view.kartSheetPixels(zed) * 0.9 : 1
-
-      objectName: "fx.fieldFlash"
-      x: cx - d / 2
-      y: Math.max(view.fxTopFor(cx, d / 2), cy - d)
-      width: d
-      height: d
-      radius: 4
-      color: "transparent"
-      border.width: 2
-      border.color: Theme.hazard
-      opacity: live ? Math.min(1, flashLeft / 400) * 0.85 : 0
-      visible: live && opacity > 0.02 && zed > view.nearDistance && zed < view.drawDistance
-      z: 1980
-    }
-  }
+  //
+  // Pile-Up: "Every other racer's TAG flashes once so the field reads the
+  // event."
+  //
+  // ROUND 3, AND IT IS THE STRAY RECTANGLE. Two blind critics in a row found "a
+  // stray thin amber rectangle in the road beside the PISTON kart" in every
+  // Pile-Up strip, and this was it: a square the size of the racer's whole
+  // sprite, drawn as an outline around the KART, whose top was separately
+  // clamped by `fxTopFor` so the square was not even square. On a kart the
+  // camera has taken up the road that is an enormous empty box lying across the
+  // tarmac, and it reads as a mis-anchored marker because it IS one -- the
+  // design says the tag flashes, and a tag is the plate under the kart, not the
+  // kart.
+  //
+  // Nothing is drawn here any more, and nothing has to be: `fxPlateRing` above
+  // already folds `fxFlash` into the ring on the racer's own plate, and the
+  // ahead badge and the chaser rail between them draw a plate of a known,
+  // legible size for every racer in the field, including one the camera cannot
+  // show. The rectangle was a SECOND drawing of the same event, in the wrong
+  // place and at the wrong size, and deleting it costs the effect nothing.
 
   // -------------------------------------------------------- the afterimages
   // "an afterimage trail behind the kart fading out" (Nitro, 700 ms) and
@@ -3304,6 +3359,54 @@ Item {
     // `tst_trackview_fx.qml` can bound what the fact has to be read against
     // rather than bounding a number that was always one.
     readonly property real washAlpha: opacity
+  }
+
+  // ------------------------------------------------ the light on the tarmac
+  //
+  // ROUND 3, AND ONLY THE PILE-UP HAS ONE. `fx.worldFlash` above is a flat tint
+  // over the whole frame, which is the right shape for a boost's white frame --
+  // the light comes from the child's own engine and there is nowhere in the
+  // picture it does not reach. It is the wrong shape for a crash: a wall of
+  // tyres and barrels landing on the road throws its light DOWN, on the tarmac,
+  // and the sky has already had the two amber flashes the design gives that
+  // card in its telegraph.
+  //
+  // So this is the same flash, at `flashGround` of its strength, laid from the
+  // horizon to the bottom of the frame and falling off as the road runs away
+  // from the wreck. Two things follow, and the second is the point:
+  //
+  //   * it is the amplitude that makes the legendary the biggest event ON THE
+  //     ROAD, which is where a blind critic measures world change and where a
+  //     child is looking;
+  //   * it is the only amplitude in the piece that cannot reach the fact, ever,
+  //     at any size, because the fact lives above the horizon and this band
+  //     starts at it. It is not counted in `fxWashOverFact` for that reason,
+  //     and `test_01` covers the geometry the same way it covers every other
+  //     effect item.
+  Rectangle {
+    objectName: "fx.groundFlash"
+    readonly property real bandTop: view.horizon * view.height + view.shakeY
+    x: 0
+    y: bandTop
+    width: view.width
+    height: Math.max(0, view.height - bandTop)
+    z: 2599
+    readonly property real washAlpha: view.flashNow * view.flashGround
+    visible: washAlpha > 0.004 && height > 1
+    gradient: Gradient {
+      // Brightest where the road meets the sky, which is where the pile lands,
+      // and half that by the time the tarmac reaches the camera.
+      GradientStop {
+        position: 0
+        color: Qt.rgba(view.flashTone.r, view.flashTone.g, view.flashTone.b,
+                       view.flashNow * view.flashGround)
+      }
+      GradientStop {
+        position: 1
+        color: Qt.rgba(view.flashTone.r, view.flashTone.g, view.flashTone.b,
+                       view.flashNow * view.flashGround * 0.45)
+      }
+    }
   }
 
   // ------------------------------------------------------- the amber sky

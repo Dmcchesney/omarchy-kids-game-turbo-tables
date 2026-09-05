@@ -214,4 +214,74 @@ TestCase {
              card + ": and the drawn span reaches into the aftermath")
     }
   }
+
+  // ------------------------------------------------------- the loudness ladder
+  //
+  // ROUND 3. A blind critic measured round two's strips and found that the
+  // legendary Pile-Up changed less of the screen at its impact than the common
+  // Nitro, and that Turbo's launch was only 1.5x Nitro's skip -- so with the
+  // HUD covered, a four-question skip and a ten-question launch were the same
+  // firework. The fix is a ladder, and this is the ladder's invariant: the
+  // flash and the shake a card spends are ordered by what the card costs the
+  // racer it lands on.
+  //
+  // The costs are the ENGINE's, read from `Engine.CARDS`, so this test cannot
+  // pass by agreeing with a second copy of the rules. A self boost is charged
+  // at the questions it skips; an attack at the questions it adds; Oil Slick at
+  // its delta times the three rivals it lands on; the Tow Hook, which moves a
+  // whole place, sits with the eights.
+  function test_08_the_loudness_is_ordered_by_what_the_card_costs() {
+    function cost(card) {
+      var c = Engine.CARDS[card]
+      if (card === "towHook")
+        return 8
+      if (card === "rollCage")
+        return 0
+      if (String(c.scope) === "aoe")
+        return Math.abs(Number(c.questionDelta)) * 3
+      return Math.abs(Number(c.questionDelta))
+    }
+    // Every card states both terms, so none of them is loud or quiet by
+    // accident.
+    for (var card in CardFx.BEATS) {
+      var b = CardFx.BEATS[card]
+      verify(b.flashPeak !== undefined, card + ": states its flash")
+      verify(b.impactShake !== undefined, card + ": states its shake")
+      verify(b.flashPeak >= 0 && b.flashPeak <= 0.76,
+             card + ": flash " + b.flashPeak + " is inside the ladder")
+      verify(b.impactShake >= 0 && b.impactShake <= 1,
+             card + ": shake " + b.impactShake + " is a fraction of a full one")
+    }
+    // The order itself. Every pair that differs in cost must differ the same
+    // way in loudness, where loudness is the two terms together.
+    function loud(card) {
+      var b = CardFx.BEATS[card]
+      return b.flashPeak + b.impactShake
+    }
+    var names = Object.keys(CardFx.BEATS)
+    for (var i = 0; i < names.length; i++)
+      for (var j = 0; j < names.length; j++) {
+        if (cost(names[i]) <= cost(names[j]))
+          continue
+        verify(loud(names[i]) > loud(names[j]),
+               names[i] + " (costs " + cost(names[i]) + ", loudness "
+               + loud(names[i]).toFixed(2) + ") is louder than " + names[j]
+               + " (costs " + cost(names[j]) + ", loudness "
+               + loud(names[j]).toFixed(2) + ")")
+      }
+    // And the two the design names in words. "Pile-Up: the one the whole room
+    // should notice"; "Turbo: the self boost that should feel like a launch",
+    // against Nitro's skip.
+    verify(loud("pileUp") === Math.max(loud("pileUp"), loud("turbo"),
+                                       loud("wrench"), loud("pothole"),
+                                       loud("nitro"), loud("oilSlick"),
+                                       loud("towHook"), loud("rollCage")),
+           "the Pile-Up is the loudest card in the game")
+    verify(loud("turbo") >= loud("nitro") * 2.5,
+           "and a launch is not a skip at a slightly higher volume ("
+           + loud("turbo").toFixed(2) + " against " + loud("nitro").toFixed(2) + ")")
+    console.log("FX-LADDER|" + names.map(function (n) {
+      return n + " cost " + cost(n) + " loud " + loud(n).toFixed(2)
+    }).join(" · "))
+  }
 }

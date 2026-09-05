@@ -2006,8 +2006,15 @@ FocusScope {
   // it, and goes back to zero with it. The ground is BEHIND the ink -- it is
   // declared before the fact's own Column, which is the same argument the whole
   // effect layer's paint order rests on -- so nothing here covers anything.
+  // PIECE F ROUND 3. The plate's own opacity, published so a test can assert
+  // that the seatbelt is fastened on every frame the light is up rather than
+  // asserting that the source contains a multiplier. See
+  // `test_03bb_the_plate_behind_the_fact_is_up_whenever_the_light_is`.
+  readonly property real factGroundAlpha: factGround.opacity
+
   Rectangle {
     id: factGround
+    objectName: "factGround"
     visible: opacity > 0.004
     readonly property real wash: track.fxWashOverFact
     // Three times the wash, capped. The multiplier is not a taste: the plate
