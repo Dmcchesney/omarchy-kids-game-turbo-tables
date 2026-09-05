@@ -1593,6 +1593,63 @@ Item {
                   view.vAt(view.playerZ) * view.height + view.shakeY + 10
                   + chaserRow * (height + 4))
 
+      // ROUND 4 -- THE THIRD BEAT FOLLOWS THE VICTIM OFF THE ROAD.
+      //
+      // The design's aftermath is state on the VICTIM, held "until the effect
+      // ends", and every card that attacks somebody sends them backwards: a
+      // Wrench is five questions, a Pothole eight, a Pile-Up fifteen. Within
+      // about 240 ms the victim is behind the camera, where there is no honest
+      // place on this road to draw them -- and the hood smoke went out with
+      // them, so the one beat the design writes as lasting a whole lap lasted
+      // four frames of twenty-one, measured on `--dump-rects`. That is most of
+      // why a blind critic could not find a single victim-state aftermath in
+      // 348 frames.
+      //
+      // This is the same smoke on the same racer, on the object that is still
+      // on the screen: their own plate. It is not a new readout -- the rail
+      // already mirrors the effect's text and its ring for exactly this reason
+      // -- and it runs off the same `fxSmoke` reading the hood uses, which is
+      // the engine's lease and not a duration typed here. So a child who
+      // wrenches a rival watches them fall past, and then watches them sit on
+      // the rail smoking until they have cleared the lap it cost them.
+      readonly property bool smoking: !isHuman && !isGhost && view.fxClock < fxSmoke
+
+      // The plume stands ON the plate's top edge and rises about two plate
+      // heights, drawn BEHIND the plate so it can never make the name or the
+      // gap harder to read. That is the same bargain the hood smoke strikes
+      // with the kart it sits on.
+      Item {
+        objectName: "fx.railSmoke"
+        visible: chaser.smoking
+        width: chaser.height * 1.9
+        height: chaser.height * 2.6
+        x: -width * 0.10
+        y: -height + chaser.height * 0.40
+        z: -1
+
+        Repeater {
+          model: chaser.smoking ? 4 : 0
+
+          Puff {
+            readonly property real ph: view.reducedMotion
+                                       ? (0.16 + index * 0.24)
+                                       : (((view.fxClock / 900) + index * 0.25) % 1)
+            readonly property color hot: "#f4e6dd"
+            readonly property color cool: "#5d4453"
+            tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
+                          hot.g + (cool.g - hot.g) * ph,
+                          hot.b + (cool.b - hot.b) * ph, 1)
+            size: chaser.height * (0.95 + ph * 1.05)
+            rings: 11
+            falloff: 1.35
+            amount: 0.95 * (1 - ph * 0.55) * Math.min(1, ph * 3.4)
+            x: parent.width * 0.42 - width / 2
+               + Math.sin(ph * 3.1 + index) * chaser.height * 0.26
+            y: parent.height - parent.height * ph * 0.90 - height / 2
+          }
+        }
+      }
+
       Rectangle {
         anchors.fill: parent
         radius: 3
@@ -3310,11 +3367,51 @@ Item {
     }
   }
 
-  // ------------------------------------------------- the smoke on the hood
-  // "a smoke sprite pinned to its hood ... for as long as the effect lasts".
-  // Not a spawned puff but a standing one, because its life is the engine's:
-  // ui/Race.qml renews `fxSmoke` for as long as the victim's lap requirement is
-  // above a clean lap. Three staggered plumes rising off the roof line.
+  // ================================================= THE THIRD BEAT: AFTERMATH
+  //
+  // "a smoke sprite pinned to its hood ... for as long as the effect lasts",
+  // and the effect lasts to the end of the victim's lap. Not a spawned puff but
+  // a standing one, because its life is the ENGINE's: ui/Race.qml renews
+  // `fxSmoke` every frame for as long as the victim's lap requirement is above
+  // a clean lap.
+  //
+  // ROUND 4 -- IT WAS BEING DRAWN AND IT COULD NOT BE SEEN, WHICH IS THE SAME
+  // THING AS NOT BEING THERE.
+  //
+  // A blind critic looked at every frame of 18 strips and reported: "the
+  // aftermaths that the spec specifies as STATE ON THE VICTIM -- hood smoke,
+  // riding one pixel low, a wheel rattle, a heat shimmer, a smoke column -- I
+  // could not find any of them on any victim in any frame." Round three's
+  // report said the aftermath runs. Both were true, and the measurement settles
+  // which one mattered. Rendering the same frames with `smoking` forced false
+  // and differencing them against the shipped frames:
+  //
+  //     wrench-leader-00, the plume's own 123x127 box
+  //         mean |delta| 2.14 of 255, max 43, 8.4% of the box moved at all
+  //     wrench-11, the 206x213 box     mean 2.06, max 34
+  //     the whole 1920x1080 frame       mean |delta| 0.02
+  //
+  // For scale, the impact flash on the same card moves the whole frame by 25.
+  // The plume was three puffs of a mauve grey (#b49aa4, #8a7280) at a peak
+  // alpha of 0.62 at the CENTRE only with a squared falloff, drawn over a mauve
+  // sunset -- so it was a smudge of the same hue as the sky at a couple of
+  // per cent contrast, and a child was never going to see it.
+  //
+  // AND IT ONLY EVER LASTED FOUR FRAMES. `--dump-rects` on the wrench strip:
+  // the plume is drawn with effective opacity 1 on frames 9, 10, 11 and 12 and
+  // on no other frame of 21. The reason is the visibility gate on the line
+  // below -- `zed > nearDistance` -- and what makes it fire is the card itself:
+  // a Wrench sends a rival five questions back, past the camera, in about
+  // 240 ms. The one aftermath in the game was switched off by the very thing it
+  // was reporting. The chaser rail below carries it from there.
+  //
+  // What changed here: four plumes instead of three; sized 0.26 to 0.68 of the
+  // kart's own sprite instead of 0.16 to 0.42; peak alpha 0.95 instead of 0.62;
+  // and a tone that RAMPS, pale and hot at the hood (#f4e6dd) to a cool dark
+  // (#5d4453) at the top of the column. The ramp is what makes it read in both
+  // halves of this picture: a pale base against near-black tarmac, a dark crown
+  // against a bright pink sky. One tone could only ever win against one of them,
+  // which is what the old mauve was doing.
   Repeater {
     model: kartModel
 
@@ -3330,29 +3427,43 @@ Item {
                                            - view.kartSpriteH(zed) * view.kartRoofFraction : 0
 
       objectName: "fx.hoodSmoke"
-      x: cx - span * 0.30
-      y: Math.max(view.fxTopFor(cx, span * 0.30), cy - span * 0.62)
-      width: span * 0.60
-      height: span * 0.62
+      x: cx - span * 0.44
+      y: Math.max(view.fxTopFor(cx, span * 0.44), cy - span * 0.86)
+      width: span * 0.88
+      height: span * 0.86
       z: 1000 - zed + 0.006
       visible: smoking && zed > view.nearDistance && zed < view.drawDistance && span > 8
 
       Repeater {
-        model: hood.smoking ? 3 : 0
+        model: hood.smoking ? 4 : 0
 
         Puff {
-          // Under reduced motion the plume is still: the same three puffs at a
-          // fixed phase, so the victim is still visibly smoking and nothing
-          // moves. That is the design's "flashes and tag changes" rule applied
-          // to a thing that is not a flash -- the state stays readable.
+          // Under reduced motion the plume is still: the same puffs at a fixed
+          // phase, so the victim is still visibly smoking and nothing moves.
+          // That is the design's "flashes and tag changes" rule applied to a
+          // thing that is not a flash -- the state stays readable.
           readonly property real ph: view.reducedMotion
-                                     ? (0.25 + index * 0.22)
-                                     : (((view.fxClock / 900) + index * 0.33) % 1)
-          tone: index === 0 ? "#b49aa4" : "#8a7280"
-          size: hood.span * (0.16 + ph * 0.26)
-          amount: 0.62 * (1 - ph) * Math.min(1, ph * 5)
-          x: hood.width / 2 - width / 2 + Math.sin(ph * 3.1 + index) * hood.span * 0.06
-          y: hood.height - hood.height * ph - height / 2
+                                     ? (0.14 + index * 0.24)
+                                     : (((view.fxClock / 900) + index * 0.25) % 1)
+          readonly property color hot: "#f4e6dd"
+          readonly property color cool: "#5d4453"
+          tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
+                        hot.g + (cool.g - hot.g) * ph,
+                        hot.b + (cool.b - hot.b) * ph, 1)
+          size: hood.span * (0.26 + ph * 0.42)
+          // Eleven rings, not the default seven. A puff is a stack of discs
+          // whose alphas sum to a smooth falloff, and seven of them is plenty
+          // at the 0.3 alpha a dust burst uses -- at the 0.95 this plume needs
+          // the steps between them show as concentric circles, which is exactly
+          // the "modern UI effect pasted over a retro scene" the rubric warns
+          // about. Eleven is where they stop reading as rings.
+          rings: 11
+          falloff: 1.5
+          // Densest just off the hood and thinning as it climbs, but never the
+          // near-nothing the old curve gave the top of the column.
+          amount: 0.95 * (1 - ph * 0.66) * Math.min(1, ph * 6)
+          x: hood.width / 2 - width / 2 + Math.sin(ph * 3.1 + index) * hood.span * 0.09
+          y: hood.height - hood.height * ph * 0.88 - height / 2
         }
       }
     }

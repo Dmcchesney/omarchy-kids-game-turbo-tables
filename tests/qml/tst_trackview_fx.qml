@@ -1146,5 +1146,73 @@ Item {
       verify(1000 / gap <= 3.0,
              "and " + gap + " ms apart is " + (1000 / gap).toFixed(2) + " Hz, under the cap")
     }
+
+    // ROUND 4 -- THE THIRD BEAT EXISTS AND IT DOES NOT GO OUT.
+    //
+    // A blind critic on round three, having looked at every frame of 18 strips
+    // of both builds: "the aftermaths that the spec specifies as state on the
+    // victim -- hood smoke, riding one pixel low, a wheel rattle, a heat
+    // shimmer, a smoke column -- I could not find any of them on any victim in
+    // any frame of either set."
+    //
+    // Two separate things were true. The plume was drawn but was invisible --
+    // measured by rendering the same frames with it suppressed and differencing
+    // them, it moved the whole frame by 0.02 of 255 -- and it went out four
+    // frames after the impact, because the victim falls behind the camera and
+    // the projection culls them. Both are fixed, and this is the guard on the
+    // half a test can hold: the smoke is DRAWN, at a size and an alpha worth
+    // seeing, on EVERY frame from the impact until the engine says the effect
+    // is over, wherever the victim happens to be. What a test cannot say is
+    // whether it reads; the with/without pixel difference in the round-4 report
+    // is the evidence for that.
+    function test_18_the_aftermath_stays_on_the_victim_until_the_effect_ends() {
+      var cards = ["wrench", "pothole", "pileUp"]
+      for (var c = 0; c < cards.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cards[c])
+        var started = false
+        var gaps = 0
+        var frames = 0
+        var widest = 0
+        var strongest = 0
+        for (var f = 0; f < 26; f++) {
+          var here = false
+          root.walk(race, function (item) {
+            var name = String(item.objectName)
+            if ((name !== "fx.hoodSmoke" && name !== "fx.railSmoke") || !root.drawn(item))
+              return
+            here = true
+            widest = Math.max(widest, item.width)
+            root.walk(item, function (kid) {
+              if (kid.amount !== undefined && root.drawn(kid))
+                strongest = Math.max(strongest, kid.amount)
+            })
+          })
+          if (here)
+            started = true
+          else if (started)
+            gaps += 1
+          if (started)
+            frames += 1
+          race.stepClock(60)
+        }
+        verify(started, cards[c] + ": the victim smokes at all")
+        compare(gaps, 0, cards[c] + ": and never stops -- " + gaps
+                         + " frames of " + frames + " after the impact had no"
+                         + " smoke on the victim anywhere, on the road or on"
+                         + " the chaser rail")
+        verify(widest >= root.height * 0.03,
+               cards[c] + ": the plume is worth seeing (" + Math.round(widest)
+               + " px across)")
+        verify(strongest >= 0.55,
+               cards[c] + ": and dense enough to see (peak puff alpha "
+               + strongest.toFixed(2) + ", round three's whole plume peaked at"
+               + " 0.62 at one pixel with a squared falloff)")
+        console.log("FX-AFTERMATH|" + cards[c] + "|" + frames
+                    + " frames after impact, " + gaps + " without smoke|widest "
+                    + Math.round(widest) + "px|peak alpha " + strongest.toFixed(2))
+      }
+    }
   }
 }
