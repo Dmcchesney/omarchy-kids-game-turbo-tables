@@ -2262,7 +2262,14 @@ Item {
       lampChaseBorn = fxClock
       lampChaseCount = b.lampChase
       lampChaseMs = b.lampChaseMs
-      fxWorldFlash("#ffffff", reducedMotion ? 0.26 : 0.62, 120)
+      // ROUND 2: 0.62 measured whole-frame mean luma 121.6 against a base of
+      // 75.2 -- +62% -- and a blind critic's note on both builds was that a
+      // third over the base reads fine and half is more than a child's eyes
+      // need. 0.15 measures 104 against 75.2, which is +38%. Every other beat
+      // of this card (the edge darken, the stretch, the horizon dip, the speed
+      // lines, the ten-lamp chase, the field streaming past) is untouched: the
+      // card did not need the brightness, it needed the consequence.
+      fxWorldFlash("#ffffff", reducedMotion ? 0.10 : 0.15, 120)
     } else if (cueCard === "rollCage") {
       // "a cage frame draws itself around your kart line by line over 300, then
       // settles to a soft amber pulse that stays as long as it is active"
@@ -2354,7 +2361,7 @@ Item {
       for (var s = 0; s < 4; s++)
         fxPuffLater(kart, 0, -span * (0.10 + s * 0.16), span * (0.36 + s * 0.10),
                     1.9, 2200, s === 0 ? "#c9b0a8" : "#8d7480", 0.30, s * 130)
-      fxWorldFlash(b.tone, 0.20, 220)
+      fxWorldFlash(b.tone, 0.14, 220)
       for (var o = 0; o < kartModel.count; o++)
         if (o !== kart)
           fxTagFlash(o, b.fieldFlash)
@@ -2389,6 +2396,27 @@ Item {
   readonly property real flashNow: (fxClock - flashBorn) > flashMs
                                    ? 0
                                    : flashPeak * CardFx.bump(CardFx.phase(fxClock - flashBorn, flashMs))
+
+  // ------------------------------------------- HOW MUCH LIGHT IS OVER THE FACT
+  //
+  // ROUND 2. The design's first hard rule is that nothing ever covers the fact,
+  // and round one read that as a GEOMETRY rule: no effect item's box may enter
+  // the fact's ink box, proved over eleven hundred boxes. It is also a CONTRAST
+  // rule, and round one failed it -- a blind critic measured the cream digits
+  // sitting on a cream-to-pale-pink bloom for 120 ms on a Turbo and about 300
+  // ms twice on a Pile-Up, surviving on a one-pixel outline. "The largest, most
+  // important thing on screen becomes the least legible thing on screen at the
+  // exact moment the child is being asked to hold a question in their head."
+  //
+  // This is the alpha of the full-frame light reaching the middle of the frame,
+  // published so `ui/Race.qml` can put the fact's own dark ground up underneath
+  // it for exactly as long as the wash lasts and no longer. The two washes that
+  // reach the fact are the world flash (Turbo's white frame, Pile-Up's amber
+  // sky, a hit's red-amber) and Nitro's sun bloom; the edge frame is four
+  // gradient bands at the rim and never touches the middle, and the speed lines
+  // are individually guarded by `fxGuardTop`.
+  readonly property real fxWashOverFact: Math.min(
+      1, Math.max(Math.max(flashNow, fxSkyFlash * fxSkyPeak), bloomNow * 0.55))
 
   property real boostBorn: -1e9
   property real boostMs: 0
@@ -2437,6 +2465,12 @@ Item {
   // which is 2.94 Hz. The second one runs 20 ms past the telegraph and into the
   // impact, which is where a wind-up wants to end anyway.
   readonly property real fxSkyGap: 340
+  // How hard the amber goes. Round one's pair measured +50% on whole-frame mean
+  // luma against a base of 81; the design's own accessibility rule is a cap on
+  // RATE, but a blind critic's note on both builds was that a third is enough
+  // and half is more than a child's eyes need. This is the number that was
+  // turned down; see `docs/design.md`, Accessibility.
+  readonly property real fxSkyPeak: 0.30
   readonly property real fxSkyFlash: {
     if (cueCard !== "pileUp" || cueBorn <= 0)
       return 0
@@ -3075,7 +3109,15 @@ Item {
     z: 2600
     visible: opacity > 0.004
     color: view.flashTone
-    opacity: Math.max(view.flashNow, view.fxSkyFlash * 0.32)
+    // ROUND 2: the sky flash is no longer folded in here. It used to be
+    // `Math.max(flashNow, fxSkyFlash * 0.32)` on a rectangle whose colour is
+    // `flashTone` -- the tone of the last flash that FIRED -- and the Pile-Up's
+    // sky flashes happen in its telegraph, BEFORE any flash has fired, so they
+    // were painted in whatever was left over (white, by default). The design
+    // says amber, twice, and a blind critic measured "a whole-screen
+    // desaturating wash, not an amber sky". It has its own item below now, it
+    // is amber, and it is the sky.
+    opacity: view.flashNow
     // THE ALPHA THE PIXEL ACTUALLY GETS, published for the test.
     //
     // Three of the four washes are containers whose CHILDREN carry the paint --
@@ -3085,6 +3127,52 @@ Item {
     // `tst_trackview_fx.qml` can bound what the fact has to be read against
     // rather than bounding a number that was always one.
     readonly property real washAlpha: opacity
+  }
+
+  // ------------------------------------------------------- the amber sky
+  // Pile-Up, telegraph: "the sky flashes amber twice". THE SKY. It is a band
+  // from the top of the frame down to the horizon, with a short fall-off below
+  // it so the light lands on the land rather than stopping on a line, and it is
+  // the card's own amber. Nothing about the road, the karts or the tarmac is
+  // touched: a full-screen wash desaturates the whole picture, which is the
+  // failure this project has a standing memory of -- darkness, and light, are
+  // achromatic fill when they are applied to everything at once.
+  Item {
+    id: skyFlash
+    objectName: "fx.skyFlash"
+    x: 0
+    y: 0
+    width: view.width
+    height: Math.round(view.horizon * view.height * 1.16)
+    z: 2590
+    readonly property real amount: view.fxSkyFlash * view.fxSkyPeak
+    readonly property real washAlpha: amount
+    visible: amount > 0.004
+
+    // The card's own amber, full strength down to the horizon and gone a
+    // sixth of the sky's height below it.
+    readonly property color tone: CardFx.BEATS.pileUp.tone
+
+    Rectangle {
+      anchors.fill: parent
+      gradient: Gradient {
+        orientation: Gradient.Vertical
+        GradientStop {
+          position: 0.0
+          color: Qt.rgba(skyFlash.tone.r, skyFlash.tone.g, skyFlash.tone.b,
+                         skyFlash.amount)
+        }
+        GradientStop {
+          position: 0.862
+          color: Qt.rgba(skyFlash.tone.r, skyFlash.tone.g, skyFlash.tone.b,
+                         skyFlash.amount)
+        }
+        GradientStop {
+          position: 1.0
+          color: Qt.rgba(skyFlash.tone.r, skyFlash.tone.g, skyFlash.tone.b, 0)
+        }
+      }
+    }
   }
 
   Item {

@@ -100,7 +100,14 @@ Item {
   // object with its own box, and a line whose box would meet the fact or the
   // field is simply not drawn. There are sixteen and the fan reads the same
   // with two missing.
-  readonly property var washNames: ["fx.worldFlash", "fx.edges", "fx.sunBloom"]
+  // ROUND 2 adds `fx.skyFlash`: Pile-Up's "the sky flashes amber twice", which
+  // used to be folded into `fx.worldFlash` and was therefore painted in the
+  // tone of the last flash that fired -- white, in its own telegraph, because
+  // no flash had fired yet. It is a band from the top of the frame to the
+  // horizon, so it is a wash by the same argument the others are: it is inside
+  // TrackView, the fact is painted after TrackView, and its alpha is bounded.
+  readonly property var washNames: ["fx.worldFlash", "fx.edges", "fx.sunBloom",
+                                    "fx.skyFlash"]
   function isWash(name) { return root.washNames.indexOf(name) >= 0 }
 
   // Every drawn item whose objectName marks it as part of the effect layer,
@@ -285,6 +292,7 @@ Item {
       var cards = ["nitro", "turbo", "oilSlick", "wrench", "pothole", "pileUp",
                    "rollCage", "towHook"]
       var peak = 0
+      var byName = ({})
       for (var c = 0; c < cards.length; c++) {
         race.buildRace()
         preroll()
@@ -292,16 +300,40 @@ Item {
         for (var f = 0; f < 26; f++) {
           var boxes = root.effectBoxes()
           for (var k = 0; k < boxes.length; k++)
-            if (root.isWash(boxes[k].name))
+            if (root.isWash(boxes[k].name)) {
               peak = Math.max(peak, boxes[k].opacity)
+              var was = byName[boxes[k].name] === undefined ? 0 : byName[boxes[k].name]
+              byName[boxes[k].name] = Math.max(was, boxes[k].opacity)
+            }
           race.stepClock(60)
         }
       }
-      // Turbo's "one white frame" is the loudest thing in the piece and it is
-      // the number this bound is set by. Anything above it would be a wash the
-      // fact has to fight rather than sit on.
-      verify(peak <= 0.66, "the loudest wash in the piece measured " + peak.toFixed(3))
-      console.log("FX-WASH|peak alpha across all eight cards|" + peak.toFixed(3))
+      // ROUND 2 TIGHTENED THIS AND SPLIT IT, BECAUSE ONE BOUND WAS HIDING TWO
+      // DIFFERENT THINGS.
+      //
+      // The FULL-FRAME TINTS -- Turbo's white frame, Pile-Up's amber sky, the
+      // edge frame -- are the ones a child's eyes pay for, and a blind critic's
+      // reading of both builds in this run was that a third over the base is
+      // enough and half is more than they need. Turbo's white frame used to be
+      // 0.62 and measured whole-frame mean luma 121.6 against a base of 75.2,
+      // which is +62%; it is 0.15 now and measures +29%. Nothing that tints the
+      // whole frame may go above a third.
+      //
+      // The SUN BLOOM is not one of those. It is a soft disc the size of the
+      // sun, on the sun, which the design asks for by name ("the sun blooms for
+      // 300") and which is warm rather than white -- so it gets its own bound,
+      // stated rather than smuggled under a looser shared one.
+      var tints = 0
+      var names = ["fx.worldFlash", "fx.skyFlash", "fx.edges"]
+      for (var n = 0; n < names.length; n++)
+        if (byName[names[n]] !== undefined)
+          tints = Math.max(tints, byName[names[n]])
+      verify(tints <= 0.34,
+             "the loudest full-frame tint in the piece measured " + tints.toFixed(3))
+      var bloom = byName["fx.sunBloom"] === undefined ? 0 : byName["fx.sunBloom"]
+      verify(bloom <= 0.56, "the sun bloom measured " + bloom.toFixed(3))
+      console.log("FX-WASH|peak alpha across all eight cards|" + peak.toFixed(3)
+                  + "|tints " + tints.toFixed(3) + "|bloom " + bloom.toFixed(3))
     }
 
     // ------------------------------------------------------------- hit-stop

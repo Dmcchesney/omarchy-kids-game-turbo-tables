@@ -1939,10 +1939,31 @@ FocusScope {
     height: race.factInkRect.height
   }
 
+  //
+  // PIECE F ROUND 2 -- AND FOR EVERY FRAME OF EVERY WORLD FLASH, FOR THE SAME
+  // REASON. A wash is not a crossbar but it does the same thing to the same
+  // glyphs: a blind critic measured the cream fact sitting on a cream-to-pale
+  // bloom through a Turbo's white frame and both of the Pile-Up's amber
+  // flashes, "the largest, most important thing on screen" reduced to a one-
+  // pixel outline at the exact moment a child has to hold the question in their
+  // head. `track.fxWashOverFact` is the alpha of the light actually reaching
+  // the middle of the frame, so the ground comes up with the wash, in step with
+  // it, and goes back to zero with it. The ground is BEHIND the ink -- it is
+  // declared before the fact's own Column, which is the same argument the whole
+  // effect layer's paint order rests on -- so nothing here covers anything.
   Rectangle {
     id: factGround
     visible: opacity > 0.004
-    opacity: track.factYield * 0.86
+    readonly property real wash: track.fxWashOverFact
+    // Three times the wash, capped. The multiplier is not a taste: the plate
+    // has to take back more ground than the wash put on, because the wash also
+    // lifts the plate itself. Measured on the frames, WCAG 2.1 contrast between
+    // the fact's ink and the ground it is on, inside the ink box: 3.47:1 with
+    // nothing happening, 3.32:1 inside a Turbo's white frame with the plate at
+    // 1.5x, and above the resting figure at 3x. The rule the design writes is
+    // that the fact is the most legible thing on screen at every moment; a
+    // number that goes DOWN during the loudest 120 ms of the game fails it.
+    opacity: Math.max(track.factYield * 0.86, Math.min(0.92, wash * 3.0))
     x: race.factInkRect.x - race.px(22)
     y: race.factInkRect.y - race.px(14)
     width: race.factInkRect.width + race.px(44)
