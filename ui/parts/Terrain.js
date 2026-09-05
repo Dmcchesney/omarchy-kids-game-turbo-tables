@@ -77,10 +77,10 @@ var SOIL = [
   [0.2353, 0.0863, 0.2039],
   [0.2000, 0.0902, 0.2039],
   [0.3255, 0.2118, 0.2745],
-  [0.4784, 0.2510, 0.2824],
+  [0.5490, 0.3529, 0.2196],
   [0.2196, 0.1098, 0.2196],
   [0.2824, 0.1333, 0.1804],
-  [0.5412, 0.3294, 0.3765],
+  [0.5412, 0.2706, 0.3608],
   [0.2353, 0.0706, 0.1569]
 ]
 var SCRUB = [
@@ -91,10 +91,10 @@ var SCRUB = [
   [0.3216, 0.1412, 0.2667],
   [0.1490, 0.0784, 0.1804],
   [0.4157, 0.2902, 0.3529],
-  [0.6353, 0.3529, 0.3451],
+  [0.6588, 0.4706, 0.2745],
   [0.2941, 0.1725, 0.2902],
   [0.4314, 0.2118, 0.2039],
-  [0.6549, 0.4157, 0.4392],
+  [0.6549, 0.3529, 0.4235],
   [0.2902, 0.1020, 0.1882]
 ]
 
@@ -272,8 +272,8 @@ function groundAt(x, s, z) {
   // every other octave uses -- which is what lets the fallback fill it exactly.
   var wind = FLAGS[a][2] + (FLAGS[b][2] - FLAGS[a][2]) * t
   if (wind > 0.001) {
-    var wn = blockNoise(x + s * 0.4, s * 0.10, COARSE)
-    var wl = 1.0 + wind * (wn - 0.5) * 0.34
+    var wn = blockNoise(x + s * 0.65, s * 0.10, COARSE)
+    var wl = 1.0 + wind * (wn - 0.5) * 0.52
     r *= wl; g *= wl; bl *= wl
   }
   return [r, g, bl]
@@ -312,7 +312,7 @@ function rowContext(s, z) {
     "fineS": Math.floor(s / FINE),
     "rutS": Math.floor(s * 0.24 / RUT),
     "windS": Math.floor(s * 0.10 / COARSE),
-    "windShear": s * 0.4
+    "windShear": s * 0.65
   }
 }
 
@@ -334,7 +334,7 @@ function rowGround(c, x, out) {
   r *= lift; g *= lift; b *= lift
   if (c.wind > 0.001) {
     var wn = hashCell(Math.floor((x + c.windShear) / COARSE), c.windS)
-    var wl = 1.0 + c.wind * (wn - 0.5) * 0.34
+    var wl = 1.0 + c.wind * (wn - 0.5) * 0.52
     r *= wl; g *= wl; b *= wl
   }
   out[0] = r; out[1] = g; out[2] = b

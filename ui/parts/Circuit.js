@@ -78,29 +78,44 @@ var SECTOR_NAMES = [
 // The pines are the other end of it. They bake at hue 185, teal, and the design
 // asks sector 6 for "a hillside of SILHOUETTED pines" -- so they take the
 // heaviest wash in the table and become what the design asked for.
+// ROUND 3 RAISED `key0` ON EVERY SET PIECE, AND THE REASON IS A MEASUREMENT.
+// Round 2 moved the kit's BODY hues into the palette, which was right, and
+// stopped short of the light: a critic measured the quarry's lit facets at hue
+// 289 -- a cool violet, with the sun burning directly behind them -- the
+// overpass's deck and pier identical to within 1/255, and the town tyre wall's
+// sun face and shade face as literally the same pixel. "We have the purple
+// world and the hot light, and they are not touching."
+//
+// The rim these numbers drive is the only directional light on the circuit,
+// because the bake's own shading is fixed and a builder may not repaint it. So
+// the set pieces take roughly half again as much of it, and `PropKey` now caps
+// the rim's REACH in absolute pixels -- which is what stops the same change
+// turning the jetty and the water tower into the duplicate rectangles a critic
+// ranked second on the cut list. Boards, banners and hay bales are unchanged:
+// they carry paint, and the design's rule is that paint keeps its own hue.
 var TINT = {
   //             wash0 wash1  key0  reach
-  "rockWall":   [0.46, 0.74, 0.44, 0.032],
-  "overpass":   [0.46, 0.74, 0.40, 0.022],
-  "rollerDoor": [0.44, 0.72, 0.38, 0.020],
-  "gantry":     [0.40, 0.70, 0.36, 0.018],
-  "pine":       [0.48, 0.78, 0.22, 0.026],
-  "waterTower": [0.34, 0.66, 0.38, 0.030],
-  "bridge":     [0.22, 0.58, 0.30, 0.018],
-  "scrapyard":  [0.20, 0.56, 0.32, 0.030],
-  "tireWall":   [0.20, 0.54, 0.28, 0.030],
-  "crowd":      [0.36, 0.70, 0.26, 0.022],
+  "rockWall":   [0.46, 0.74, 0.66, 0.032],
+  "overpass":   [0.46, 0.74, 0.62, 0.022],
+  "rollerDoor": [0.44, 0.72, 0.58, 0.020],
+  "gantry":     [0.40, 0.70, 0.54, 0.018],
+  "pine":       [0.48, 0.78, 0.32, 0.026],
+  "waterTower": [0.34, 0.66, 0.58, 0.030],
+  "bridge":     [0.22, 0.58, 0.46, 0.018],
+  "scrapyard":  [0.20, 0.56, 0.48, 0.030],
+  "tireWall":   [0.20, 0.54, 0.44, 0.030],
+  "crowd":      [0.36, 0.70, 0.30, 0.022],
   "billboard":  [0.12, 0.36, 0.24, 0.024],
   "banner":     [0.12, 0.36, 0.24, 0.024],
   "pitBoard":   [0.14, 0.40, 0.24, 0.028],
-  "distanceBoard": [0.14, 0.42, 0.24, 0.034],
-  "hayBale":    [0.18, 0.52, 0.28, 0.040],
-  "jetty":      [0.26, 0.60, 0.32, 0.034],
-  "drum":       [0.20, 0.54, 0.30, 0.044],
-  "cone":       [0.16, 0.48, 0.26, 0.050],
-  "markerPost": [0.22, 0.56, 0.28, 0.060]
+  "distanceBoard": [0.14, 0.42, 0.26, 0.034],
+  "hayBale":    [0.18, 0.52, 0.30, 0.040],
+  "jetty":      [0.26, 0.60, 0.48, 0.034],
+  "drum":       [0.20, 0.54, 0.34, 0.044],
+  "cone":       [0.16, 0.48, 0.28, 0.050],
+  "markerPost": [0.22, 0.56, 0.30, 0.060]
 }
-var TINT_DEFAULT = [0.24, 0.58, 0.28, 0.030]
+var TINT_DEFAULT = [0.24, 0.58, 0.30, 0.030]
 
 function tintFor(kind) { return TINT[kind] || TINT_DEFAULT }
 

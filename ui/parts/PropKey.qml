@@ -37,7 +37,22 @@ Item {
   readonly property real drawnH: host ? host.drawnH : 0
   // The rim's reach, in screen pixels. A share of the prop's drawn width, so a
   // rock wall and the same rock wall four times further away are lit the same.
-  readonly property real reach: Math.max(1, drawnW * (host ? host.keyReach : 0.030))
+  //
+  // AND IT IS CAPPED, WHICH IT WAS NOT, AND THAT IS WHERE THE GHOSTS CAME
+  // FROM. A share of the drawn width is right for a rock and wrong for
+  // anything with a thin member in it: the lake's jetty draws about 800 px
+  // across at 1080p, so 0.034 of that put a 27-PIXEL displaced copy of a
+  // four-pixel-thick deck out into the sky. A critic read the result as
+  // "semi-transparent duplicate rectangles floating above and behind the
+  // jetty" and as a "translucent vertical column" beside the water tower, and
+  // ranked the quads that make them second on the cut list.
+  //
+  // They are not glow quads and they are not haze: they are this rim, at a
+  // size where a rim stops being a rim. Ten screen pixels is two and a half of
+  // the internal buffer's own pixels at 1080p -- a lit edge on the biggest
+  // rock in the quarry, and never a second copy of a plank.
+  readonly property real reach: Math.max(1, Math.min(
+      drawnW * (host ? host.keyReach : 0.030), 10))
   readonly property real lit: (host && host.clarity > 0.12)
                               ? host.clarity * host.keyAmount : 0
 

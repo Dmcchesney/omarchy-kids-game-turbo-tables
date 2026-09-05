@@ -111,10 +111,10 @@ const vec3 SOIL[12] = vec3[12](
     vec3(0.2353, 0.0863, 0.2039),
     vec3(0.2000, 0.0902, 0.2039),
     vec3(0.3255, 0.2118, 0.2745),
-    vec3(0.4784, 0.2510, 0.2824),
+    vec3(0.5490, 0.3529, 0.2196),
     vec3(0.2196, 0.1098, 0.2196),
     vec3(0.2824, 0.1333, 0.1804),
-    vec3(0.5412, 0.3294, 0.3765),
+    vec3(0.5412, 0.2706, 0.3608),
     vec3(0.2353, 0.0706, 0.1569));
 
 const vec3 SCRUB[12] = vec3[12](
@@ -125,10 +125,10 @@ const vec3 SCRUB[12] = vec3[12](
     vec3(0.3216, 0.1412, 0.2667),
     vec3(0.1490, 0.0784, 0.1804),
     vec3(0.4157, 0.2902, 0.3529),
-    vec3(0.6353, 0.3529, 0.3451),
+    vec3(0.6588, 0.4706, 0.2745),
     vec3(0.2941, 0.1725, 0.2902),
     vec3(0.4314, 0.2118, 0.2039),
-    vec3(0.6549, 0.4157, 0.4392),
+    vec3(0.6549, 0.3529, 0.4235),
     vec3(0.2902, 0.1020, 0.1882));
 
 // [grid, water, wind, scrubAmount] per sector.
@@ -300,9 +300,18 @@ void main()
     // THE DUNES' WIND LINES. Long diagonal ridges across the sand, drawn as
     // blocks on the same lattice so they belong to the ground rather than
     // being ruled over it.
+    // ROUND 3. "The dunes are the one sector a stranger could not name." They
+    // were, and the reason was two numbers: the palette was the same magenta
+    // dirt as every other sector at a higher value -- a critic measured its
+    // ground at H 345 against the billboards' H 338 and wrote "a lighter tint
+    // of the same material is not a place" -- and the wind lines moved the
+    // ground by plus or minus 17%, which under the haze is nothing. The
+    // palette is sand now (H 24 and H 31 in SOIL and SCRUB, the only two warm
+    // entries in the table), and the ridges are half as strong again and run
+    // at a steeper shear, so they read as wind rather than as noise.
     if (flags.z > 0.001) {
-        float wind = blockNoise(x + s * 0.4, s * 0.10, COARSE);
-        floorCol *= 1.0 + flags.z * (wind - 0.5) * 0.34;
+        float wind = blockNoise(x + s * 0.65, s * 0.10, COARSE);
+        floorCol *= 1.0 + flags.z * (wind - 0.5) * 0.52;
     }
 
     // THE HOUR REACHES THE GROUND. Terrain.js `duskMul`, applied at the same
@@ -344,7 +353,21 @@ void main()
     // strip below is the wet sand and the foam line, a pale band a unit and a
     // half wide centred a third of a unit out from the bank, and it is what
     // makes the two read as two things.
-    float shore = roadHalf + rumbleHalf + 2.6;
+    // THE BANK COMES IN, AND THAT IS WHAT MAKES THE REFLECTION EXIST.
+    //
+    // At 2.6 units past the kerb the water's near edge was off the right of
+    // the frame until about z = 3, and it crossed the sun's own column at
+    // z = 7: so the reflection -- which is a vertical plane through the eye and
+    // the sun, and therefore a CONSTANT screen u -- could only ever land on
+    // water in a band near the horizon, where the haze had already taken 87% of
+    // it. A critic looked for the design's showpiece and found "no sun column
+    // at all" and, where it did survive, two pale rectangles it read as ghosts.
+    // Both are the same fact: the lake was not under the sun.
+    //
+    // 1.15 units past the kerb is still "water beside the road", and it puts
+    // the bank in the bottom-right corner of the frame where the design's own
+    // sentence needs it.
+    float shore = roadHalf + rumbleHalf + 1.15;
     float water = flags.y * step(shore, x);
     if (flags.y > 0.001) {
         float edge = 1.0 - clamp(abs(x - shore - 0.32) / 0.78, 0.0, 1.0);
@@ -362,8 +385,15 @@ void main()
         // rung four world units long is under a pixel out there, and alternating
         // it produced the "chunky offset horizontal blocks that read as a torn
         // texture" a critic measured.
+        // AND THE WEDGE OPENS FOUR TIMES AS WIDE. The column stays centred on
+        // `sunU` -- it is the sun's own image and it does not bend -- but a
+        // rippled surface scatters the glitter wider the nearer it is to the
+        // eye, and 0.090 of the frame at the near end was a stripe rather than
+        // a path. At 0.30 the tail of the wedge reaches the bank in the corner
+        // of the frame and the whole thing reads as one shape converging on the
+        // disc, which is what "the bar's own image" means in pixels.
         float near = clamp((30.0 - z) / 26.0, 0.0, 1.0);
-        float column = clamp(1.0 - abs(u - sunU) / mix(0.020, 0.090, near), 0.0, 1.0);
+        float column = clamp(1.0 - abs(u - sunU) / mix(0.022, 0.300, near), 0.0, 1.0);
         column *= column;
         float ladder = column * (0.45 + 0.55 * rungs) * mix(0.55, 1.0, near);
         lake = mix(lake, waterLit.rgb, ladder);
@@ -419,6 +449,17 @@ void main()
     float kerbHere = (x > 0.0) == (cHere > 0.0) ? bend : 0.0;
     vec3 zebraCol = mix(rumbleColor.rgb, rumbleAlt.rgb, softBand);
     vec3 shoulder = soil * 0.72;
+    // THE ROAD HALF BURIED AT THE EDGES, which is the third of the design's
+    // three words for sector 8 and the only one that was not drawn at all.
+    // Drifts of the sector's own crest sand run over the shoulder in blocks
+    // three world units long -- a function of `s` alone, so the fallback can
+    // paint the same block per band rather than per slice, and the two frames
+    // stay the same frame.
+    if (flags.z > 0.001) {
+        float drift = clamp((blockNoise(0.0, s, 3.0) - 0.34) / 0.40, 0.0, 1.0) * flags.z;
+        shoulder = mix(shoulder, scrub * mix(vec3(1.0), DUSK, nightfall), drift);
+        kerbHere *= 1.0 - 0.70 * drift;
+    }
     vec3 rumble = mix(shoulder, zebraCol, kerbHere);
 
     // ------------------------------------------------------- the start grid

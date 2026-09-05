@@ -995,12 +995,27 @@ Item {
   // picture the sun does not warm, so it is pulled off the soil's magenta and
   // toward blue -- H 270 against the land's 320 -- and the shore band between
   // them says where one stops.
-  readonly property color waterTone: Qt.rgba(0.129 * (1 - 0.35 * nightfall),
-                                             0.078 * (1 - 0.35 * nightfall),
-                                             0.345 * (1 - 0.25 * nightfall), 1)
+  // ROUND 3, AND THE HUE IS THE WHOLE OF THE CHANGE. (0.129, 0.078, 0.345) is
+  // hue 252 authored and measured 265 on the frame -- an INDIGO, a colour that
+  // appears nowhere else in this game and belongs to no part of the palette.
+  // The design's own cool end is the reference sky's zenith at hue 284, and a
+  // lake at golden hour is the sky lying down: 280 is that violet, still 33
+  // degrees off the lake sector's own land at hue 313, still the one thing in
+  // the picture the sun does not warm, and now inside the palette rather than
+  // beside it.
+  readonly property color waterTone: Qt.rgba(0.243 * (1 - 0.35 * nightfall),
+                                             0.063 * (1 - 0.35 * nightfall),
+                                             0.329 * (1 - 0.25 * nightfall), 1)
   // The wet sand and the foam line. Pale, warm, and the brightest thing on the
   // ground in that sector, so the eye reads an edge before it reads a colour.
-  readonly property color shoreTone: dimmed(Qt.rgba(0.788, 0.541, 0.525, 1), surfaceDusk)
+  // AND IT TAKES THE GROUND'S HOUR, NOT THE TARMAC'S. The shore is mixed into
+  // the floor AFTER `Terrain.DUSK` has been applied in both renderers, so it is
+  // the one piece of ground whose dusk has to arrive in its own uniform; taking
+  // `surfaceDusk` left a bright wet-sand band under a lap-12 sky.
+  readonly property color shoreTone: {
+    var d = Terrain.duskMul(nightfall)
+    return Qt.rgba(0.788 * d[0], 0.541 * d[1], 0.525 * d[2], 1)
+  }
   readonly property color waterLitTone: Qt.rgba(0.949 * (1 - 0.28 * nightfall),
                                                 0.784 * (1 - 0.36 * nightfall),
                                                 0.494 * (1 - 0.30 * nightfall), 1)

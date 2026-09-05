@@ -380,6 +380,22 @@ Canvas {
                           rub + (rlb - rub) * soft, 1)
       var kerbR = cHere > 0 ? bend : 0
       var kerbL = cHere < 0 ? bend : 0
+      // THE ROAD HALF BURIED AT THE EDGES. road.frag's drift block, and it is
+      // a function of `s` alone for exactly this reason: this renderer paints
+      // one shoulder colour per band, so a drift that varied across x could not
+      // be the same picture. Three world units of sand at a time, and where it
+      // lands the kerb goes under it.
+      if (flags[2] > 0.001) {
+        var drift = Math.max(0, Math.min(1,
+          (Terrain.blockNoise(0, sMid, 3.0) - 0.34) / 0.40)) * flags[2]
+        if (drift > 0.001) {
+          var crest = sectorScrub(sMid)
+          for (var dc = 0; dc < 3; dc++)
+            shoulder[dc] += (crest[dc] - shoulder[dc]) * drift
+          kerbR *= 1 - 0.70 * drift
+          kerbL *= 1 - 0.70 * drift
+        }
+      }
 
       var shoulderCol = hazed(shoulder, fSurf)
       var zebraCol = blend(fogColor, zebra, fSurf)
@@ -655,7 +671,11 @@ Canvas {
       // column is in SCREEN u, because that is what a reflection is: the sun's
       // image is under the disc, not at a fixed place on the lake.
       if (row.water > 0.001) {
-        var shore = uRoadHalf + uRumbleHalf + 2.6
+        // 1.15 and not 2.6: road.frag carries the argument -- at 2.6 the bank
+        // was off the right of the frame until z = 3 and did not cross the
+        // sun's own column until z = 7, so the design's reflection had no
+        // water to be in anywhere the haze had not already taken it.
+        var shore = uRoadHalf + uRumbleHalf + 1.15
         // THE SHORE, FIRST AND UNDER THE WATER. road.frag mixes a pale band
         // into the floor before it lays the lake over it; four slices across
         // the same unit and a half, each weighted by the same quadratic, is
@@ -704,7 +724,7 @@ Canvas {
             // on its source; a constant-width stripe is a bar of light standing
             // on the water.
             var nearK = Math.max(0, Math.min(1, (30 - mid) / 26))
-            var colm = Math.max(0, 1 - Math.abs(uc - uSunU) / (0.020 + 0.070 * nearK))
+            var colm = Math.max(0, 1 - Math.abs(uc - uSunU) / (0.022 + 0.278 * nearK))
             colm *= colm
             var ladder = colm * (0.45 + 0.55 * rungs) * (0.55 + 0.45 * nearK)
             ctx.fillStyle = Qt.rgba(
@@ -740,6 +760,16 @@ Canvas {
     var soil = Terrain.mix3(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2])
     var d = Terrain.duskMul(nightfall)
     return [soil[0] * d[0], soil[1] * d[1], soil[2] * d[2]]
+  }
+
+  // The sector's crest tone, dusked: what the dunes' sand drifts over the
+  // shoulder are made of. road.frag has `scrub` as a local at that point;
+  // this renderer has to go and get it.
+  function sectorScrub(s) {
+    var m = Terrain.sectorMix(s)
+    var scrub = Terrain.mix3(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2])
+    var d = Terrain.duskMul(nightfall)
+    return [scrub[0] * d[0], scrub[1] * d[1], scrub[2] * d[2]]
   }
 
   // The pit's diagnostic grid, three octaves, both directions. Unchanged from
