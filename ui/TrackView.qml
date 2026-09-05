@@ -3587,6 +3587,100 @@ Item {
     }
   }
 
+  // ------------------------------------------- the Tow Hook's motion blur
+  //
+  // Design v4, Tow Hook, impact: "the line goes taut and the two karts zip past
+  // each other, yours forward and theirs back, WITH MOTION BLUR ON BOTH; the
+  // camera whips to follow." Three rounds built the whip, the hook, the line
+  // and the swap and left the blur out, and it has been in every round's own
+  // "what is not covered" list since the first. It is the second item on the
+  // round-4 work order's list of what is still unbuilt.
+  //
+  // It is the same trick the boosts already use -- copies of the car further
+  // along the way it came, fainter with distance -- pointed the other way for
+  // each of the two cars, because they are moving in opposite directions:
+  //
+  //   the child is hauled FORWARD, so their trail is further back, at larger z,
+  //   which on this camera is up the road behind them;
+  //   the rival is dragged BACK past the camera, so their trail is where they
+  //   were, which is further up the road: also larger z, but from a kart that
+  //   is rushing toward the lens.
+  //
+  // Nothing here reads a rule. `towNow` is the impact beat's own decay and
+  // `towKart` is the racer `ui/Race.qml` named when the engine emitted `swap`;
+  // both are already what the tow line is drawn from. Reduced motion takes it
+  // with the rest of the movement, and each copy is a zero-size anchor item, so
+  // the box proof sees nothing new.
+  Repeater {
+    model: (view.towNow > 0.02 && !view.reducedMotion && view.heroIndex >= 0) ? 3 : 0
+
+    Item {
+      readonly property real zed: view.playerZ + (index + 1) * 0.50
+      readonly property var fit: view.kartCell(zed)
+
+      objectName: "fx.towBlur"
+      x: view.uAt(view.heroLane, zed) * view.width + view.shakeX
+      y: view.vAt(zed) * view.height + view.shakeY
+      width: 0
+      height: 0
+      z: 1000 - zed - 0.01
+      opacity: view.towNow * (0.40 - index * 0.10)
+
+      CarSprite {
+        body: view.heroBody
+        paint: view.heroPaint
+        number: view.heroNumber
+        camera: "road"
+        yaw: 0
+        sheetScale: parent.fit.sheetScale
+        pixelScale: parent.fit.pixelScale
+        showNumber: false
+      }
+    }
+  }
+
+  Repeater {
+    model: (view.towNow > 0.02 && !view.reducedMotion
+            && view.towKart >= 0 && view.towKart < kartModel.count) ? 3 : 0
+
+    Item {
+      readonly property var victim: kartModel.get(view.towKart)
+      readonly property real base: view.fxKartZ(view.towKart)
+      // Spaced by the depth the rival is actually covering, so the trail is
+      // long when they are being flung past and short when they are nearly
+      // stopped -- rather than three fixed steps that would read the same at
+      // every moment of the swap.
+      readonly property real zed: base + (index + 1) * (0.50 + view.towNow * 2.2)
+      readonly property var fit: view.kartCell(zed)
+      readonly property int paintIdx: {
+        for (var i = 0; i < Theme.paints.length; i++)
+          if (Qt.colorEqual(Theme.paints[i], victim.kartPaint))
+            return i
+        return 0
+      }
+
+      objectName: "fx.towBlur"
+      x: view.uAt(view.laneOf(victim.kartSeat), zed) * view.width + view.shakeX
+      y: view.vAt(zed) * view.height + view.shakeY
+      width: 0
+      height: 0
+      z: 1000 - zed - 0.01
+      visible: zed > view.nearDistance && zed < view.drawDistance
+      opacity: view.towNow * (0.40 - index * 0.10)
+
+      CarSprite {
+        body: parent.victim.kartBody
+        paint: parent.paintIdx
+        number: parent.victim.kartNumber
+        camera: "road"
+        yaw: CarMeta.columnForHeading(view.kartHeadingDeg(parent.zed))
+        sheetScale: parent.fit.sheetScale
+        pixelScale: parent.fit.pixelScale
+        showNumber: false
+      }
+    }
+  }
+
   // ------------------------------------------------------- the speed lines
   // "speed lines from the corners" (Nitro) and "heavy speed lines" (Turbo).
   // Drawn in QML, from the four corners toward the vanishing point, so they
