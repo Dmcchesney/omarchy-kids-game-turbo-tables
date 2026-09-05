@@ -24,6 +24,7 @@
     "check:props": "node src/tools/check-props.ts",
     "check:terrain": "node src/tools/check-terrain.ts",
     "sfx": "python3 src/tools/bake-sfx.py --out assets/sfx",
-    "check:sfx": "node src/tools/check-sfx.ts"
+    "check:sfx": "node src/tools/check-sfx.ts",
+    "perf": "node src/tools/perf.ts"
   }
 }
