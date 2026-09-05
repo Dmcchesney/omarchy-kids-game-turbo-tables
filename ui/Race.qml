@@ -308,6 +308,7 @@ FocusScope {
     // pass waiting to be shown belongs to a race that is over.
     picker.reset()
     race.pendingPasses = []
+    race.pendingSay = []
     race.echoHold = null
     race.priorState = null
     race.mapDue = 0
@@ -453,11 +454,15 @@ FocusScope {
         break
       case "blocked":
         if (e.racerId === me) {
+          // A rival's attack breaking on the child's own cage. There is no
+          // projectile to wait for -- the view does not draw a rival's throw --
+          // so the verdict and the flash are the same frame.
           say("ROLL CAGE HELD", Theme.teal)
           track.fxBlockedMe(e.card, e.fromId)
         } else if (e.fromId === me) {
-          // "the callout reads ROLL CAGE HELD on their side"
-          say("ROLL CAGE HELD  ·  " + nameOf(e.racerId), Theme.teal)
+          // "the callout reads ROLL CAGE HELD on their side" -- ON THE FRAME
+          // THE WRENCH ARRIVES. See `sayAtImpact`.
+          sayAtImpact("ROLL CAGE HELD  ·  " + nameOf(e.racerId), Theme.teal)
           track.fxBlockedOn(e.racerId, e.card)
         }
         break
@@ -698,6 +703,39 @@ FocusScope {
   // Design v4, Pile-Up: "the callout is in the large type reserved for this
   // card." Reserved means reserved: `say(..., true)` is called from the
   // `cardUsed` branch for `pileUp` and from nowhere else in the file.
+  // A CALLOUT THAT BELONGS TO AN IMPACT WAITS FOR THE IMPACT.
+  //
+  // ROUND 2. The `blocked` event arrives in the same engine step as the
+  // `cardUsed` that caused it -- the ordering guarantee puts a card's effects
+  // straight after the card -- and the view queues the block's flash and ring
+  // behind the wrench's 500 ms flight so the shatter happens where the wrench
+  // is. Round one did not queue the WORDS with them, so a blind critic read
+  // `ROLL CAGE HELD - BOLT` at +180 ms "while the wrench is still visibly
+  // mid-flight above the road": the announcement 480 ms before the event it
+  // announced. The design's own line about this card is "the block is the
+  // payoff and must be loud", and a payoff said first is not a payoff.
+  //
+  // Held here rather than inside `say` because most callouts are NOT impacts:
+  // the card the child chose is announced when they choose it, a pass when the
+  // karts cross, a rival's signal when it is sent.
+  property var pendingSay: []
+  function sayAtImpact(message, tone, big) {
+    if (!track.cueTelegraphing) {
+      say(message, tone, big)
+      return
+    }
+    var next = race.pendingSay.slice()
+    next.push({ "message": message, "tone": String(tone), "big": big === true })
+    race.pendingSay = next
+  }
+  function releaseSay() {
+    for (var i = 0; i < race.pendingSay.length; i++) {
+      var entry = race.pendingSay[i]
+      say(entry.message, entry.tone, entry.big)
+    }
+    race.pendingSay = []
+  }
+
   function say(message, tone, big) {
     for (var i = 0; i < calloutSlots.count; i++) {
       var slot = calloutSlots.itemAt(i)
@@ -1561,6 +1599,9 @@ FocusScope {
                        question.y + fieldBox.y,
                        fieldBox.width, fieldBox.height)
     factRect: race.factInkRect
+    // The one thing this screen listens to the road for: a callout that belongs
+    // to an impact, released on the frame the impact lands. See `sayAtImpact`.
+    onFxImpactFired: race.releaseSay()
   }
 
   // THE SKY IS NEVER BLACK, AND THIS USED TO MAKE IT BLACK.

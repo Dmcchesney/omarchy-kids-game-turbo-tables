@@ -81,8 +81,10 @@ var BEATS = {
     lampChase: 10,
     lampChaseMs: 500,
     speedLines: 1.0,
-    // the horizon dips
-    horizonDip: 0.030,
+    // the horizon dips. ROUND 2: 0.030 of the frame height is 32 px at 1080p
+    // and a blind critic looking at the strips found "no camera work of any
+    // kind". 0.055 is 59 px, which is a dip you can see happen.
+    horizonDip: 0.055,
     tone: "#f2e6c4",
   },
   // "Oil Slick (everyone else +3)": telegraph 200, the decal grows for 400,

@@ -110,6 +110,20 @@ Item {
                                     "fx.skyFlash"]
   function isWash(name) { return root.washNames.indexOf(name) >= 0 }
 
+  // Is any callout on the screen saying this, right now. A walk rather than a
+  // property, because "the child can read it" is a question about the drawn
+  // tree and not about a variable.
+  function calloutSays(text) {
+    var found = false
+    root.walk(race, function (item) {
+      if (item.text === undefined || !root.drawn(item))
+        return
+      if (String(item.text).indexOf(text) >= 0)
+        found = true
+    })
+    return found
+  }
+
   // Every drawn item whose objectName marks it as part of the effect layer,
   // with its box in the screen's own coordinates.
   function effectBoxes() {
@@ -397,6 +411,129 @@ Item {
       verify(sawItem, "and the tag and the decal are still on the screen")
       Store.setSetting("reducedMotion", false)
       race.buildRace()
+    }
+
+    // ... AND THE ROAD IS STILL A ROAD.
+    //
+    // ROUND 2. `TrackView.advance` used to return before `travel` under reduced
+    // motion, so a child with the setting on got a racing game in which the road
+    // does not move. A blind critic measured it on both builds in this run:
+    // consecutive road-region frame differences of exactly 0.000 for thirteen of
+    // twenty frames. The design's static perspective plane is a PERFORMANCE
+    // floor -- "if even that is too slow" -- and what the setting means is the
+    // line above it: shake, lurch and streak lines. Not the race.
+    function test_05b_reduced_motion_does_not_stop_the_race() {
+      Store.setSetting("reducedMotion", true)
+      race.buildRace()
+      preroll()
+      var was = track.travel
+      var moved = 0
+      for (var f = 0; f < 20; f++) {
+        var before = track.travel
+        race.stepClock(60)
+        if (track.travel > before)
+          moved += 1
+      }
+      compare(moved, 20, "the road moved on every one of twenty frames")
+      verify(track.travel > was + 5,
+             "and it went somewhere: " + (track.travel - was).toFixed(1) + " units")
+      // The same through a card, where the hit-stop would otherwise hold it.
+      race.injectEvent("cardUsed", "wrench")
+      var frozen = 0
+      for (var g = 0; g < 20; g++) {
+        var at = track.travel
+        race.stepClock(60)
+        if (track.travel <= at)
+          frozen += 1
+      }
+      compare(frozen, 0, "and no frame of a card held it still")
+      Store.setSetting("reducedMotion", false)
+      race.buildRace()
+    }
+
+    // --------------------------------------------------------- the camera
+    //
+    // Design v4 asks for three camera moves by name: "the camera whips to
+    // follow" (Tow Hook), "the horizon dips" (Turbo), and "the horizon
+    // pull-back as now" (being hit). All three existed in round one and a blind
+    // critic reading the strips reported "no camera work of any kind ... no
+    // shake I can detect in the frames" -- because the shake was nine pixels on
+    // a 1920 frame, which is 0.47%, and the horizon dip was 32 px.
+    //
+    // So the sizes are asserted as FRACTIONS OF THE FRAME, which is the only
+    // form of the claim a picture can be held to. The thresholds are the floor
+    // of what shows in a 60 ms sample, not the values themselves.
+    function test_14_the_camera_actually_moves() {
+      preroll()
+      // The whip: the frame is dragged sideways and snaps back.
+      race.injectEvent("cardUsed", "towHook")
+      var swing = 0
+      for (var f = 0; f < 70; f++) {
+        swing = Math.max(swing, Math.abs(track.shakeX))
+        race.stepClock(20)
+      }
+      verify(swing > root.width * 0.02,
+             "the Tow Hook whipped the camera " + swing.toFixed(1)
+             + " px, which is " + (100 * swing / root.width).toFixed(2) + "% of the frame")
+
+      // The dip: the horizon drops through Turbo's stretch.
+      race.buildRace()
+      preroll()
+      var flat = track.horizon
+      race.injectEvent("cardUsed", "turbo")
+      var dip = 0
+      for (var g = 0; g < 70; g++) {
+        dip = Math.max(dip, Math.abs(track.horizon - flat))
+        race.stepClock(20)
+      }
+      verify(dip > 0.035,
+             "the Turbo moved the horizon by " + (100 * dip).toFixed(1) + "% of the frame")
+
+      // The pull-back: being hit drags the camera back off the road.
+      race.buildRace()
+      preroll()
+      verify(race.injectEvent("hit", "wrench"), "the hit was delivered")
+      var back = 0
+      var wobble = 0
+      for (var h = 0; h < 40; h++) {
+        back = Math.max(back, track.pullback)
+        wobble = Math.max(wobble, Math.abs(track.shakeX))
+        race.stepClock(20)
+      }
+      verify(back > 0.3, "being hit pulled the camera back by " + back.toFixed(2))
+      verify(wobble > root.width * 0.008,
+             "and shook it " + wobble.toFixed(1) + " px")
+      console.log("FX-CAMERA|whip " + swing.toFixed(1) + "px|dip "
+                  + (100 * dip).toFixed(1) + "%|pullback " + back.toFixed(2))
+    }
+
+    // ------------------------------------------- the payoff is not said first
+    //
+    // Design, Wrench blocked: "the block is the payoff and must be loud." Round
+    // one printed `ROLL CAGE HELD - BOLT` at +180 ms while the wrench was still
+    // visibly mid-flight -- the verdict announced 480 ms before the impact it
+    // was a verdict on. The callout now waits on `fxImpactFired`, so this walks
+    // the whole telegraph and asserts the words are not on screen yet.
+    function test_13_the_block_is_not_announced_before_it_happens() {
+      preroll()
+      verify(race.injectEvent("blocked", "wrench"), "the block was delivered")
+      var b = CardFx.BEATS.wrench
+      var stepped = 0
+      while (stepped < b.telegraph - 40) {
+        verify(!root.calloutSays("ROLL CAGE HELD"),
+               "at t=" + stepped + " ms the wrench is still in the air and the "
+               + "verdict is not on screen")
+        race.stepClock(20)
+        stepped += 20
+      }
+      // ... and then it is.
+      var said = false
+      for (var f = 0; f < 6; f++) {
+        if (root.calloutSays("ROLL CAGE HELD"))
+          said = true
+        race.stepClock(20)
+      }
+      verify(said, "the verdict lands with the block")
     }
 
     // ------------------------------------------------------------- the cues

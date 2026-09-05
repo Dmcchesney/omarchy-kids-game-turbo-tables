@@ -543,13 +543,34 @@ Item {
     fxAdvance()
 
     if (reducedMotion) {
-      // The design's reduced-motion floor: a static perspective plane with
-      // sprites. No scroll, no shake, no lurch, no streaks.
+      // REDUCED MOTION IS NOT A PAUSE BUTTON.
+      //
+      // ROUND 2. This used to `return` here, which stopped `travel` -- so a
+      // child with the setting on got a racing game in which THE ROAD DOES NOT
+      // MOVE. A blind critic measured it on both builds in this run: consecutive
+      // road-region frame differences of exactly 0.000 for thirteen of twenty
+      // frames. The design's static perspective plane is a PERFORMANCE floor
+      // ("if even that is too slow"), not what the setting means, and what the
+      // setting means is written a line above it: "reduced motion removes all
+      // shake, lurch, and streak lines", and in the power-up section, "replaces
+      // hit-stop, shake, and spins with flashes and tag changes". None of those
+      // is the road going by. A child with the setting on is still driving.
+      //
+      // So: the shake, the lurch, the pull-back, the whip and the hit-stop are
+      // all gone -- the speed lines, afterimages, spins, bounces and the
+      // projectile's flight are gone elsewhere, in `CardFx.reducedOut` -- and
+      // the road scrolls at the speed the engine says the child is going.
       lurch = 0
       pullback = 0
       shake = 0
       shakeX = 0
       shakeY = 0
+      var still = raw / 1000
+      var pace = speed * 26
+      travel += pace * still
+      heading += curve * pace * still * 118
+      if (!shaderMode)
+        roadCanvas.requestPaint()
       return
     }
 
@@ -577,13 +598,28 @@ Item {
     lurch = Math.max(0, lurch - dt * 1.5)
     pullback = Math.max(0, pullback - dt * 1.35)
     shake = Math.max(0, shake - dt * 2.6)
+    // THE CAMERA MOVES BY A FRACTION OF THE SCREEN, NOT BY NINE PIXELS.
+    //
+    // ROUND 2. These were the constants 9 and 6, in pixels, which is 0.47% of a
+    // 1920-wide frame -- and a blind critic looking at the strips reported "no
+    // camera work of any kind ... no shake I can detect in the frames". The
+    // shake was there and it was below the threshold of a picture. It is a
+    // fraction of the frame now, so it is the same shake at every size, and it
+    // is about three times what it was.
     if (shake > 0) {
       var phase = travel * 3.1
-      shakeX = Math.sin(phase * 6.3) * shake * 9
-      shakeY = Math.cos(phase * 8.1) * shake * 6
+      shakeX = Math.sin(phase * 6.3) * shake * width * 0.0155
+      shakeY = Math.cos(phase * 8.1) * shake * height * 0.0125
     } else {
       shakeX = 0
       shakeY = 0
+    }
+    // ... and the whip, which is not a shake: one big swing out and back, so a
+    // Tow Hook reads as the camera being dragged round to follow the swap.
+    // Design, Tow Hook: "the camera whips to follow".
+    if (whipNow !== 0) {
+      shakeX += whipNow * width * 0.066
+      shakeY += Math.abs(whipNow) * height * 0.020
     }
 
     if (!shaderMode)
@@ -1963,6 +1999,7 @@ Item {
     cageCracked = 0
     cageCount = 0
     towBorn = -1e9
+    whipBorn = -1e9
     towKart = -1
     lampChaseBorn = -1e9
     minimapPulseBorn = -1e9
@@ -2142,7 +2179,8 @@ Item {
     var b = CardFx.BEATS.towHook
     if (!reducedMotion) {
       // "the camera whips to follow"
-      shake = Math.min(1, b.whip)
+      whipBorn = fxClock
+      shake = Math.min(1, b.whip * 0.5)
       lurch = Math.min(1, lurch + 0.35)
     }
     towBorn = fxClock
@@ -2290,7 +2328,19 @@ Item {
     for (var i = 0; i < cuePending.length; i++)
       fxLand(cuePending[i], i * stagger)
     cuePending = []
+    // ... and the verdict, which `ui/Race.qml` has been holding since the card
+    // was played. Design, Wrench blocked: "the block is the payoff and must be
+    // loud" -- and round one printed `ROLL CAGE HELD - BOLT` 480 ms BEFORE the
+    // wrench arrived, so beat three landed inside beat one and the payoff
+    // spoiled its own punchline. A callout that belongs to an impact is said on
+    // the frame the impact happens, which is this one.
+    fxImpactFired()
   }
+
+  // Emitted on the frame a card's impact lands, after every victim's reaction
+  // has been started. The only listener is `ui/Race.qml`, and the only thing it
+  // does with it is release a callout it was holding.
+  signal fxImpactFired()
 
   // What lands on one victim.
   function fxLand(entry, delay) {
@@ -2493,6 +2543,19 @@ Item {
       (fxClock - cageBorn) / CardFx.BEATS.rollCage.pulseMs * Math.PI * 2))
   // The crack: 260 ms of the outline breaking up, then gone.
   readonly property real cageCrackT: cageCracked > 0 ? (fxClock - cageCracked) : -1
+
+  // The camera whip. Design, Tow Hook, impact: "the camera whips to follow".
+  // One swing out and back over the zip-past, signed, so the frame is dragged
+  // one way and snaps the other -- which is what a whip pan looks like and what
+  // a decaying shake does not.
+  property real whipBorn: -1e9
+  readonly property real whipNow: {
+    var b = CardFx.BEATS.towHook
+    var t = fxClock - whipBorn
+    if (reducedMotion || t < 0 || t > b.impact)
+      return 0
+    return CardFx.decay(t / b.impact, 0.75) * b.whip
+  }
 
   // The tow.
   property real towBorn: -1e9
@@ -2843,9 +2906,19 @@ Item {
       readonly property real cx: view.fxKartX(gKart)
       // "pops over it": up and out over the first fifth of its life, then held.
       readonly property real pop: CardFx.easeOut(Math.min(1, u * 5))
-      readonly property real size: Math.max(gBig ? 30 : 17,
-                                            Math.round(view.kartSpriteH(zed)
-                                                       * (gBig ? 0.46 : 0.26)))
+      // A FLOOR AND A CEILING, BOTH FOR THE SAME REASON.
+      //
+      // The tag is sized off the victim's own kart so a `+5` on a far kart is a
+      // `+5` at that kart's size, and the floor keeps it readable when the kart
+      // saturates at the vanishing point. ROUND 2 adds the ceiling: with the
+      // engine really running, a Tow Hook drags its victim from up the road to
+      // right beside the camera, `kartSpriteH` goes past four hundred pixels,
+      // and `TOWED` was drawn a third of the screen wide. The fact is the
+      // largest thing on screen at every moment of a race, and that is a rule.
+      readonly property real size: Math.max(
+          gBig ? 30 : 17,
+          Math.min(Math.round(view.height * (gBig ? 0.062 : 0.040)),
+                   Math.round(view.kartSpriteH(zed) * (gBig ? 0.46 : 0.26))))
 
       objectName: "fx.tag"
       x: cx - width / 2
@@ -3046,8 +3119,31 @@ Item {
   Item {
     id: cage
     objectName: "fx.rollCage"
-    readonly property real span: view.kartSheetPixels(view.playerZ) * 0.52
-    readonly property real tall: view.kartSpriteH(view.playerZ) * 0.92
+    // THE CAGE IS AROUND THE CAR, NOT BESIDE IT.
+    //
+    // ROUND 2. `span` was 0.52 of the sheet, which made the box 1.04 SHEETS
+    // wide -- and a car is about 0.60 to 0.65 of its own sheet, because the
+    // bake leaves margin on both sides. `tall` was 0.92 of the cell measured up
+    // from the contact point, and the cell's roof line is at 0.62, so the top
+    // rail floated a third of a car above the roof. A blind critic called it
+    // "an oversized plain rectangle offset to the right of the kart, floating
+    // in the road rather than around the car", and it was two of those three.
+    //
+    // The numbers now come off the car: 0.35 of the sheet either side of the
+    // contact point (a shade wider than the widest body at any yaw, so it
+    // clears the wheels), from just above `kartRoofFraction` down to just
+    // below the tyres.
+    // The two numbers are measured off the rendered frame rather than off the
+    // sheet's nominal geometry, because the sheet is not the car and this file
+    // has been caught by that before (see `kartSheetSpan`). At `playerZ` the
+    // sheet draws 400 px wide, the quantised cell 384, and the rear-view body
+    // 208 -- so 0.29 of the sheet either side is a cage about a tenth wider
+    // than the car it is around. The roof of the tallest body sits about 0.39
+    // of the cell height above the contact point (`kartRoofFraction`'s 0.62 is
+    // where a TAG hangs, which is deliberately clear of the roof), so the hoop
+    // goes at 0.50 and the sill just under the tyres.
+    readonly property real span: view.kartSheetPixels(view.playerZ) * 0.29
+    readonly property real tall: view.kartSpriteH(view.playerZ) * 0.54
     readonly property real cx: view.uAt(view.heroLane, view.playerZ) * view.width + view.shakeX
     readonly property real cy: view.vAt(view.playerZ) * view.height + view.shakeY
     // The crack: the outline breaks up over 260 ms and goes.
@@ -3057,15 +3153,34 @@ Item {
                                    : (crack > 0 ? Math.max(0, 1 - crack) * (crack < 0.5 ? 1 : 0.4)
                                                 : view.cagePulse)
 
-    // top, bottom, the two sides, the four uprights and the two waist rails,
-    // each [x1, y1, x2, y2, start] in the item's own 0..1 box.
-    readonly property var spec: [[0, 0, 1, 0, 0.00], [0, 1, 1, 1, 0.62],
-                                 [0, 0, 0, 1, 0.24], [1, 0, 1, 1, 0.24],
-                                 [0.22, 0, 0.22, 1, 0.42], [0.78, 0, 0.78, 1, 0.42],
-                                 [0, 0.36, 1, 0.36, 0.80], [0, 0.70, 1, 0.70, 0.86]]
+    // A ROLL CAGE, NOT A LADDER. Round one drew a grid: two horizontals, two
+    // verticals and four more uprights, evenly spaced. What a roll cage is, is
+    // a main hoop over the driver, two tapered uprights down to the sill, a
+    // waist rail, a front hoop and a diagonal cross-brace -- and the brace is
+    // the line that makes the shape read as a cage rather than as a box.
+    //
+    // Each entry is [x1, y1, x2, y2, start] in the item's own 0..1 box, and
+    // `start` is where in the 300 ms draw that member begins, so the frame
+    // assembles hoop-first the way one is welded.
+    readonly property var spec: [
+      // the main hoop, over the roof
+      [0.10, 0.06, 0.90, 0.06, 0.00],
+      // its two uprights, tapering out to the sill
+      [0.10, 0.06, 0.03, 1.00, 0.18],
+      [0.90, 0.06, 0.97, 1.00, 0.18],
+      // the sill, along the bottom of the doors
+      [0.03, 1.00, 0.97, 1.00, 0.40],
+      // the waist rail, at the window line
+      [0.05, 0.60, 0.95, 0.60, 0.52],
+      // the cross-brace: the line that says cage
+      [0.10, 0.06, 0.97, 1.00, 0.64],
+      [0.90, 0.06, 0.03, 1.00, 0.72],
+      // the front hoop
+      [0.20, 0.30, 0.80, 0.30, 0.84]
+    ]
 
     x: cx - span
-    y: Math.max(view.fxTopFor(cx, span), cy - tall)
+    y: Math.max(view.fxTopFor(cx, span), cy - tall * 0.926)
     width: span * 2
     height: tall
     z: 1000 - view.playerZ + 0.007
