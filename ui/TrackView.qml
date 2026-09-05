@@ -1652,8 +1652,10 @@ Item {
             readonly property real ph: view.reducedMotion
                                        ? (0.16 + index * 0.24)
                                        : (((view.fxClock / 900) + index * 0.25) % 1)
-            readonly property color hot: "#f4e6dd"
-            readonly property color cool: "#5d4453"
+            // The same hot-to-cold ramp as the hood plume above, for the same
+            // reason: the crown has to be a hue the sky is not.
+            readonly property color hot: "#fff1da"
+            readonly property color cool: "#242a4e"
             tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
                           hot.g + (cool.g - hot.g) * ph,
                           hot.b + (cool.b - hot.b) * ph, 1)
@@ -2949,9 +2951,9 @@ Item {
     flashLineGain = 1
   }
   // One flash, with a shape and up to two anchors.
-  function fxShapedFlash(f, peak, anchor, anchor2) {
+  function fxShapedFlash(f, peak, anchor, anchor2, shape) {
     fxWorldFlash(f.tone, peak, f.ms, f.ground, f.over)
-    flashShape = f.shape
+    flashShape = shape === undefined ? f.shape : shape
     flashAnchor = anchor === undefined ? -1 : anchor
     flashAnchor2 = anchor2 === undefined ? -1 : anchor2
     flashRoadNear = f.roadNear === true
@@ -3011,10 +3013,14 @@ Item {
   // `SHAPED_CAP` instead. The argument is written out in `ui/parts/CardFx.js`
   // and the whole-frame consequence of it is measured in the round-5 report.
   function fxFireFlash(f, anchor, anchor2) {
-    var cap = f.shape === "full" ? CardFx.FLASH_CAP : CardFx.SHAPED_CAP
+    // A card may name a different shape for reduced motion, and one does: the
+    // Nitro's whole gesture is movement, so with the setting on it has nothing
+    // left unless the light the design promises as the substitute comes back.
+    var shape = (reducedMotion && f.reducedShape) ? f.reducedShape : f.shape
+    var cap = shape === "full" ? CardFx.FLASH_CAP : CardFx.SHAPED_CAP
     fxShapedFlash(f,
                   reducedMotion ? Math.min(f.peak * 0.66, cap) : f.peak,
-                  anchor, anchor2)
+                  anchor, anchor2, shape)
   }
   // "a 200 ms shake with decay". `shake` decays at 2.6 per second in `advance`,
   // so a shake of 1 is about 380 ms of camera and a shake of 0.5 about 190 --
@@ -3556,7 +3562,23 @@ Item {
       readonly property real zed: !smoking ? view.playerZ
                                   : (isHuman ? view.playerZ
                                              : view.zForDelta(kartProgress - view.humanProgress))
-      readonly property real span: smoking ? view.kartSheetPixels(zed) : 1
+      readonly property real kartPx: smoking ? view.kartSheetPixels(zed) : 1
+      // ROUND 5: A COLUMN OF SMOKE IS NOT THE SIZE OF THE CAR IT CAME OFF.
+      //
+      // Three critics in a row have said the same thing about the one case that
+      // matters most -- a Wrench thrown at the race leader, who is the most
+      // natural target in the game and who is eight pixels tall at the
+      // vanishing point. Whatever hood smoke existed there was sub-pixel, so
+      // the aftermath at distance was "a label, not a beat".
+      //
+      // This is `fxMarkSize` again, the departure round 3 introduced and named
+      // for exactly this, and here it is not even much of a departure: smoke
+      // rises and spreads, and a column off a crashed kart a hundred metres up
+      // the road really is many times the size of the kart. The floor is a
+      // tenth of the frame height, which is 108 px at 1080p -- about the height
+      // of a road sign at that distance, and a shape a child can see. The
+      // VICTIM'S KART is untouched at every distance, as it has been all along.
+      readonly property real span: smoking ? view.fxMarkSize(kartPx, 0.10) : 1
       readonly property real cx: smoking ? view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX : 0
       readonly property real cy: smoking ? view.vAt(zed) * view.height + view.shakeY
                                            - view.kartSpriteH(zed) * view.kartRoofFraction : 0
@@ -3567,7 +3589,7 @@ Item {
       width: span * 0.88
       height: span * 0.86
       z: 1000 - zed + 0.006
-      visible: smoking && zed > view.nearDistance && zed < view.drawDistance && span > 8
+      visible: smoking && zed > view.nearDistance && zed < view.drawDistance && kartPx > 3
 
       Repeater {
         model: hood.smoking ? 4 : 0
@@ -3580,8 +3602,24 @@ Item {
           readonly property real ph: view.reducedMotion
                                      ? (0.14 + index * 0.24)
                                      : (((view.fxClock / 900) + index * 0.25) % 1)
-          readonly property color hot: "#f4e6dd"
-          readonly property color cool: "#5d4453"
+          // ROUND 5: THE CROWN IS COLD, AND THAT IS THE WHOLE POINT.
+          //
+          // "The smoke needs a hue and a value that separate it from BOTH the
+          // tarmac and the sky." This picture is a near-black purple road under
+          // a magenta-to-orange sky, and round 4's ramp ran from a warm cream
+          // to `#5d4453` -- a desaturated purple, which is the hills' own
+          // colour and the road's own family. It separated by value at the base
+          // and by nothing at all at the crown, which is why a critic could
+          // measure it at about 15% contrast and call it "present, not seen".
+          //
+          // The base stays hot cream, which is the tone that wins against black
+          // tarmac. The crown is now a deep INDIGO -- the one hue in this
+          // scene's neighbourhood that is neither the magenta of the sky nor
+          // the purple of the hills, and dark enough to be a silhouette against
+          // a bright sky rather than a smudge in it. So the column reads at both
+          // ends of the picture, and it reads as damage rather than as haze.
+          readonly property color hot: "#fff1da"
+          readonly property color cool: "#242a4e"
           tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
                         hot.g + (cool.g - hot.g) * ph,
                         hot.b + (cool.b - hot.b) * ph, 1)
@@ -3596,7 +3634,10 @@ Item {
           falloff: 1.5
           // Densest just off the hood and thinning as it climbs, but never the
           // near-nothing the old curve gave the top of the column.
-          amount: 0.95 * (1 - ph * 0.66) * Math.min(1, ph * 6)
+          // The crown keeps more of its alpha than it did (0.42 of the base at
+          // the top of the column against 0.34), because a dark crown that is
+          // also transparent is nothing at all.
+          amount: 0.95 * (1 - ph * 0.58) * Math.min(1, ph * 6)
           x: hood.width / 2 - width / 2 + Math.sin(ph * 3.1 + index) * hood.span * 0.09
           y: hood.height - hood.height * ph * 0.88 - height / 2
         }
@@ -3872,12 +3913,21 @@ Item {
   // Nitro: "the sun blooms for 300". A soft disc on the sun's own place in the
   // sky, over the plane rather than inside it, so it is not quantised by the
   // 480 x 270 layer.
-  Puff {
+  //
+  // ROUND 5: A `PointLight` RATHER THAN A `Puff`. Nothing about its place, its
+  // size, its colour or its alpha changed. What changed is how the disc is
+  // built: 670 px of `Puff` at seven rings steps by 0.086 of alpha every 48 px,
+  // and a 3x crop of `nitro-04` showed it as a set of concentric circles round
+  // the sun. One radial gradient has no steps to show. See
+  // `ui/parts/PointLight.qml`.
+  PointLight {
     objectName: "fx.sunBloom"
     visible: view.bloomNow > 0.01
     tone: Theme.duskSun
-    size: view.height * 0.62
+    width: view.height * 0.62
+    height: width
     amount: view.bloomNow * 0.55
+    falloff: 2.0
     readonly property real washAlpha: visible ? amount : 0
     x: view.sunU * view.width - width / 2
     y: view.horizon * view.height - height / 2
@@ -4212,18 +4262,21 @@ Item {
       visible: amount > 0.004 && disc > 4 && height > 1
       readonly property real washAlpha: visible ? amount : 0
 
-      Puff {
+      // `ui/parts/PointLight.qml`, not `Puff`: at this size a stack of rings
+      // draws visible concentric circles, and the block at the top of that file
+      // is the arithmetic for why. The light is positioned at its FULL rect
+      // inside the clipping box, so the clip takes a bite out of the top of it
+      // when the fact is overhead and the light itself never moves.
+      PointLight {
         tone: view.flashTone
-        size: pointFlash.disc
         amount: pointFlash.amount
-        // Fifteen rings and a soft falloff: this is the brightest single puff
-        // in the game and at eleven the steps read as concentric circles, which
-        // is the "modern effect pasted over a retro scene" the rubric warns
-        // about. The falloff is gentler than smoke's because a light spills.
-        rings: 15
-        falloff: 1.7
+        // A strike's light is tighter than a lamp's: most of it is within half
+        // the radius and it is nearly gone at the rim.
+        falloff: 2.1
         x: 0
         y: pointFlash.wantTop - pointFlash.y
+        width: pointFlash.disc
+        height: pointFlash.disc
       }
     }
   }
@@ -4287,12 +4340,13 @@ Item {
   // head -- alone.
   //
   // So the wash is gone from `fxHitMe` and the frame carries the whole beat.
-  // It is deeper (0.24 of the frame against 0.16), stronger (0.86 against
-  // 0.62), and it is genuinely RED-AMBER rather than amber: `HIT.edgeHot` at
-  // the very rim running to `HIT.edgeTone` a third of the way in, so the two
-  // words in the design's sentence are two colours in the picture. Turbo's
-  // telegraph darkening is unchanged in every respect -- same depth, same
-  // strength, same single tone -- and is measured as such in the report.
+  // It is a little deeper (0.20 of the frame against 0.16), a little stronger
+  // (0.66 against 0.62), and it is genuinely RED-AMBER rather than amber:
+  // `HIT.edgeHot` at the very rim running to `HIT.edgeTone` a fifth of the way
+  // in, so the two words in the design's sentence are two colours in the
+  // picture. Turbo's telegraph darkening is unchanged in every respect -- same
+  // depth, same strength, same single tone -- and is measured as such in the
+  // report.
   Item {
     id: edgeFrame
     objectName: "fx.edges"
@@ -4308,8 +4362,8 @@ Item {
     // The rim itself, which is the red half of "red-amber". Turbo's darkening
     // has one tone and keeps it.
     readonly property color rim: hitting ? CardFx.HIT.edgeHot : tone
-    readonly property real amount: Math.max(dark * 0.55, hot * 0.86)
-    readonly property real depth: hitting ? 0.24 : 0.16
+    readonly property real amount: Math.max(dark * 0.55, hot * 0.66)
+    readonly property real depth: hitting ? 0.20 : 0.16
     readonly property real washAlpha: amount
     visible: amount > 0.004
 
@@ -4323,18 +4377,26 @@ Item {
         height: vertical ? edgeFrame.height : Math.round(edgeFrame.height * edgeFrame.depth)
         x: index === 1 ? edgeFrame.width - width : 0
         y: index === 3 ? edgeFrame.height - height : 0
-        // Three stops, not two: the rim colour for the outermost third, the
-        // frame colour through the middle, and transparent where it meets the
-        // picture. `atEnd` is the right or bottom band, whose gradient runs the
-        // other way, so the two positions are mirrored rather than duplicated.
+        // Three stops, not two: the hot rim, the amber frame a fifth of the
+        // way in, and transparent where it meets the picture. `atEnd` is the
+        // right or bottom band, whose gradient runs the other way, so the two
+        // positions are mirrored rather than duplicated.
         readonly property color rimColor: Qt.rgba(edgeFrame.rim.r, edgeFrame.rim.g,
                                                   edgeFrame.rim.b, edgeFrame.amount)
         readonly property color midColor: Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
-                                                  edgeFrame.tone.b, edgeFrame.amount * 0.78)
+                                                  edgeFrame.tone.b, edgeFrame.amount * 0.62)
+        // The middle stop is at a FIFTH of the band, not a third, and it is
+        // 0.62 of the rim rather than 0.78. Round 5's first cut put it at a
+        // third and 0.78 over a band a quarter of the frame deep, and the
+        // result was the full-screen grade again by another route: four bands
+        // that strong meet in the middle and the sky, the hills and the road
+        // all went orange. The light this carries now integrates to about what
+        // round 4's thinner single-tone frame carried, and the measurement is
+        // in the report.
         gradient: Gradient {
           orientation: vertical ? Gradient.Horizontal : Gradient.Vertical
           GradientStop { position: 0.0; color: atEnd ? "transparent" : rimColor }
-          GradientStop { position: atEnd ? 0.66 : 0.34; color: midColor }
+          GradientStop { position: atEnd ? 0.78 : 0.22; color: midColor }
           GradientStop { position: 1.0; color: atEnd ? rimColor : "transparent" }
         }
       }

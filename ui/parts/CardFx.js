@@ -109,14 +109,16 @@
 //            design.
 //   "point"  a round light centred on the kart the event happened to, mostly
 //            painted UNDER the sprites so the victim is a silhouette in it and
-//            not a ghost inside it. The Wrench's clang, the Pothole's thud, the
-//            Nitro's own exhaust (anchored on the child instead of a victim),
-//            and the Roll Cage's block.
+//            not a ghost inside it. The Wrench's clang, the Pothole's thud and
+//            the Roll Cage's block.
 //   "road"   the tarmac only, from the horizon down, near end strongest. The
 //            Oil Slick, whose whole idea is that the ROAD changed -- and the
 //            one card whose light goes DOWN rather than up.
-//   "line"   the tow line itself goes white-hot and thick along its length.
-//            Nothing else in the picture changes.
+//   "line"   the tow line itself goes white-hot and thick along its length,
+//            with a flare at each end. Nothing else in the picture changes.
+//   "none"   no light anywhere. The Roll Cage, which has never had one, and
+//            the Nitro, which is motion: throw, speed lines, sun bloom,
+//            exhaust flare, four lamps chasing.
 //
 // `pointGain` is why a point light may be brighter than the card's full-frame
 // number: a disc of 0.24 of the frame height covers about a sixth of the
@@ -157,17 +159,31 @@ var BEATS = {
     flashPeak: 0.13,
     flashMs: 180,
     impactShake: 0.10,
-    // ROUND 5. Nitro's light is the child's OWN exhaust, so it is a point on
-    // the child's own kart and not a tint of the sky. What the card is is the
-    // motion: the road throws forward, sixteen speed lines come in from the
-    // corners, four lamps chase. In greyscale a Nitro is a frame full of lines
-    // pointing at the horizon with a bright kart at the bottom of them.
-    flashShape: "point",
-    pointGain: 3.4,
-    pointSpan: 1.9,
-    pointFloor: 0.15,
-    // Mostly OVER the sprites: this light is between the camera and the kart
-    // that made it, which is where an exhaust flare actually is.
+    // ROUND 5: MOTION, NOT LIGHT, and that is the work order's own phrase for
+    // this card. A Nitro used to tint the whole frame pale blue for 180 ms.
+    // What it is instead is everything else it already does: the road throws
+    // forward, sixteen speed lines come in from the corners, the sun blooms,
+    // the exhaust flares blue-white off the child's own kart, and four lamps
+    // chase left to right with a tick each. Cover the colour and a Nitro is a
+    // frame full of lines pointing at the horizon. It is the quietest card in
+    // the deck and the one that spends nothing at all on the framebuffer.
+    //
+    // `flashPeak` above is what the loudness ladder orders the deck by and it
+    // is unchanged; `flashShape: "none"` is where that light is spent, which is
+    // nowhere. `tst_cardfx`'s test_08 still reads the ladder.
+    flashShape: "none",
+    // ... EXCEPT WITH REDUCED MOTION ON, WHERE THE MOTION IS THE THING THAT IS
+    // GONE. The design's substitution rule is that the setting "replaces
+    // hit-stop, shake, and spins with FLASHES and tag changes", and a Nitro
+    // whose entire gesture is motion has nothing left once the throw, the speed
+    // lines, the bloom and the exhaust flare are all removed: `test_05c` walked
+    // the deck with the setting on and found this card drawing nothing at all.
+    // So with the setting on it gets back exactly what that sentence promises --
+    // a light, on the child's own kart, small and still.
+    reducedShape: "point",
+    pointGain: 2.4,
+    pointSpan: 1.2,
+    pointFloor: 0.14,
     flashOver: 0.72,
   },
   // "Turbo (skip 10)": telegraph 250, hit-stop 90, aftermath 1200.
@@ -280,9 +296,13 @@ var BEATS = {
     // mostly under the sprites, so the kart is a hard silhouette standing in
     // its own flare instead of a ghost inside a screen-wide tan wash.
     flashShape: "point",
-    pointGain: 3.2,
-    pointSpan: 2.4,
-    pointFloor: 0.20,
+    // 0.26 x 1.9 = 0.49 at the centre of a disc about one and a half karts
+    // across. A wash of 0.26 over two million pixels becomes a light of 0.49
+    // over three hundred thousand, and the second one is a thing that happened
+    // to a kart rather than a thing that happened to the screen.
+    pointGain: 1.9,
+    pointSpan: 1.55,
+    pointFloor: 0.19,
     flashOver: 0.30,
   },
   // "Pothole (one rival +8)": telegraph 350, hit-stop 100, the kart bounces
@@ -309,9 +329,9 @@ var BEATS = {
     // fell into it -- and the camera drops with the kart rather than shaking
     // sideways. See `dropPx`.
     flashShape: "point",
-    pointGain: 3.0,
-    pointSpan: 2.2,
-    pointFloor: 0.19,
+    pointGain: 1.8,
+    pointSpan: 1.45,
+    pointFloor: 0.18,
     flashOver: 0.26,
     // ROUND 5: THE CAMERA FALLS IN TOO. Every other card shakes; this one
     // drops. A downward kick of 1.8% of the frame that recovers in two
@@ -453,8 +473,8 @@ var BEATS = {
     // the room, which is what a bright event at close range actually does to
     // a picture, and it is a quarter of what round 4 put over the whole frame.
     blockShape: "point",
-    blockPointGain: 1.9,
-    blockPointSpan: 3.0,
+    blockPointGain: 1.5,
+    blockPointSpan: 2.1,
     blockPointFloor: 0.30,
     blockOver: 0.58,
     blockShake: 0.55,
@@ -491,9 +511,9 @@ var BEATS = {
     // of its resting two pixels.
     lineGain: 7.0,
     // The flare at each end of it, on the two karts that are trading places.
-    pointGain: 2.2,
-    pointSpan: 1.6,
-    pointFloor: 0.11,
+    pointGain: 1.6,
+    pointSpan: 1.05,
+    pointFloor: 0.10,
     flashOver: 0.62,
   },
 }
@@ -524,7 +544,10 @@ function flashOf(card) {
            span: b.pointSpan === undefined ? 2.2 : b.pointSpan,
            floor: b.pointFloor === undefined ? 0.18 : b.pointFloor,
            lineGain: b.lineGain === undefined ? 1 : b.lineGain,
-           roadNear: b.roadNear === true }
+           roadNear: b.roadNear === true,
+           // What this card's light becomes when reduced motion has taken the
+           // movement away. Only the Nitro needs one; see its row.
+           reducedShape: b.reducedShape === undefined ? "" : b.reducedShape }
 }
 
 // The same, for the Roll Cage's block -- which is not a card being played and
