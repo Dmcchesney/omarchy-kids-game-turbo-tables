@@ -2926,6 +2926,27 @@ Item {
     // hills and the road orange and cost the fact contrast, for no information
     // the frame was not already carrying. The frame is the beat now, and it is
     // deeper, stronger and two-toned to pay for what the grade used to add.
+    //
+    // ROUND 6 -- AND THE SETTING GETS THE FLASH BACK, BECAUSE IT IS THE
+    // SUBSTITUTE AND NOT THE THING SUBSTITUTED.
+    //
+    // Taking the grade off was right with the setting OFF, where the hit-stop,
+    // the 200 ms shake, the pull-back and the bounce all still land and the
+    // frame is one more voice among them. With the setting ON every one of
+    // those is removed, and the design's substitution rule is explicit about
+    // what replaces them: "reduced motion replaces hit-stop, shake, and spins
+    // with FLASHES and tag changes". Round 5 left a child with the setting on a
+    // rim and nothing else -- a blind critic measured the road under it moving
+    // by +2.6/+2.0/+0.2 RGB and called that "nothing", and the work order's
+    // words are that reduced motion should attenuate, not delete.
+    //
+    // So with the setting on, and ONLY then, being hit lights the whole frame
+    // in the same red-amber, at `FLASH_CAP` -- the ceiling that exists for
+    // exactly this, solved in `CardFx.js` against a photosensitive child and
+    // the loudest card in the game. It is a fifth of the alpha round 4's grade
+    // used and it is bounded by the same number that binds the reduced Pile-Up.
+    if (reducedMotion)
+      fxWorldFlash(CardFx.HIT.tone, CardFx.FLASH_CAP, CardFx.HIT.edgeMs, 0, 1)
     if (heroIndex >= 0) {
       // "Your own hood smokes until the effect ends." The floor is the stall
       // the engine reported; Race.qml renews it from the lap requirement.
