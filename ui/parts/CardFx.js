@@ -274,6 +274,16 @@ var BEATS = {
     // pink-white wash, not the specified amber").
     flashTone: "#ffc65e",
     flashPeak: 0.76,
+    // ROUND 4 -- AND THIS IS THE NUMBER THAT ANSWERS "THE WASH ERASES ITS OWN
+    // CRASH". Only 0.24 of the flash is painted over the objects standing in
+    // it; the rest goes under them, so the ROAD still reaches 0.76 amber and
+    // the wreck on it only 0.18. A blind critic measured round three's version
+    // at roughly 85% composite over everything and reported the victim kart,
+    // the tyre stack, the barrels and both tags as "ghosts inside the gold" for
+    // 120 ms. The light is the same size; it now falls ON the crash instead of
+    // over it. See `fx.worldFlash` in ui/TrackView.qml for the arithmetic that
+    // keeps the composite over the road identical.
+    flashOver: 0.24,
     // THE LIGHT OF THE CRASH ON THE TARMAC. A second helping of the same amber,
     // laid from the horizon down and strongest where the wreck is, because a
     // wall of tyres and barrels landing on a road lights the ROAD -- not the
@@ -373,7 +383,13 @@ function flashOf(card) {
   return { tone: b.flashTone ? b.flashTone : b.tone,
            peak: b.flashPeak,
            ms: b.flashMs ? b.flashMs : 180,
-           ground: b.groundBias ? b.groundBias : 0 }
+           ground: b.groundBias ? b.groundBias : 0,
+           // How much of the flash is painted over the world's OBJECTS rather
+           // than under them. 1 is a flat tint over everything, which is right
+           // for a boost -- the light comes from the child's own engine and
+           // there is nowhere in the picture it does not reach -- and is what
+           // every card here but the Pile-Up asks for.
+           over: b.flashOver === undefined ? 1 : b.flashOver }
 }
 function shakeOf(card) {
   var b = BEATS[card]

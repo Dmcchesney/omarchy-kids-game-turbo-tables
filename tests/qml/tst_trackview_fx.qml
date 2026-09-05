@@ -110,7 +110,12 @@ Item {
   // band from the horizon to the bottom of the frame. It is a wash by the same
   // argument, and it is the one that cannot reach the fact at all -- the fact
   // is above the horizon and this band starts there.
-  readonly property var washNames: ["fx.worldFlash", "fx.edges", "fx.sunBloom",
+  // ROUND 4 adds `fx.worldFlashUnder`: the half of the world flash that is
+  // painted BELOW the world's objects, so the Pile-Up's light falls on the
+  // wreck rather than over it. Same rectangle, same alpha law, same argument --
+  // it is inside TrackView and the fact is painted after TrackView.
+  readonly property var washNames: ["fx.worldFlash", "fx.worldFlashUnder",
+                                    "fx.edges", "fx.sunBloom",
                                     "fx.skyFlash", "fx.groundFlash"]
   function isWash(name) { return root.washNames.indexOf(name) >= 0 }
 
@@ -366,7 +371,8 @@ Item {
       // sun, on the sun, which the design asks for by name ("the sun blooms for
       // 300") and which is warm rather than white.
       var tints = 0
-      var names = ["fx.worldFlash", "fx.skyFlash", "fx.edges", "fx.groundFlash"]
+      var names = ["fx.worldFlash", "fx.worldFlashUnder", "fx.skyFlash",
+                   "fx.edges", "fx.groundFlash"]
       for (var n = 0; n < names.length; n++)
         if (byName[names[n]] !== undefined)
           tints = Math.max(tints, byName[names[n]])

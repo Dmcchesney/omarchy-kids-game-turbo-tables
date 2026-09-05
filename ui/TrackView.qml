@@ -2791,16 +2791,27 @@ Item {
   // How much of the same flash is laid on the ground as well, from the horizon
   // down. 0 for every card but the Pile-Up; see `groundBias` in the beat table.
   property real flashGround: 0
-  function fxWorldFlash(tone, peak, ms, groundBias) {
+  // How much of the flash is painted OVER the world's objects. 1 is the whole
+  // of it, which is what every card but the Pile-Up asks for and is exactly the
+  // single rectangle this used to be. See `fx.worldFlash` for the split.
+  property real flashOverBias: 1
+  function fxWorldFlash(tone, peak, ms, groundBias, overBias) {
     flashTone = tone
     flashPeak = peak
     flashMs = ms
     flashGround = groundBias === undefined ? 0 : groundBias
+    flashOverBias = overBias === undefined ? 1 : Math.max(0, Math.min(1, overBias))
     flashBorn = fxClock
   }
   readonly property real flashNow: (fxClock - flashBorn) > flashMs
                                    ? 0
                                    : flashPeak * CardFx.bump(CardFx.phase(fxClock - flashBorn, flashMs))
+  // The two halves of it, split so that the composite over the ROAD is exactly
+  // `flashNow` however the split falls: `1 - (1 - under)(1 - over) = flashNow`.
+  readonly property real flashOver: flashNow * flashOverBias
+  readonly property real flashUnder: flashOver >= 0.999
+                                     ? 0
+                                     : Math.max(0, (flashNow - flashOver) / (1 - flashOver))
 
   // The two lines every card's impact runs, off the loudness ladder in
   // `ui/parts/CardFx.js`. Kept here rather than inline in `fxImpact` so the
@@ -2813,7 +2824,7 @@ Item {
     // Reduced motion keeps the flash -- it is the substitute, not the thing
     // substituted -- but takes a third off it, because a child who has asked
     // for less motion is not asking for a brighter screen.
-    fxWorldFlash(f.tone, reducedMotion ? f.peak * 0.66 : f.peak, f.ms, f.ground)
+    fxWorldFlash(f.tone, reducedMotion ? f.peak * 0.66 : f.peak, f.ms, f.ground, f.over)
   }
   // "a 200 ms shake with decay". `shake` decays at 2.6 per second in `advance`,
   // so a shake of 1 is about 380 ms of camera and a shake of 0.5 about 190 --
@@ -3628,6 +3639,38 @@ Item {
   // are inside TrackView, which ui/Race.qml declares BEFORE the fact and the
   // field, so both are drawn over these however bright they get. The flash's
   // own peak is 0.78 for one white frame and 0.30 or less for everything else.
+  // ROUND 4 -- THE FLASH REVEALS THE WRECK, IT DOES NOT REPLACE IT.
+  //
+  // A blind critic on round three: "the loudest beat in the game erases the
+  // event it is announcing." `A/frames/pileup/11.png` is a full-frame amber
+  // fill at roughly 85% composite, and "the victim kart, the tyre stack, the
+  // barrels, the `+15` tag and the `BOLT +15` tag are all ghosts inside the
+  // gold." That is right, and the design's own words are the fix: "ONE FRAME OF
+  // COLOUR OVER THE ROAD LAYER". Over the road layer -- not over the crash on
+  // it.
+  //
+  // So the flash is two rectangles now, and `flashOver` in the beat table says
+  // how much of it is painted ABOVE the world's objects:
+  //
+  //   fx.worldFlash       z 2600, `flashNow * flashOver` -- the light TOUCHING
+  //                       the karts, the debris, the rings and the tags
+  //   fx.worldFlashUnder  z 800, above the road plane and the streak lines,
+  //                       below every sprite in the 1000-z band -- the light ON
+  //                       the world behind them
+  //
+  // The under-layer carries exactly what the over-layer left, so the COMPOSITE
+  // over the road is `flashNow` to the last decimal:
+  //
+  //     under = (flashNow - over) / (1 - over)
+  //
+  // At `flashOver: 1` -- which is every card but the Pile-Up -- `over` is the
+  // whole flash, `under` is zero and the item is not drawn: seven of the eight
+  // cards render exactly as they did, and the strips prove it. The Pile-Up
+  // takes 0.24, so the road still goes to 0.76 amber and the wreck standing on
+  // it only to 0.18. The whole-frame amplitude barely moves, because the karts
+  // and the debris are a few per cent of the pixels and the road and sky are
+  // the rest -- but the thing the flash is about is now the one solid shape in
+  // a blazing frame instead of a ghost inside it.
   Rectangle {
     objectName: "fx.worldFlash"
     anchors.fill: parent
@@ -3642,7 +3685,7 @@ Item {
     // says amber, twice, and a blind critic measured "a whole-screen
     // desaturating wash, not an amber sky". It has its own item below now, it
     // is amber, and it is the sky.
-    opacity: view.flashNow
+    opacity: view.flashOver
     // THE ALPHA THE PIXEL ACTUALLY GETS, published for the test.
     //
     // Three of the four washes are containers whose CHILDREN carry the paint --
@@ -3651,6 +3694,17 @@ Item {
     // and says nothing. `washAlpha` is each wash's own strongest paint, so
     // `tst_trackview_fx.qml` can bound what the fact has to be read against
     // rather than bounding a number that was always one.
+    readonly property real washAlpha: opacity
+  }
+
+  // The rest of the same flash, under the world's objects. See the block above.
+  Rectangle {
+    objectName: "fx.worldFlashUnder"
+    anchors.fill: parent
+    z: 800
+    color: view.flashTone
+    opacity: view.flashUnder
+    visible: opacity > 0.004
     readonly property real washAlpha: opacity
   }
 
@@ -3683,7 +3737,12 @@ Item {
     y: bandTop
     width: view.width
     height: Math.max(0, view.height - bandTop)
-    z: 2599
+    // ROUND 4: BELOW THE THINGS STANDING ON THE TARMAC. This is the light a
+    // wall of tyres and barrels throws DOWN on the road, and light on a road
+    // does not paint over the wreck that made it. Above the plane, below every
+    // sprite in the 1000-z band, so the composite on the tarmac is exactly what
+    // it was and the wreck is a silhouette in it rather than a ghost.
+    z: 799
     readonly property real washAlpha: view.flashNow * view.flashGround
     visible: washAlpha > 0.004 && height > 1
     gradient: Gradient {
