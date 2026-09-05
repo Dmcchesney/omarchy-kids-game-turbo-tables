@@ -1648,7 +1648,7 @@ Item {
         Repeater {
           model: chaser.smoking ? 4 : 0
 
-          Puff {
+          PointLight {
             readonly property real ph: view.reducedMotion
                                        ? (0.16 + index * 0.24)
                                        : (((view.fxClock / 900) + index * 0.25) % 1)
@@ -1659,8 +1659,8 @@ Item {
             tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
                           hot.g + (cool.g - hot.g) * ph,
                           hot.b + (cool.b - hot.b) * ph, 1)
-            size: chaser.height * (0.95 + ph * 1.05)
-            rings: 11
+            width: chaser.height * (0.95 + ph * 1.05)
+            height: width
             falloff: 1.35
             amount: 0.95 * (1 - ph * 0.55) * Math.min(1, ph * 3.4)
             x: parent.width * 0.42 - width / 2
@@ -3594,7 +3594,14 @@ Item {
       Repeater {
         model: hood.smoking ? 4 : 0
 
-        Puff {
+        // ROUND 5: `PointLight`, NOT `Puff`, AND FOR THE REASON THE ROUND KEEPS
+        // FINDING. A puff is a stack of concentric discs and the step between
+        // two of them is `amount * falloff / rings` whatever the diameter -- so
+        // at the 0.95 this plume needs and the 400 px the CHILD'S OWN kart draws
+        // it at, eleven rings step by 0.13 every eighteen pixels, and a 1:1 crop
+        // of `hit-wrench-14` shows the smoke as a bullseye. One radial gradient
+        // has no steps in it at any size. See `ui/parts/PointLight.qml`.
+        PointLight {
           // Under reduced motion the plume is still: the same puffs at a fixed
           // phase, so the victim is still visibly smoking and nothing moves.
           // That is the design's "flashes and tag changes" rule applied to a
@@ -3623,14 +3630,8 @@ Item {
           tone: Qt.rgba(hot.r + (cool.r - hot.r) * ph,
                         hot.g + (cool.g - hot.g) * ph,
                         hot.b + (cool.b - hot.b) * ph, 1)
-          size: hood.span * (0.26 + ph * 0.42)
-          // Eleven rings, not the default seven. A puff is a stack of discs
-          // whose alphas sum to a smooth falloff, and seven of them is plenty
-          // at the 0.3 alpha a dust burst uses -- at the 0.95 this plume needs
-          // the steps between them show as concentric circles, which is exactly
-          // the "modern UI effect pasted over a retro scene" the rubric warns
-          // about. Eleven is where they stop reading as rings.
-          rings: 11
+          width: hood.span * (0.26 + ph * 0.42)
+          height: width
           falloff: 1.5
           // Densest just off the hood and thinning as it climbs, but never the
           // near-nothing the old curve gave the top of the column.
