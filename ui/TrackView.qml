@@ -2398,22 +2398,32 @@ Item {
           // starts at the bumper". This is that: three depths over 3.9 units,
           // about a car's width at the nose and half of it at the end, at half
           // the strength. Six quads instead of fourteen.
-          model: beam.visible ? 6 : 0
+          model: beam.visible ? 5 : 0
 
           Rectangle {
-            readonly property int tier: index % 2
-            readonly property real t: Math.floor(index / 2) / 2
-            readonly property real zHere: slot.zed + 0.35 + t * 3.55
+            readonly property real t: index / 5
+            readonly property real zHere: slot.zed + 0.30 + t * 4.0
             readonly property real px: Math.max(1, view.fxPixel)
             // The pool spreads a little in WORLD units and shrinks a lot in
             // SCREEN units, which is what a beam does: the light goes further
             // out the further it travels, and the perspective takes more back
             // than the spread gives. So it converges on the road ahead instead
             // of being a rectangle laid over the lane.
-            readonly property real half: view.sizeAt(
-                view.roadHalf * (tier === 0 ? 0.17 + t * 0.13 : 0.075 + t * 0.06), zHere)
+            // ONE TIER AND A CONSTANT WORLD WIDTH, WHICH IS WHAT MAKES IT
+            // TAPER. Round 3's first cut kept the old shape -- a wide dim slab
+            // with a narrow bright one inside it, and a world half-width that
+            // GREW with depth at about the rate perspective shrank it -- so
+            // the union was two nested rectangles with hard edges, which is
+            // the same defect at a quarter of the size. A fixed 0.22 of the
+            // road's half-width lets the projection do the narrowing on its
+            // own, and one tier per depth means no nested edge to see.
+            readonly property real half: view.sizeAt(view.roadHalf * 0.22, zHere)
+            // Deep enough to reach the next slab's top row, so the five of
+            // them tile into one pool rather than stacking as five bars.
+            readonly property real deep: view.vAt(Math.max(0.2, zHere))
+                                         - view.vAt(Math.max(0.2, zHere + 0.80))
             width: Math.max(px, Math.round(half * 2 / px) * px)
-            height: Math.max(px, Math.round(view.sizeAt(1.1, zHere) * 0.62 / px) * px)
+            height: Math.max(px, Math.round(deep * view.height * 1.15 / px) * px)
             x: Math.round((view.uAt(view.laneOf(kartSeat), zHere) * view.width
                            + view.shakeX - slot.x - width / 2) / px) * px
             y: Math.round((view.vAt(zHere) * view.height + view.shakeY - slot.y
@@ -2427,11 +2437,10 @@ Item {
             // the tone is lifted toward the sun's own core and the strength is
             // most of double, and the pool now starts half a metre off the nose
             // rather than a car's length up the road.
-            color: tier === 0 ? "#f7b45c" : "#ffe6bc"
+            color: "#ffdcae"
             // Brightest a car's length ahead, gone by the end of the throw: a
             // pool with a hard bright edge at both ends is a decal, not a light.
-            opacity: (tier === 0 ? 0.085 : 0.15)
-                     * Math.min(1, t * 5 + 0.35) * (1 - t) * (1 - t * 0.4)
+            opacity: 0.155 * Math.min(1, t * 6 + 0.30) * (1 - t) * (1 - t * 0.45)
             antialiasing: false
           }
         }

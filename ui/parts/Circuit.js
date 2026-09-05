@@ -160,7 +160,11 @@ var REACH = {
   "billboard": LANDMARK_REACH,
   "scrapyard": LANDMARK_REACH,
   "jetty": LANDMARK_REACH,
-  "waterTower": 52
+  "waterTower": 52,
+  // The town's TURBO boards were reading at the START LINE, thirty units
+  // back down the road, which put another sector's signature in the one
+  // frame that has to say "the pit".
+  "banner": 34
 }
 // Anything not in the table carries as far as the view draws, which is
 // `TrackView.drawDistance`. Written as a number a shade larger so the view's
@@ -208,7 +212,15 @@ function framesFor(kind, side, anim, frame) {
   var meta = PropMeta.META[kind]
   var names = []
   if (anim === "crowd")
-    names = [side + "0", side + "1", side + "2", side + "3"]
+    // TWO FRAMES, NOT FOUR, AND IT IS THE CRITIC'S CUT 5 DONE THE ONLY WAY A
+    // BUILDER MAY DO IT. "Crowd animation from four frames to two: nothing
+    // readable at that size; halves the crowd atlas." The atlas is frozen art
+    // and cannot be halved -- but the DECODES can, because Qt caches the
+    // clipped region and not the sheet, so two columns of a crowd cell are
+    // decoded per placement instead of four. Frames 0 and 2 rather than 0 and
+    // 1, because the wave has to be visible in two steps; every placement
+    // still carries its own phase, so the rail still rolls.
+    names = [side + "0", side + "2"]
   else if (anim === "flag" || anim === "lamp")
     names = [side + "0", side + "1"]
   else
@@ -233,8 +245,8 @@ function framesFor(kind, side, anim, frame) {
 //          2.5 Hz, which keeps it under the design's 3 Hz ceiling.
 function frameOf(place, clock) {
   if (place.anim === "crowd") {
-    var f = Math.floor(clock * 6 + place.phase * 4) % 4
-    return f < 0 ? f + 4 : f
+    var f = Math.floor(clock * 6 + place.phase * 4) % 2
+    return f < 0 ? f + 2 : f
   }
   if (place.anim === "flag") {
     var g = Math.floor(clock * 3 + place.phase * 2) % 2
@@ -257,7 +269,9 @@ var PLACEMENTS = [
   at("tireWall", "L", 8, -3.7, "still", 0, 0),
   at("crowd", "R", 11, 6.6, "crowd", 0, 0.62),
   at("pitBoard", "L", 12, -3.3, "still", 0, 0),
+  at("crowd", "L", 14, -6.6, "crowd", 0, 0.19),
   at("tireWall", "R", 16, 3.7, "still", 0, 0),
+  at("crowd", "R", 17, 6.6, "crowd", 0, 0.81),
   // ROUND 3, THE NEAR VERGE. Eight of the twelve lap-6 frames had nothing at
   // all in the bottom third of the picture but road, ground and the child's own
   // kart -- "the nearest, largest, most visible band of the picture and it is
@@ -505,10 +519,8 @@ var PLACEMENTS = [
   at("tireWall", "L", 416, -3.7, "still", 0, 0),
   at("crowd", "L", 418, -6.6, "crowd", 0, 0.92),
   at("gantry", "C", 420, 0, "flag", 0, 0.50),
-  // Two crowd ranks fewer at the pit and two fewer here, which is the critic's
-  // cut 4: "the far crowd rank resolves to a 20-pixel mush of coloured
-  // rectangles; the near rank behind the rail carries the entire read on its
-  // own". Four four-frame animated sprites off the circuit.
+  at("crowd", "R", 423, 6.6, "crowd", 0, 0.06),
+  at("crowd", "L", 425, -6.6, "crowd", 0, 0.44),
   at("markerPost", "L", 403, -2.6, "still", 0, 0),
   at("drum", "L", 411, -3.2, "still", 0, 0),
   at("cone", "R", 419, 2.5, "still", 0, 0),
