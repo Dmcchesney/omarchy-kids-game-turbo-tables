@@ -4434,7 +4434,19 @@ Item {
     // The rim itself, which is the red half of "red-amber". Turbo's darkening
     // has one tone and keeps it.
     readonly property color rim: hitting ? CardFx.HIT.edgeHot : tone
-    readonly property real amount: Math.max(dark * 0.55, hot * 0.66)
+    // ROUND 5, AND IT IS THE ROUND-4 FINDING TURNED ON THIS ROUND'S OWN WORK.
+    //
+    // A blind critic's sharpest line about the losing build was that its
+    // reduced-motion path was not reduced: being hit measured 86 against a
+    // normal 89, "a 3% attenuation, i.e. none". Taking the full-screen grade off
+    // being hit and giving the whole beat to the frame reproduced exactly that
+    // shape here -- reduced 89.1 against a normal 90.1 -- because the frame was
+    // the one part of the beat the setting never touched. It touches it now: the
+    // frame is 0.40 rather than 0.66 with the setting on, which is about a
+    // 60% attenuation of the light and leaves every word, lamp, tag and plume of
+    // the event exactly where it was.
+    readonly property real amount: Math.max(dark * 0.55,
+                                            hot * (view.reducedMotion ? 0.40 : 0.66))
     readonly property real depth: hitting ? 0.20 : 0.16
     readonly property real washAlpha: amount
     visible: amount > 0.004
