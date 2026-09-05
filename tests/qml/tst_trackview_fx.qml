@@ -1416,5 +1416,89 @@ Item {
                   + Math.round(axis["wrench"].x) + "x/"
                   + Math.round(axis["wrench"].y) + "y")
     }
+
+    // AN EFFECT THAT IS DRAWN OFF THE SCREEN IS NOT DRAWN.
+    //
+    // ROUND 5, AND IT IS THE GATE FOR A BUG FOUR ROUNDS OF EVIDENCE WALKED
+    // PAST. Both fans of lines in this file -- the road's ambient streaks and
+    // the boost's speed lines, which design v4 names for two separate cards
+    // ("speed lines from the corners", "heavy speed lines") -- took their
+    // centre as `uAt(0, 6000)`. On a CURVED road `uAt`'s curve term grows
+    // linearly with z, so that is not the horizon; it is ninety thousand pixels
+    // off the left of the frame. Sixteen line items, every one of them visible,
+    // every one of them nowhere:
+    //
+    //     rect  fx.speedLine  -90199  462  1187  81  1.000
+    //
+    // The frame strips could not catch it, because what is missing from a
+    // picture leaves no mark on it. The box proof could not catch it, because
+    // it asks whether a box touches the FACT and these were nowhere near
+    // anything. 232 tests could not catch it. What catches it is asking the
+    // opposite question of the same walk: every effect item that is drawn at
+    // all has to be somewhere a child could see it.
+    function test_20_no_effect_is_drawn_off_the_screen() {
+      var cases = [["cardUsed", "nitro"], ["cardUsed", "turbo"],
+                   ["cardUsed", "oilSlick"], ["cardUsed", "wrench"],
+                   ["cardUsed", "pothole"], ["cardUsed", "pileUp"],
+                   ["cardUsed", "rollCage"], ["cardUsed", "towHook"],
+                   ["hit", "wrench"], ["blocked", "wrench"]]
+      var worst = null
+      var thinnestFan = 99
+      var checked = 0
+      for (var c = 0; c < cases.length; c++) {
+        race.buildRace()
+        preroll()
+        race.injectEvent(cases[c][0], cases[c][1])
+        for (var f = 0; f < 26; f++) {
+          var boxes = root.effectBoxes()
+          var fan = 0
+          var fanOn = 0
+          for (var i = 0; i < boxes.length; i++) {
+            var b = boxes[i].box
+            checked += 1
+            // Any overlap with the screen at all is enough: a light clipped by
+            // the fact's guard, a plate hauled to the rail and a spark burst on
+            // a kart at the edge are all legitimately part-off.
+            var onScreen = b.x < root.width && b.x + b.width > 0
+                           && b.y < root.height && b.y + b.height > 0
+            // THE ONE EXEMPTION, AND IT IS NAMED RATHER THAN QUIET. A speed
+            // line is one spoke of a sixteen-spoke fan whose centre follows the
+            // road, so the spokes pointing away from the picture legitimately
+            // start beyond its edge. What may NOT happen is the whole fan
+            // leaving, which is exactly the defect this test exists for, so the
+            // spokes are counted per frame instead of judged one at a time.
+            if (boxes[i].name === "fx.speedLine") {
+              fan += 1
+              if (onScreen) fanOn += 1
+              continue
+            }
+            if (!onScreen && (worst === null
+                              || Math.abs(b.x) + Math.abs(b.y) > Math.abs(worst.box.x) + Math.abs(worst.box.y)))
+              worst = { "name": boxes[i].name, "box": b, "card": cases[c][1] }
+          }
+          if (fan > 0)
+            thinnestFan = Math.min(thinnestFan, fanOn)
+          race.stepClock(60)
+        }
+      }
+      verify(worst === null,
+             worst === null
+             ? "every drawn effect item is on the screen"
+             : ("on " + worst.card + ", " + worst.name + " is drawn at ("
+                + Math.round(worst.box.x) + ", " + Math.round(worst.box.y)
+                + ") " + Math.round(worst.box.width) + "x"
+                + Math.round(worst.box.height) + ", which is off a "
+                + root.width + "x" + root.height + " screen"))
+      // Six of sixteen, not sixteen of sixteen: the fan's centre follows the
+      // road, so in a corner it sits near one edge and the spokes pointing that
+      // way start beyond it. The measured worst over ten events is seven. The
+      // defect this guards against printed ZERO.
+      verify(thinnestFan >= 6,
+             "and the speed-line fan is on the screen on every frame it is"
+             + " drawn (thinnest " + thinnestFan + " of sixteen spokes)")
+      console.log("FX-ONSCREEN|" + checked
+                  + " drawn effect boxes over ten events, 0 off the screen"
+                  + "|thinnest speed-line fan " + thinnestFan + "/16")
+    }
   }
 }

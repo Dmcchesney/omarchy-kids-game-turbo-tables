@@ -292,6 +292,39 @@ Item {
     return worldWidth * focal * height / (2 * Math.max(0.05, z))
   }
 
+  // ------------------------------------- WHERE THE ROAD RUNS AWAY TO
+  //
+  // ROUND 5 OF PIECE F, AND IT IS A BUG THAT HAS BEEN HIDING IN PLAIN SIGHT.
+  //
+  // Two fans of lines are drawn from "the vanishing point": the road's own
+  // ambient streaks (`streaks`, z 5) and the boost's speed lines (`boostLines`,
+  // z 2400 -- design v4, Nitro: "speed lines FROM THE CORNERS", Turbo: "heavy
+  // speed lines"). Both took that point as `uAt(0, 6000)`.
+  //
+  // `uAt(x, z)` is `0.5 + ((x + curve*z*z) * focal) / (z * 2 * aspect)`, so the
+  // curve term grows LINEARLY WITH z: `curve * z * focal / (2 * aspect)`. There
+  // is no vanishing point on a curved road -- the road turns away and never
+  // converges. At z = 6000 the answer is not "the horizon", it is about ninety
+  // THOUSAND pixels off the left of the screen, and `--dump-rects` says so:
+  //
+  //     rect  fx.speedLine  -90199  462  1187  81  1.000
+  //
+  // Sixteen line items, every one of them "drawn", every one of them ninety
+  // thousand pixels away. Rendering the same frame with the whole fan disabled,
+  // and again with every line forced to twelve-pixel opaque RED, gives a mean
+  // absolute difference over the whole 1920x1080 frame of 0.000 in both cases.
+  // The speed lines have never been on the screen, and neither have the road's
+  // ambient streaks.
+  //
+  // The honest anchor is where the road actually leaves the picture: its centre
+  // line at the far draw distance, clamped inside the frame so a hard corner
+  // cannot throw the fan out of shot again. On a straight it is the middle of
+  // the road at the horizon, which is what "the vanishing point" meant all
+  // along; in a corner it leans the way the road leans.
+  readonly property real fanU: Math.max(0.10, Math.min(0.90, uAt(0, drawDistance)))
+  readonly property real fanX: fanU * width + shakeX
+  readonly property real fanY: horizon * height + shakeY
+
   // How wide a kart's SHEET is drawn at depth z: the kart at true perspective
   // scale, floored so it never falls below `kartMinPixels` of actual kart.
   function kartSheetPixels(z) {
@@ -955,8 +988,8 @@ Item {
     opacity: Math.max(0, Math.min(0.42, (view.speed - 0.12) * 0.45 + view.lurch * 0.55))
     z: 5
 
-    readonly property real vx: view.uAt(0, 6000) * view.width + view.shakeX
-    readonly property real vy: view.horizon * view.height + view.shakeY
+    readonly property real vx: view.fanX
+    readonly property real vy: view.fanY
 
     Repeater {
       model: 14
@@ -1895,6 +1928,24 @@ Item {
     return vAt(fxKartZ(i)) * height + shakeY
   }
   function fxKartSpan(i) { return kartSheetPixels(fxKartZ(i)) }
+
+  // IS THIS KART SOMEWHERE THE PROJECTION CAN HONESTLY DRAW IT.
+  //
+  // ROUND 5. `uAt(x, z)` divides by `Math.max(0.05, z)` but its curve term is
+  // `curve * z * z` in the numerator, so for a kart BEHIND the camera -- which
+  // is where every attacked rival goes, because a Pile-Up sends them fifteen
+  // questions back in about a quarter of a second -- it returns a screen x in
+  // the tens of thousands. `test_20` caught the Pile-Up's dust wall being drawn
+  // at (149046, 23148).
+  //
+  // The hood plume has had this gate since round 3 and says why: a rival the
+  // camera is in front of has no place on this road, and their news travels on
+  // the chaser rail instead. The ring says so in a comment and never checked
+  // it. Everything anchored purely in world space checks it here now.
+  function fxKartOnRoad(i) {
+    var z = fxKartZ(i)
+    return z > nearDistance && z < drawDistance
+  }
   function kartModelSeat(i) {
     return (i >= 0 && i < kartModel.count) ? kartModel.get(i).kartSeat : 0
   }
@@ -3271,8 +3322,17 @@ Item {
       // Culled a little further out than the karts are: a road decal at the
       // near limit is drawn thousands of pixels wide, almost all of it off the
       // frame, and it has already passed under the camera by then.
+      // ROUND 5 adds the last clause: a decal that has scrolled under the
+      // camera is still inside the z cull for a frame or two while its whole
+      // box sits below the bottom of the screen. Nothing was wrong with the
+      // picture -- it is a draw nobody could see -- but `test_20` holds the
+      // whole effect layer to "if it is drawn, it is somewhere a child could
+      // see it", and an exception here would be an exception in the gate that
+      // found the speed lines.
       visible: zed > view.nearDistance + 0.55 && zed < view.drawDistance && px > 2
                && sprite.amount > 0.01
+               && y < view.height && y + height > 0
+               && x < view.width && x + width > 0
 
       EffectSprite {
         id: sprite
@@ -3339,7 +3399,12 @@ Item {
       width: Math.max(1, px)
       height: Math.max(1, px)
       z: 1000 - zed + 0.5
+      // The last two clauses are round 5's, for the reason written at the
+      // decal above: a hubcap that has rolled to the verge and past the camera
+      // is inside the z cull with its whole box off the bottom-left corner.
       visible: zed > view.nearDistance && zed < view.drawDistance && px > 2 && u < 1
+               && y < view.height && y + height > 0
+               && x < view.width && x + width > 0
 
       EffectSprite {
         objectName: "fx.flyerArt." + yKind
@@ -3419,7 +3484,7 @@ Item {
       width: Math.max(1, d)
       height: Math.max(1, d)
       z: 1000 - view.fxKartZ(pKart) + 0.004
-      visible: age >= 0 && u < 1 && d > 1
+      visible: age >= 0 && u < 1 && d > 1 && view.fxKartOnRoad(pKart)
 
       Puff {
         anchors.centerIn: parent
@@ -3457,8 +3522,9 @@ Item {
       z: 1000 - zed + 0.006
       // A ring is a mark ON THE ROAD at the victim's place, so it is drawn only
       // where the victim is: a rival the camera is in front of has no place on
-      // this road, and their news travels on the chaser rail instead.
-      visible: age >= 0 && u < 1 && d > 2
+      // this road, and their news travels on the chaser rail instead. ROUND 5:
+      // and the check the sentence describes is now actually made.
+      visible: age >= 0 && u < 1 && d > 2 && view.fxKartOnRoad(rKart)
                && zed > view.nearDistance && zed < view.drawDistance
 
       Rectangle {
@@ -3493,7 +3559,7 @@ Item {
       width: sReach * 2
       height: sReach * 2
       z: 1000 - view.fxKartZ(sKart) + 0.005
-      visible: age >= 0 && u < 1
+      visible: age >= 0 && u < 1 && view.fxKartOnRoad(sKart)
 
       Sparks {
         x: parent.width / 2
@@ -3683,7 +3749,12 @@ Item {
       width: tagText.implicitWidth + 14
       height: tagText.implicitHeight + 8
       z: 1990
-      visible: age >= 0 && u < 1 && view.fxKartZ(gKart) < view.drawDistance
+      // ROUND 5: and not behind the camera either. `fxKartOnRoad` -- the far
+      // gate this line already had, plus the near one it did not, which is the
+      // one every attacked rival crosses within about a quarter of a second.
+      // The victim's news carries on from there on the chaser rail, which is
+      // what round 4 built the rail smoke and the edge marker for.
+      visible: age >= 0 && u < 1 && view.fxKartOnRoad(gKart)
       opacity: Math.min(1, (1 - u) * 3.2)
       scale: 0.7 + pop * 0.3
 
@@ -3870,8 +3941,8 @@ Item {
     readonly property real washAlpha: visible ? view.boostNow * 0.80 : 0
     z: 2400
 
-    readonly property real vx: view.uAt(0, 6000) * view.width + view.shakeX
-    readonly property real vy: view.horizon * view.height + view.shakeY
+    readonly property real vx: view.fanX
+    readonly property real vy: view.fanY
 
     Repeater {
       model: boostLines.visible ? 16 : 0
