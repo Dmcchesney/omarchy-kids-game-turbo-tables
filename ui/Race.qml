@@ -2025,7 +2025,22 @@ FocusScope {
     // 1.5x, and above the resting figure at 3x. The rule the design writes is
     // that the fact is the most legible thing on screen at every moment; a
     // number that goes DOWN during the loudest 120 ms of the game fails it.
-    opacity: Math.max(track.factYield * 0.86, Math.min(0.92, wash * 3.0))
+    // PIECE F ROUND 6 -- AND THE HORIZON IS THE OTHER THING THAT GETS BEHIND
+    // THE FACT.
+    //
+    // The plate came up for a road-spanning prop and for a full-frame wash, and
+    // those were the two things anybody had measured. A Turbo dips the horizon
+    // by 0.055 of the frame for 400 ms, which lifts the bright half of the sky
+    // into the fact's own box for four times as long as its white frame lasts;
+    // round 6's hit-stop pushed the recovery two strip frames later and the
+    // measurement found the fact at 2.93 : 1 on `turbo` f08, under the 3.07
+    // floor this corpus has held since round two, with the plate at zero. The
+    // dip is a disturbance behind the fact exactly as a gantry is, so the plate
+    // answers it for as long as it lasts. `stretchNow` is Turbo's alone: every
+    // other card reads zero here and nothing about them changes.
+    opacity: Math.max(track.factYield * 0.86,
+                      Math.min(0.92, wash * 3.0),
+                      track.stretchNow * 0.62)
     x: race.factInkRect.x - race.px(22)
     y: race.factInkRect.y - race.px(14)
     width: race.factInkRect.width + race.px(44)
