@@ -67,19 +67,27 @@ import "../ui/parts"
 //
 // ------------------------------------------------------------------ PIECE F
 //
-//   --inject <e>[:<a>]  deliver ONE engine-shaped event, or the short sequence
-//                       the engine's ordering guarantee puts with it, to the
-//                       loaded screen. The screen's own `injectEvent(kind, arg)`
-//                       builds it to the shapes in src/engine/events.ts and
-//                       pushes it through the same `handleEvents` funnel a real
-//                       event goes through; the engine is NOT stepped, so this
-//                       is a probe of the view and not of the rules. Events:
+//   --inject <e>[:<a>]  put the loaded screen into the situation a strip is
+//                       about and let THE REAL RULES run. The screen's own
+//                       `injectEvent(kind, arg)` seeds the hand the strip is
+//                       about to spend and then calls `Engine.step` with
+//                       `useCard`, exactly as the child's Enter key does, so
+//                       every event the strip reacts to is the engine's own.
+//                       ROUND 2 CHANGED THIS: it used to synthesise the event
+//                       and skip the engine, which made every strip evidence
+//                       about the view rather than about the game. Events:
 //
 //                         --inject cardUsed:wrench    the child plays a card
-//                         --inject hit:pothole        the child is hit by one
-//                         --inject blocked:wrench     a rival's cage holds
-//                         --inject swap               a Tow Hook lands
-//                         --inject handDealt          a hand arrives
+//                         --inject hit:pothole        a rival plays one at the
+//                                                     child (the rival is the
+//                                                     actor; the engine writes
+//                                                     the stall and the lamps)
+//                         --inject blocked:wrench     the target is given a
+//                                                     Roll Cage first, so the
+//                                                     RULES emit the block
+//                         --inject swap               a Tow Hook, played
+//                         --inject handDealt          answer the twelfth in a
+//                                                     row (needs --warmup 11)
 //                         --inject chooseCard:1       press 1 then Enter, which
 //                                                     is the hand's slam beat
 //                                                     (a key press, not an event)
@@ -87,6 +95,15 @@ import "../ui/parts"
 //                       The card names are the engine's own keys: nitro,
 //                       oilSlick, wrench, pothole, rollCage, pileUp, turbo,
 //                       towHook.
+//
+//                       A targeted card may name WHO it is aimed at with a
+//                       `+` suffix: `+near` (the default) is the nearest rival,
+//                       `+leader` is the racer furthest up the road -- which at
+//                       a Grand Prix's saturating tail is a kart at the
+//                       vanishing point, and is the realistic worst case a
+//                       child is handed when the race picks the distance.
+//
+//                         --inject cardUsed:wrench+leader
 //
 //   --strip <path>      write a CONTACT SHEET of frames from the injection to
 //                       <path>, and the individual frames beside it as

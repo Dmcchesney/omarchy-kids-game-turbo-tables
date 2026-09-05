@@ -94,12 +94,65 @@ FocusScope {
   property real nowMs: 0
 
   readonly property var human: state ? Engine.humanRacer(state) : null
-  readonly property int lapsDone: human ? human.lapsComplete : 0
   readonly property int totalLaps: state ? state.totalLaps : 12
-  readonly property string tableName: (state && human) ? Engine.currentTableName(state, human) : ""
+
+  // ------------------------------- PIECE F ROUND 2: THE PAYOFF FOLLOWS THE CAUSE
+  //
+  // A card resolves in ONE engine step: the `cardUsed` and every `hit`, `swap`
+  // and `lapComplete` it causes come back together, and the lap requirement,
+  // the order and the progress have all already moved by the time this screen
+  // is told. The design's beat, though, is a TELEGRAPH the eye catches first
+  // and an IMPACT the world reacts on -- so a view bound straight to the engine
+  // shows the reward while the wind-up is still playing. A blind critic caught
+  // exactly that on a rival build: "the lap counter goes 1/12 to 2/12 and 4th
+  // to 1st 300 ms BEFORE the impact and simultaneous with the telegraph. The
+  // payoff precedes the cause."
+  //
+  // So the VIEW -- never the rules -- holds at the race as it was until the
+  // telegraph lands. One snapshot, taken from the state as it was before the
+  // step, read by the lap gauge, the table name, the lamps, the place, the
+  // kart positions and the minimap; released on the frame `ui/TrackView.qml`'s
+  // cue reaches its impact, which is the same frame the hit-stop, the flash and
+  // the victim's reaction fire on. Nothing is swallowed and nothing is
+  // invented: the engine is still the only authority, and the most this can
+  // ever defer a number by is one card's telegraph (600 ms, the Pile-Up's).
+  //
+  // It is the same shape as `pendingPasses` below, which defers a pass until
+  // the karts have visibly crossed, and for the same reason: a HUD that
+  // contradicts the road is a HUD a child cannot read.
+  property var echoHold: null
+  readonly property bool echoHeld: echoHold !== null && track.cueTelegraphing
+
+  function snapshotOf(from) {
+    if (!from)
+      return null
+    var progress = []
+    for (var i = 0; i < from.racers.length; i++)
+      progress.push(Engine.effectiveProgress(from.racers[i], from.questionsPerLap))
+    var self = Engine.humanRacer(from)
+    var order = Engine.raceOrder(from)
+    var at = order.indexOf(from.humanId)
+    return {
+      "progress": progress,
+      "order": order,
+      "lapsDone": self ? self.lapsComplete : 0,
+      "table": self ? Engine.currentTableName(from, self) : "",
+      "lit": self ? self.correctInLap : 0,
+      "needed": self ? Math.max(1, self.questionsNeededThisLap) : 12,
+      "place": at < 0 ? order.length : at + 1
+    }
+  }
+
+  readonly property int lapsDone: echoHeld ? echoHold.lapsDone
+                                           : (human ? human.lapsComplete : 0)
+  readonly property string tableName: echoHeld
+                                      ? echoHold.table
+                                      : ((state && human) ? Engine.currentTableName(state, human) : "")
   readonly property int place: {
     if (!state)
       return 1
+    if (echoHeld)
+      return echoHold.place
     var order = Engine.raceOrder(state)
     var at = order.indexOf(state.humanId)
     return at < 0 ? order.length : at + 1
@@ -255,6 +308,9 @@ FocusScope {
     // pass waiting to be shown belongs to a race that is over.
     picker.reset()
     race.pendingPasses = []
+    race.echoHold = null
+    race.priorState = null
+    race.mapDue = 0
 
     race.viewProgress = progress[0]
     race.smoothProgress = progress.slice()
@@ -267,6 +323,10 @@ FocusScope {
 
   // --------------------------------------------------------- the reducer
   function apply(result) {
+    // The race as it was before this step, kept for exactly one purpose: the
+    // pre-card snapshot `echoHold` holds the view at through a telegraph. It
+    // is read only inside `handleEvents`, on the `cardUsed` branch.
+    race.priorState = race.state
     race.state = result.state
     handleEvents(result.events)
     // Every claim the keyboard holds over the field is checked against the
@@ -292,10 +352,13 @@ FocusScope {
     if (!rivals || !state)
       return
     var moved = Engine.rivalStep(state, rivals, clockNow())
+    race.priorState = race.state
     race.state = moved.state
     race.rivals = moved.rivals
     handleEvents(moved.events)
   }
+
+  property var priorState: null
 
   // Every animation and every message on this screen comes from here.
   function handleEvents(events) {
@@ -352,6 +415,11 @@ FocusScope {
           var label = Engine.CARDS[e.card].label.toUpperCase()
           say(e.targetId === "" ? label : label + " ▸ " + nameOf(e.targetId),
               Theme.amber, e.card === "pileUp")
+          // The view holds at the race as it was for the length of this card's
+          // telegraph. See `echoHold` above; a card with no telegraph (the Roll
+          // Cage) releases on the same frame, because `cueTelegraphing` is
+          // already false by the time anything reads it.
+          race.echoHold = race.snapshotOf(race.priorState)
           track.fxCardUsed(e.card, e.racerId, e.targetId)
         }
         break
@@ -429,159 +497,180 @@ FocusScope {
 
   // ------------------------------------------------------ PIECE F: INJECTION
   //
-  // ONE ENTRY POINT, AND WHAT IT IS AND IS NOT.
+  // ONE ENTRY POINT, AND ROUND TWO MADE IT THE GAME.
   //
-  // `dev/Harness.qml --inject <event>[:<card>]` calls this so a frame strip of
-  // one card can be reproduced in one command, by anybody, without playing a
-  // race until that card happens to be dealt and happens to land.
+  // `dev/Harness.qml --inject <event>[:<card>[+<aim>]]` calls this so a frame
+  // strip of one card can be reproduced in one command, by anybody, without
+  // playing a race until that card happens to be dealt and happens to land.
   //
-  // WHAT IT IS: the event objects below are built to the shapes in
-  // `src/engine/events.ts` -- every field of `CardUsedEvent`, `HitEvent`,
-  // `BlockedEvent`, `SwapEvent` and `HandDealtEvent` is filled, and the deltas,
-  // the stalls and the schedule are read from `Engine.CARDS` and
-  // `Engine.dealHand` rather than typed. They then go through `handleEvents`,
-  // which is the same funnel every real event goes through, in the order the
-  // engine's own ordering guarantee puts them in (the card, then the effects it
-  // had, in racer order).
+  // WHAT ROUND ONE DID, AND WHY IT WAS WRONG. It built an event object to the
+  // shape in `src/engine/events.ts` and pushed it through `handleEvents`
+  // WITHOUT calling `Engine.step`. The source said so plainly, and the source
+  // was honest about the wrong thing: a strip taken that way is evidence about
+  // the VIEW and not about the GAME. A blind critic found it from the outside
+  // -- a Turbo that skips ten questions of twelve left the HUD reading `1/12`,
+  // `3rd` and six lit lamps, so Nitro and Turbo were indistinguishable, "a
+  // firework that changes nothing in the race". A test that asserts an effect,
+  // in an environment that can produce that effect by another route, is testing
+  // the environment.
   //
-  // WHAT IT IS NOT: it is not the engine running. `Engine.step` is not called,
-  // the state is not changed, no streak moves and nothing is banked -- so a
-  // strip taken this way is evidence about the VIEW's response to an
-  // engine-shaped event, and it is not evidence that the engine emits that
-  // event. The engine's own event stream is proved by 657 tests under
-  // `tests/engine/`, which is the right place for it.
+  // WHAT IT DOES NOW. It puts the race into the situation the strip is about
+  // and then lets the REAL RULES run: `race.send({ kind: "useCard", ... })`,
+  // which is the identical call `ui/Picker.qml`'s `onCardUsed` makes when the
+  // child presses Enter. Every event the strip reacts to is then the engine's
+  // own `cardUsed`, `hit`, `blocked`, `swap`, `lapComplete` and `passed`. The
+  // lap counter really moves, the place really changes, the hand really
+  // empties, the stall really starts, and the aftermath really ends when the
+  // engine says the victim's lap is clean again.
   //
-  // It is also why this is here and not in dev/: `handleEvents` is private to
-  // this screen, and a harness reaching into it would be a second copy of the
-  // switch above.
-  function injectEvent(kind, arg) {
-    if (!state)
-      return false
-    var me = state.humanId
-    var card = (arg && Engine.isCard(arg)) ? arg : "wrench"
-    var def = Engine.CARDS[card]
-    // The NEAREST rival still in the fight, not the first one in the list. The
-    // road compresses distance hard past four questions -- the leader of a
-    // Grand Prix is drawn at the vanishing point, twenty pixels wide -- so a
-    // strip aimed at whichever rival happened to be first in the racer array
-    // shows a spark burst on a speck. The picker's own default aim is index 0,
-    // which is a different question (what a child is offered first); this is
-    // the harness choosing a target a camera can see.
-    var victim = ""
-    var mine = race.human ? Engine.effectiveProgress(race.human, state.questionsPerLap) : 0
-    var best = Number.POSITIVE_INFINITY
+  // THE ONE WRITE THAT PLAY NEVER DOES is `injectSetupHand` below: putting a
+  // chosen card into a hand. A hand comes off a shared round-robin cursor and
+  // no sequence of legal inputs can be relied on to put a Pile-Up in it, so a
+  // strip of the Pile-Up needs a fixture. It is one named function, it is
+  // documented where it lives, and nothing in the game can reach it: the only
+  // callers are the four branches below, and the only caller of those is
+  // `dev/Harness.qml --inject`.
+  //
+  // It is here and not in dev/ because `send` and `handleEvents` are private to
+  // this screen, and a harness reaching into them would be a second copy of
+  // the switch above.
+
+  // The fixture, and the whole of it. `Engine.CARD_SCHEDULE` fills the other
+  // two slots so the panel has a real three-card hand to deal and to slam,
+  // exactly as `Engine.dealHand` would have handed it over.
+  function injectSetupHand(racer, card) {
+    var hand = [card]
+    for (var i = 0; i < Engine.CARD_SCHEDULE.length && hand.length < 3; i++) {
+      var other = Engine.CARD_SCHEDULE[i]
+      if (other !== card)
+        hand.push(other)
+    }
+    racer.hand = hand
+  }
+
+  // WHO AN ATTACK IS AIMED AT, AND WHY THE HARNESS GETS TO CHOOSE.
+  //
+  // `near` (the default) is the nearest rival still in the fight. `leader` is
+  // the racer furthest up the road, which at a Grand Prix's saturating tail is
+  // a kart at the vanishing point -- the realistic worst case a child gets
+  // handed when the race decides the distance rather than the harness. Both
+  // are strips in the evidence, deliberately, because an effect that only
+  // reads when the victim is close does not read.
+  //
+  // In play NOTHING calls this: the child's aim is `ui/Picker.qml`'s, and a
+  // rival's is `src/engine/rivals.ts`'s.
+  function injectAim(mode) {
+    if (!state || !race.human)
+      return ""
+    var mine = Engine.effectiveProgress(race.human, state.questionsPerLap)
+    var pick = ""
+    var best = mode === "leader" ? -1 : Number.POSITIVE_INFINITY
     for (var i = 0; i < state.racers.length; i++) {
       var candidate = state.racers[i]
       if (candidate.kind === "human" || candidate.finished)
         continue
-      var away = Math.abs(Engine.effectiveProgress(candidate, state.questionsPerLap) - mine)
-      if (away < best) {
-        best = away
-        victim = candidate.id
-      }
-    }
-    var at = race.nowMs
-
-    if (kind === "cardUsed") {
-      var targeted = def.scope === "targeted"
-      var events = [{
-        "type": "cardUsed", "at": at, "racerId": me,
-        "card": card, "targetId": targeted ? victim : "", "discarded": []
-      }]
-      // The effects the card has, in the order the engine emits them. A self
-      // card has none; an every-rival card has one per rival.
-      if (def.questionDelta !== 0 || card === "towHook") {
-        for (var r = 0; r < state.racers.length; r++) {
-          var racer = state.racers[r]
-          if (racer.kind === "human" || racer.finished)
-            continue
-          if (targeted && racer.id !== victim)
-            continue
-          if (card === "towHook") {
-            events.push({ "type": "swap", "at": at, "racerId": me, "withId": racer.id })
-            break
-          }
-          events.push({
-            "type": "hit", "at": at, "racerId": racer.id, "fromId": me, "card": card,
-            "questionDelta": def.questionDelta,
-            "questionsNeededThisLap": racer.questionsNeededThisLap + def.questionDelta,
-            "stallMs": def.stallMs
-          })
+      var at = Engine.effectiveProgress(candidate, state.questionsPerLap)
+      if (mode === "leader") {
+        if (at > best) {
+          best = at
+          pick = candidate.id
+        }
+      } else {
+        var away = Math.abs(at - mine)
+        if (away < best) {
+          best = away
+          pick = candidate.id
         }
       }
-      handleEvents(events)
+    }
+    return pick
+  }
+
+  function injectEvent(kind, arg) {
+    if (!state || !race.human)
+      return false
+    var me = state.humanId
+    var plus = (arg || "").indexOf("+")
+    var name = plus >= 0 ? arg.slice(0, plus) : (arg || "")
+    var aimMode = plus >= 0 ? arg.slice(plus + 1) : "near"
+    var card = Engine.isCard(name) ? name : "wrench"
+    var victim = injectAim(aimMode)
+    var targeted = Engine.CARDS[card].scope === "targeted"
+
+    // The child plays the card. One line, because it is the child's own line.
+    if (kind === "cardUsed" || kind === "swap") {
+      var played = kind === "swap" ? "towHook" : card
+      if (Engine.CARDS[played].scope === "targeted" && victim === "")
+        return false
+      injectSetupHand(race.human, played)
+      race.send({ "kind": "useCard", "index": 0,
+                  "targetId": Engine.CARDS[played].scope === "targeted" ? victim : "" })
       return true
     }
 
-    if (kind === "hit") {
-      // THE ONE PLACE AN INJECTION TOUCHES THE STATE, AND WHY.
-      //
-      // Half of what the design says being hit looks like is not an animation
-      // at all: "the answer field locks with a mechanical overlay of bolts that
-      // spin off over the stall duration", and "the extra lap lamps you now owe
-      // appear as dark lamps added to the row with a rattle". The lock is
-      // `stalledUntilMs` and the lamps are `questionsNeededThisLap` -- both are
-      // ENGINE FIELDS, and a view-only injection leaves them alone, so a strip
-      // of being hit showed the shake and the edge frame and none of the beat
-      // the child actually looks at.
-      //
-      // So the two fields the engine's own `applyCard` writes on a victim are
-      // written here, on the state the engine just handed back through a real
-      // `Engine.step`. It is exactly what `tests/qml/tst_race_keys.qml`'s
-      // `stall()` helper does and for the same reason, and it is stated rather
-      // than hidden: a `hit` strip is a picture of the view AND of those two
-      // fields, and it is not a demonstration that the engine set them. The
-      // engine's own doing of it is proved by `tests/engine/cards.spec.ts`.
-      var stepped = Engine.step(race.state, { "kind": "tick" }, at)
-      var next = stepped.state
-      for (var v = 0; v < next.racers.length; v++) {
-        if (next.racers[v].id !== next.humanId)
-          continue
-        next.racers[v].stalledUntilMs = next.nowMs + def.stallMs
-        next.racers[v].questionsNeededThisLap += Math.max(1, def.questionDelta)
-      }
-      race.state = next
-      handleEvents([{
-        "type": "hit", "at": at, "racerId": me, "fromId": victim, "card": card,
-        "questionDelta": Math.max(1, def.questionDelta),
-        "questionsNeededThisLap": race.human ? race.human.questionsNeededThisLap : 12,
-        "stallMs": def.stallMs
-      }])
-      return true
-    }
-
+    // The child's attack meeting a rival's Roll Cage. The cage is given to the
+    // rival and then the rules decide: `attackOne` sees a cage, spends it, and
+    // emits `blocked` instead of `hit`. Nothing here fabricates the block.
     if (kind === "blocked") {
-      // The child's Wrench shattering on a rival's Roll Cage, which is the
-      // payoff the design says must be loud.
-      handleEvents([
-        { "type": "cardUsed", "at": at, "racerId": me, "card": card,
-          "targetId": victim, "discarded": [] },
-        { "type": "blocked", "at": at, "racerId": victim, "fromId": me,
-          "card": card, "rollCagesLeft": 0 }
-      ])
+      if (!targeted || victim === "")
+        return false
+      for (var b = 0; b < state.racers.length; b++)
+        if (state.racers[b].id === victim)
+          state.racers[b].rollCages = Math.max(1, state.racers[b].rollCages)
+      injectSetupHand(race.human, card)
+      race.send({ "kind": "useCard", "index": 0, "targetId": victim })
       return true
     }
 
-    if (kind === "swap") {
-      handleEvents([{ "type": "swap", "at": at, "racerId": me, "withId": victim }])
+    // A rival attacking the child, through the engine's own `useCard` with the
+    // rival as the actor -- which is exactly what `src/engine/rivals.ts` sends
+    // when a rival mind decides to spend. The stall, the extra lamps and the
+    // hood smoke are then the engine's fields, written by the engine, and the
+    // one mutation round one had to make by hand is gone.
+    if (kind === "hit") {
+      var attacker = ""
+      for (var a = state.racers.length - 1; a >= 0; a--) {
+        if (state.racers[a].kind !== "human" && !state.racers[a].finished) {
+          attacker = state.racers[a].id
+          break
+        }
+      }
+      if (attacker === "" || !targeted)
+        return false
+      for (var h = 0; h < state.racers.length; h++)
+        if (state.racers[h].id === attacker)
+          injectSetupHand(state.racers[h], card)
+      apply(Engine.step(race.state,
+                        { "kind": "useCard", "racerId": attacker,
+                          "index": 0, "targetId": me },
+                        clockNow()))
       return true
     }
 
+    // The hand arriving. Nothing to set up: with the streak one short of the
+    // threshold the honest way to see a hand is to answer the question, so
+    // `--warmup 11 --inject handDealt` is a child getting their twelfth in a
+    // row. If the streak is not there, this refuses rather than faking it.
     if (kind === "handDealt") {
-      handleEvents([{
-        "type": "handDealt", "at": at, "racerId": me,
-        "hand": Engine.dealHand(Engine.CARD_SCHEDULE, 0).hand, "cursorAfter": 3
-      }])
+      if (race.human.finished || race.human.currentFact < 0)
+        return false
+      if (race.human.streak + 1 < state.streakThreshold) {
+        console.log("Race: handDealt needs a streak of " + (state.streakThreshold - 1)
+                    + "; this race has " + race.human.streak + " -- use --warmup "
+                    + (state.streakThreshold - 1))
+        return false
+      }
+      race.send({ "kind": "answer", "value": Engine.factAnswer(race.human.currentFact) })
       return true
     }
 
     // `chooseCard:<n>` is not an engine event and does not pretend to be one:
     // it presses the keys. The hand's slam is a keyboard beat, so the only
     // honest way to shoot it is through the same arbitration a child's press
-    // goes through -- `typeKey` then `submitKey`, exactly as ui/Race.qml's own
-    // handler calls them.
+    // goes through -- the picker's own choose, then `submitKey`, exactly as
+    // ui/Race.qml's own handler calls them.
     if (kind === "chooseCard") {
-      var slot = Math.max(1, Math.min(3, parseInt(arg || "1", 10)))
+      var slot = Math.max(1, Math.min(3, parseInt(name || "1", 10)))
       if (race.hand.length < slot)
         return false
       picker.choose(slot - 1)
@@ -760,7 +849,11 @@ FocusScope {
     var clean = race.state.questionsPerLap
     for (var a = 0; a < race.state.racers.length; a++) {
       var racer = race.state.racers[a]
-      var afflicted = !racer.finished && racer.questionsNeededThisLap > clean
+      // ... and not before the attack has landed: through a telegraph the
+      // victim is a kart nothing has happened to yet. `fxLand` starts the
+      // smoke on the impact; this lease keeps it alive from there.
+      var afflicted = !racer.finished && !race.echoHeld
+                      && racer.questionsNeededThisLap > clean
       track.fxAfflicted(a, afflicted)
       if (!afflicted)
         track.fxClearLow(a)
@@ -769,12 +862,32 @@ FocusScope {
     // it is up exactly while the engine says a cage is held.
     track.fxSetCages(race.human ? race.human.rollCages : 0)
 
-    var lerp = race.reducedMotion ? 1 : Math.min(1, dtMs / 190)
+    // THE HIT-STOP HOLDS THE KARTS TOO.
+    //
+    // The freeze lived in `TrackView.advance`, which stops the road, the camera
+    // and the shake -- but the karts are positioned from `setProgress`, called
+    // here, so through every hit-stop in round one the victim carried on
+    // sliding backwards over a road that had stopped. A freeze that only some
+    // of the world obeys is a dropped frame, which is exactly what the design
+    // says a hit-stop must not read as.
+    //
+    // `fxSettleMs` is how long a kart takes to reach the position the card gave
+    // it: longer through an impact, so a knock-back is a shove rather than a
+    // cut. See `TrackView.fxSettleMs`.
+    var lerp = race.reducedMotion ? 1 : Math.min(1, dtMs / track.fxSettleMs)
+    if (track.worldFrozen)
+      lerp = 0
     var values = []
     var targets = []
     var before = race.viewProgress
+    // Through a telegraph the karts stay where the card found them, so a
+    // victim does not start sliding backwards before the wrench reaches them
+    // and the child does not surge before the launch. See `echoHold`.
+    var frozen = race.echoHeld ? race.echoHold.progress : null
     for (var i = 0; i < state.racers.length; i++) {
-      var target = Engine.effectiveProgress(state.racers[i], state.questionsPerLap)
+      var target = frozen && frozen.length > i
+                   ? frozen[i]
+                   : Engine.effectiveProgress(state.racers[i], state.questionsPerLap)
       var held = (race.smoothProgress.length > i) ? race.smoothProgress[i] : target
       var next = held + (target - held) * lerp
       values.push(next)
@@ -788,7 +901,26 @@ FocusScope {
     // 2.8s, longer than a callout lives -- and a readout taken from the drawn
     // order could put the child third with the third kart drawn in front. The
     // exact targets go with it so the road's gap tags print the engine's gap.
-    track.setProgress(values, Engine.raceOrder(state), targets)
+    // ... AND THE ORDER CLAMP IS LIFTED WHILE A KART IS BEING SHOVED.
+    //
+    // `TrackView.orderedProgress` pulls every drawn position down to the
+    // engine's order, which closes a rounding seam worth 5e-5 of a question on
+    // about one frame in fifteen thousand. Through a card's impact it does
+    // something else entirely: a Wrench sends a rival from one question ahead
+    // to four behind, the engine's order flips on the same frame, and the clamp
+    // teleports that kart from the middle of the road to behind the camera in
+    // ONE FRAME -- so the shove the design asks for ("a Pile-Up visibly shoves
+    // a kart backwards") never happens and the sparks land on an empty road.
+    // Measured: the wrench's victim was drawn at +480 ms and gone at +540.
+    //
+    // So for the length of the settle the karts are drawn where they actually
+    // are and cross each other in the open. The HUD still reads the engine on
+    // the frame of the impact -- that is the payoff -- and `pendingPasses`
+    // below still holds each callout until the two karts have visibly crossed.
+    track.setProgress(values,
+                      race.echoHeld ? race.echoHold.order
+                                    : (track.cueSettling ? null : Engine.raceOrder(state)),
+                      targets)
 
     // Speed is effective-progress rate, in questions per second, plus the
     // idle roll: the design has the kart rolling while the child is thinking.
@@ -801,8 +933,28 @@ FocusScope {
     // engine's order flips.
     race.releasePasses()
 
+    // THE MAP IS REFRESHED ON THE FRAME CLOCK, AT THE PULSE'S OWN CADENCE.
+    //
+    // ROUND 2. It used to be refreshed from the 100 ms engine `pulse` alone,
+    // and the pulse is stopped under `externalClock` -- so in every frame strip
+    // this piece has ever produced the minimap was frozen at the race's opening
+    // positions. A blind critic read four dots that never moved through a Tow
+    // Hook and called the swap "a line of text", correctly: the picture did not
+    // move. The cadence was the intent and the pulse was only where it happened
+    // to live, so the accumulator below keeps the ten-a-second and works under
+    // either timebase.
+    race.mapDue -= dtMs
+    if (race.mapDue <= 0) {
+      race.mapDue = 100
+      race.refreshMap()
+    }
+
     track.advance(dtMs)
   }
+  // Milliseconds until the minimap's next refresh. Not a timer: it is counted
+  // down by whatever clock is driving the frame, so a strip and a race refresh
+  // it on the same schedule.
+  property real mapDue: 0
 
   // ---------------------------------------------------------- the engine
   // 100 ms: the race clock, the rival deadlines and the stall expiries. The
@@ -819,7 +971,6 @@ FocusScope {
       race.nowMs = race.clockNow()
       apply(Engine.step(race.state, { "kind": "tick" }, race.nowMs))
       advanceRivals()
-      race.refreshMap()
     }
   }
 
@@ -1501,8 +1652,13 @@ FocusScope {
 
         LapLamps {
           id: lamps
-          lit: race.human ? race.human.correctInLap : 0
-          total: race.human ? Math.max(1, race.human.questionsNeededThisLap) : 12
+          // Held at the pre-card reading through a telegraph, so the ten lamps
+          // a Turbo pays out light on the chase rather than before it. See
+          // `echoHold`.
+          lit: race.echoHeld ? race.echoHold.lit
+                             : (race.human ? race.human.correctInLap : 0)
+          total: race.echoHeld ? race.echoHold.needed
+                               : (race.human ? Math.max(1, race.human.questionsNeededThisLap) : 12)
           cleanTotal: race.state ? race.state.questionsPerLap : 12
           cell: race.px(13)
           gap: race.px(4)
@@ -1679,7 +1835,7 @@ FocusScope {
     // the map spent up to half of every run drawing the field in an order the
     // callouts and the road disagreed with. The map takes it as indices into
     // `values`, because a dot has no kart id.
-    var order = Engine.raceOrder(state)
+    var order = race.echoHeld ? race.echoHold.order : Engine.raceOrder(state)
     var rank = []
     for (var k = 0; k < order.length; k++)
       for (var r = 0; r < state.racers.length; r++)

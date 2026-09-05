@@ -374,12 +374,31 @@ Item {
         //            the design's own definition of when an effect ends.
         //   fxLow    how many pixels the kart rides low (Pothole's aftermath)
         //   fxFlash  the reading a tag flash ends at (Pile-Up's field flash)
+        //
+        // ROUND 2 -- THE NAME PLATE IS WHERE AN EFFECT READS WHEN THE KART
+        // CANNOT. A rival one question up who takes a Wrench is FIVE questions
+        // BEHIND the child a moment later, and a first-person camera cannot
+        // show a kart behind it; the leader of a Grand Prix saturates at the
+        // vanishing point and is thirty pixels wide. In both cases the sparks,
+        // the smoke and the floating `+5` land where nobody can read them. Every
+        // rival always has a plate on screen, though -- the ahead badge or the
+        // chaser rail -- so the effect is mirrored onto it and the child is
+        // never told nothing.
+        //
+        //   fxPlate      the text the plate carries ("+5", "TOWED", "BLOCKED")
+        //   fxPlateTone  its colour, as a string
+        //   fxPlateBorn  the reading it started carrying it, for the ring
+        //   fxPlateUntil the reading the plate stops carrying it
         "fxKind": "",
         "fxFrom": 0,
         "fxUntil": 0,
         "fxSmoke": 0,
         "fxLow": 0,
-        "fxFlash": 0
+        "fxFlash": 0,
+        "fxPlate": "",
+        "fxPlateTone": "#f5a524",
+        "fxPlateBorn": 0,
+        "fxPlateUntil": 0
       })
     }
   }
@@ -1294,8 +1313,10 @@ Item {
         anchors.fill: parent
         radius: 3
         color: view.plateGround
-        border.width: 1
-        border.color: Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95)
+        border.width: view.fxPlateRing(index) > 0.05 ? 2 : 1
+        border.color: view.fxPlateRing(index) > 0.05
+                      ? Qt.rgba(1, 1, 1, 0.35 + 0.65 * view.fxPlateRing(index))
+                      : Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95)
       }
 
       Row {
@@ -1318,8 +1339,13 @@ Item {
           id: tagGap
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: badge.gapQuestions > 0 ? "+" + badge.gapQuestions : ""
-          color: Theme.amber
+          // What the effect did, when there is one, and the gap otherwise. See
+          // the `fxPlate` roles: this is the readout a rival keeps when the
+          // projection has taken their kart away.
+          text: view.fxPlateShowing(index)
+                ? fxPlate
+                : (badge.gapQuestions > 0 ? "+" + badge.gapQuestions : "")
+          color: view.fxPlateShowing(index) ? fxPlateTone : Theme.amber
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: badge.tagSize
@@ -1408,9 +1434,12 @@ Item {
         color: view.plateGround
         // Two pixels of border when the rival is within one question: the
         // child is about to be passed and the plate says so without a word.
-        border.width: (view.haveExact && chaser.gapQuestions >= -1) ? 2 : 1
-        border.color: Qt.rgba(chaser.paintCol.r, chaser.paintCol.g,
-                              chaser.paintCol.b, 0.95)
+        border.width: (view.fxPlateRing(index) > 0.05
+                       || (view.haveExact && chaser.gapQuestions >= -1)) ? 2 : 1
+        border.color: view.fxPlateRing(index) > 0.05
+                      ? Qt.rgba(1, 1, 1, 0.35 + 0.65 * view.fxPlateRing(index))
+                      : Qt.rgba(chaser.paintCol.r, chaser.paintCol.g,
+                                chaser.paintCol.b, 0.95)
       }
 
       Row {
@@ -1446,8 +1475,15 @@ Item {
           // the smoothed delta instead is wrong on a sixth of frames, and a
           // plate that disagrees with the HUD is two sources of truth for one
           // number -- the same rule the ahead-plate is held to.
-          text: view.haveExact ? String(chaser.gapQuestions) : ""
-          color: Theme.teal
+          //
+          // ... and what the effect did, while there is one. A Wrench sends a
+          // rival who was one question up to four behind, where the camera
+          // cannot follow them; this rail is where the child reads that it
+          // landed. See the `fxPlate` roles.
+          text: view.fxPlateShowing(index)
+                ? fxPlate
+                : (view.haveExact ? String(chaser.gapQuestions) : "")
+          color: view.fxPlateShowing(index) ? fxPlateTone : Theme.teal
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: view.chaserSize
@@ -1672,6 +1708,50 @@ Item {
     kartModel.setProperty(index, "fxFlash", fxClock + ms)
   }
 
+  // Is this rival's name plate carrying an effect readout right now, and how
+  // hard is it ringing. Both read `fxClock` FIRST and unconditionally, for the
+  // reason `fxKartDx` spells out: a binding depends on what the function
+  // actually read, and an early return above the clock leaves the plate frozen
+  // at whatever it evaluated to once.
+  //
+  // Design v4, Pile-Up: "Every other racer's tag flashes once so the field
+  // reads the event." Round one wrote `fxFlash` and nothing ever read it, so
+  // the field never flashed; the ring below is that line, finally drawn, and
+  // it doubles as the ring on the victim's own plate.
+  // How many karts the view is holding, and what a kart's plate is carrying.
+  // Read by `tests/qml/tst_trackview_fx.qml` so the off-camera readout can be
+  // asserted rather than eyeballed; nothing in the picture reads either.
+  readonly property int kartCount: kartModel.count
+  function kartPlateText(index) {
+    if (index < 0 || index >= kartModel.count)
+      return ""
+    return kartModel.get(index).fxPlate
+  }
+
+  function fxPlateShowing(index) {
+    var now = fxClock
+    if (index < 0 || index >= kartModel.count)
+      return false
+    var k = kartModel.get(index)
+    return k.fxPlate !== "" && now < k.fxPlateUntil
+  }
+  function fxPlateRing(index) {
+    var now = fxClock
+    if (index < 0 || index >= kartModel.count)
+      return 0
+    var k = kartModel.get(index)
+    var ring = 0
+    if (k.fxFlash > 0 && now < k.fxFlash)
+      ring = Math.max(ring, CardFx.bump(1 - (k.fxFlash - now) / CardFx.BEATS.pileUp.fieldFlash))
+    // The victim's own plate rings for the first 320 ms it carries a readout,
+    // so the eye is taken to it ON the impact rather than after it.
+    if (k.fxPlate !== "" && now < k.fxPlateUntil) {
+      var age = now - k.fxPlateBorn
+      ring = Math.max(ring, age < 320 ? CardFx.bump(age / 320) : 0.18)
+    }
+    return Math.max(0, Math.min(1, ring))
+  }
+
   // How far a kart is pushed sideways and down by whatever it is in the middle
   // of. Both are in pixels and both are scaled by the kart's own drawn size, so
   // a jolt reads the same on a kart at the vanishing point as on one filling
@@ -1807,6 +1887,19 @@ Item {
       "gKart": kart, "gText": text, "gTone": String(tone), "gBorn": fxClock,
       "gLife": life, "gBig": big, "gDelay": delay
     })
+    // ... and on the victim's name plate, always, whether their kart is drawn
+    // or not. See the `fxPlate` roles: this is the one readout an effect has
+    // that the projection cannot take away.
+    fxPlateFor(kart, text, tone, life + delay)
+  }
+
+  function fxPlateFor(kart, text, tone, life) {
+    if (kart < 0 || kart >= kartModel.count)
+      return
+    kartModel.setProperty(kart, "fxPlate", String(text))
+    kartModel.setProperty(kart, "fxPlateTone", String(tone))
+    kartModel.setProperty(kart, "fxPlateBorn", fxClock)
+    kartModel.setProperty(kart, "fxPlateUntil", fxClock + life)
   }
 
   // --------------------------------------------------------------- the sound
@@ -1905,6 +1998,23 @@ Item {
                                   ? CardFx.BEATS[cueCard] : null
   readonly property real cueT: fxClock - cueBorn
   readonly property bool cueTelegraphing: cueBeats !== null && !cueImpacted
+  // The impact beat, from the moment it lands until its world reaction is
+  // spent. `ui/Race.qml` reads it for two things: how long a kart takes to
+  // settle to the position the card gave it, and nothing else.
+  readonly property bool cueSettling: cueBeats !== null && cueImpacted
+                                      && cueT < cueBeats.telegraph + cueBeats.impact + 420
+  // HOW LONG A KART TAKES TO REACH THE POSITION THE ENGINE GAVE IT.
+  //
+  // 190 ms ordinarily -- about three frames, which is what it takes to glide
+  // between the engine's ten-a-second steps instead of stepping. Through a
+  // card's impact it is nearly three times that, because the design does not
+  // ask for the field to be re-ordered, it asks for a kart to be SHOVED: "the
+  // two karts zip past each other", "a Pile-Up visibly shoves a kart
+  // backwards", "rivals ahead stream past both sides of the frame as they fall
+  // behind". A knock-back that resolves in three frames is a cut. This is the
+  // one number that turns it into a move the eye can follow, and it is the
+  // reason a Wrench's victim is still on screen while the sparks are on them.
+  readonly property real fxSettleMs: cueSettling ? 520 : 190
   // The first victim, for the things that only ever have one (the wrench's
   // flight, the pothole's decal, the pile that falls).
   readonly property int cueTarget: cuePending.length > 0 ? cuePending[0].kart : -1

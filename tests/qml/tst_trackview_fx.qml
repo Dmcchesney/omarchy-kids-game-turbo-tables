@@ -468,14 +468,58 @@ Item {
       verify(sawSparks || sawTag, "the impact is on the target kart")
 
       // Beat three: the aftermath is still on the victim a second later.
+      //
+      // ROUND 2 -- WHERE THE AFTERMATH IS ALLOWED TO BE. This used to demand
+      // hood smoke and nothing else, and it passed only because the injection
+      // never ran the engine: with the real rules a rival one question ahead
+      // who takes a Wrench is FIVE questions BEHIND the child a moment later,
+      // and a camera that sits behind the child's kart cannot draw them. The
+      // aftermath is not optional, but its PLACE is: the hood while the kart is
+      // on screen, the rival's own name plate when it is not. Both are checked,
+      // and the engine's own lease -- the victim's lap requirement still above
+      // a clean lap -- is checked first, because that is what "the effect is
+      // still running" actually means.
       for (var f = 0; f < 16; f++)
         race.stepClock(60)
+      var victim = null
+      for (var v = 0; v < race.state.racers.length; v++) {
+        var r = race.state.racers[v]
+        if (r.kind !== "human" && r.questionsNeededThisLap > race.state.questionsPerLap)
+          victim = r
+      }
+      verify(victim !== null,
+             "the engine still says the effect is running on the victim")
       var smoking = false
       root.walk(race, function (item) {
         if (String(item.objectName) === "fx.hoodSmoke" && root.drawn(item))
           smoking = true
       })
-      verify(smoking, "the target's hood is still smoking a second after the hit")
+      var onThePlate = false
+      for (var k = 0; k < track.kartCount; k++)
+        if (track.fxPlateShowing(k))
+          onThePlate = true
+      verify(smoking || onThePlate,
+             "a second after the hit the victim still carries the aftermath -- "
+             + "smoke on the hood if their kart is drawn, their name plate if not")
+    }
+
+    // ... and the case the line above allows for, on its own, because it is the
+    // whole answer to "an effect that only reads when the victim is close does
+    // not read". A Wrench on the nearest rival puts them behind the camera; the
+    // child must still be told it landed.
+    function test_12_an_effect_reads_when_the_victim_is_off_camera() {
+      preroll()
+      race.injectEvent("cardUsed", "wrench")
+      for (var f = 0; f < 24; f++)
+        race.stepClock(60)
+      var carrying = -1
+      for (var k = 0; k < track.kartCount; k++)
+        if (track.fxPlateShowing(k))
+          carrying = k
+      verify(carrying >= 0, "the victim's name plate carries the readout")
+      verify(String(track.kartPlateText(carrying)).indexOf("+") === 0,
+             "and the readout is the questions the card cost them: "
+             + track.kartPlateText(carrying))
     }
 
     // The Roll Cage's outline is the whole of that card, so it gets its own
