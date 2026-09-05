@@ -2312,6 +2312,11 @@ FocusScope {
         // The fade is wall-time, so under an external clock it is a cut. See
         // `externalClock` above.
         reducedMotion: race.reducedMotion || race.externalClock
+        // ... and so is the 1.6 s HOLD, which round one missed: whether a
+        // callout was still up at frame 18 of a strip depended on how long the
+        // harness had taken to write seventeen PNGs. Under an external clock
+        // the hold is measured on the effect clock instead.
+        fxNow: race.externalClock ? track.fxClock : -1
       }
     }
   }

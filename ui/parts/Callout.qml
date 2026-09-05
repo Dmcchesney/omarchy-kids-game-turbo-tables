@@ -20,14 +20,40 @@ Item {
   // legendary card reads as the same object shouted rather than as a different
   // object.
   property bool big: false
-  readonly property bool showing: hold.running || fade.opacity > 0
+
+  // PIECE F ROUND 2 -- THE HOLD, ON WHICHEVER CLOCK THE CALLER IS USING.
+  //
+  // The 1.6 s hold was a `Timer`, which is the WALL clock, and a frame strip
+  // steps a clock of its own -- so whether a callout was still on screen at
+  // frame 18 depended on how long the harness had taken to save seventeen
+  // PNGs. Two runs of the eighteen strips came back with fifty-nine files
+  // differing, all of them in the callout stack's box and all of them on late
+  // frames. A strip that differs run to run is not evidence.
+  //
+  // With `fxNow` set (in milliseconds, by the caller) the hold is measured on
+  // that clock instead and the Timer never runs. Left at -1, which is what the
+  // garage and a real race use, nothing about this file changes.
+  property real fxNow: -1
+  readonly property bool external: fxNow >= 0
+  property real bornAt: -1e9
+
+  readonly property bool showing: external ? fade.opacity > 0
+                                           : (hold.running || fade.opacity > 0)
 
   function say(message, colour) {
     callout.text = message
     if (colour !== undefined)
       callout.tone = colour
     fade.opacity = 1
-    hold.restart()
+    callout.bornAt = callout.fxNow
+    if (!callout.external)
+      hold.restart()
+  }
+
+  onFxNowChanged: {
+    if (callout.external && fade.opacity > 0
+        && callout.fxNow - callout.bornAt > callout.holdMs)
+      fade.opacity = 0
   }
 
   implicitWidth: fade.implicitWidth

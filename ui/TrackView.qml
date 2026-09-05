@@ -1912,7 +1912,30 @@ Item {
     fxFlyerModel.append({
       "yKind": kind, "yFrom": fromKart, "yTo": toKart, "yBorn": fxClock,
       "yDur": dur, "ySpins": spins, "yWorld": worldWidth, "yFrames": frames,
-      "yLine": 0, "yArc": 1
+      "yLine": 0, "yArc": 1, "ySettle": dur,
+      // Where it came off, as a point on the road rather than as a depth --
+      // the same `travel`-relative coordinate every decal uses. Only a ground
+      // flyer reads it; see `yGround`.
+      "yAt": travel + fxKartZ(fromKart), "yGround": 0
+    })
+  }
+  // A GROUND FLYER: a thing that leaves a kart and ENDS UP ON THE ROAD.
+  //
+  // ROUND 2. The Pothole's hubcap was an ordinary flyer, which arcs on top of
+  // the roof line -- so a blind critic watched "a flat grey disc that flies
+  // UPWARD INTO THE SKY above the horizon line instead of rolling to the
+  // verge", in a game whose whole style depends on things sitting on the road.
+  // Worse, its path was bound to the victim's own depth, and the victim is
+  // being shoved past the camera at that exact moment, so the disc followed
+  // them and grew. A ground flyer is pinned to the point on the road it came
+  // off, bounces twice along the tarmac out to the verge, and then lies there
+  // and recedes with everything else.
+  function fxGroundFlyer(kind, fromKart, dur, spins, worldWidth, frames) {
+    fxFlyerModel.append({
+      "yKind": kind, "yFrom": fromKart, "yTo": -1, "yBorn": fxClock,
+      "yDur": dur * 3, "ySpins": spins, "yWorld": worldWidth, "yFrames": frames,
+      "yLine": 0, "yArc": 0, "ySettle": dur,
+      "yAt": travel + fxKartZ(fromKart), "yGround": 1
     })
   }
   function fxPuff(kart, dx, dy, size, grow, life, tone, rise) {
@@ -2418,7 +2441,7 @@ Item {
       fxPuff(kart, span * 0.32, 0, span * 0.36, 2.6, 700, "#e7c489", 0.18)
       fxPuff(kart, 0, span * 0.04, span * 0.30, 2.4, 520, "#fff0cc", 0.06)
       if (!reducedMotion)
-        fxFlyer("hubcap", kart, -1, b.hubcapMs, 4, 0.7, 3)
+        fxGroundFlyer("hubcap", kart, b.hubcapMs, 4, 0.7, 3)
       // "the kart rides one pixel low with a rattle animation on the wheels
       // until the effect ends"
       fxRideLow(kart, Math.max(1, span * 0.012), 2600)
@@ -2714,22 +2737,40 @@ Item {
     Item {
       id: flyer
       readonly property real u: CardFx.phase(view.fxClock - yBorn, yDur)
-      readonly property real z0: view.fxKartZ(yFrom) + 0.10
+      readonly property bool onGround: yGround === 1
+      // A ground flyer is a point on the ROAD, so its depth is the road's --
+      // `yAt - travel`, exactly as a decal's is -- and it recedes toward the
+      // camera on its own. Everything else travels between two karts.
+      readonly property real z0: onGround ? (yAt - view.travel)
+                                          : (view.fxKartZ(yFrom) + 0.10)
       // A hubcap has no destination kart: it goes to the verge and stays put in
       // world terms, so it falls back toward the camera as the road moves.
       readonly property real z1: yTo >= 0 ? view.fxKartZ(yTo) : (z0 - 0.8)
-      readonly property real zed: z0 + (z1 - z0) * CardFx.easeOut(u)
+      readonly property real zGround: z0
+      readonly property real zed: onGround ? zGround : z0 + (z1 - z0) * CardFx.easeOut(u)
       readonly property real lane0: view.laneOf(view.kartModelSeat(yFrom))
       readonly property real lane1: yTo >= 0 ? view.laneOf(view.kartModelSeat(yTo))
                                              : (lane0 < 0 ? -(view.roadHalf + 0.7) : view.roadHalf + 0.7)
-      readonly property real lane: lane0 + (lane1 - lane0) * u
+      readonly property real lane: onGround ? lane0 + (lane1 - lane0) * settle
+                                            : lane0 + (lane1 - lane0) * u
       readonly property real px: view.sizeAt(yWorld, zed)
       readonly property real cx: view.uAt(lane, zed) * view.width + view.shakeX
       // "arcs along the road": up and over, peaking in the middle of the
       // flight, on top of the projection's own vertical travel.
       readonly property real arc: CardFx.bump(u) * view.sizeAt(1.5, zed) * yArc
-      readonly property real cy: view.vAt(zed) * view.height + view.shakeY
-                                 - view.kartSpriteH(zed) * 0.55 - arc
+      // A ground flyer starts at the wheel and bounces twice down to the road,
+      // and it is measured off the ROAD SURFACE, not off the roof line.
+      // The bounce and the roll are over in `ySettle`; the rest of the flyer's
+      // life it simply lies at the verge and recedes with the road, which is
+      // what "rolls to the verge" means.
+      readonly property real settle: CardFx.phase(view.fxClock - yBorn,
+                                                 Math.max(1, ySettle))
+      readonly property real hop: view.kartSpriteH(zed) * 0.34 * (1 - settle)
+                                  * Math.abs(Math.cos(settle * Math.PI * 2.4))
+      readonly property real cy: onGround
+                                 ? view.vAt(zed) * view.height + view.shakeY - hop
+                                 : view.vAt(zed) * view.height + view.shakeY
+                                   - view.kartSpriteH(zed) * 0.55 - arc
 
       objectName: "fx.flyer." + yKind
       x: cx - px / 2
@@ -2749,9 +2790,10 @@ Item {
         // three-frame tumble.
         frame: yKind === "towHook"
                ? (flyer.u > 0.86 ? 1 : 0)
-               : Math.floor(flyer.u * Math.max(1, ySpins) * yFrames)
+               : Math.floor((flyer.onGround ? flyer.settle : flyer.u)
+                            * Math.max(1, ySpins) * yFrames)
         boundsWidth: flyer.px
-        spin: yKind === "hubcap" ? flyer.u * 540 : 0
+        spin: yKind === "hubcap" ? flyer.settle * 540 : 0
         amount: 1
       }
 
