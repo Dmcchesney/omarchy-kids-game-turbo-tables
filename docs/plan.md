@@ -294,6 +294,66 @@ v3.1 order: **F first**, under the v4.1 rubric (the hand's keys, the one answer 
 
 Then the unfinished v2 pieces: **3 and 5** under v4.1, including the words in `docs/open-questions.md` §5.4 (drop the OFFLINE badge, rename the track from MIDNIGHT GARAGE, PIT CREW → ANSWERS SHOWN, BEST STREAK → BEST COMBO, the power-ups line as icons or a count) and the sunset band on results; then **6**, then **7** in the VM. C is done. Nothing runs in parallel with a piece that edits the same file.
 
+### Performance: the game must run on a weak machine
+
+Added 2026-09-05 on the maintainer's instruction, and it binds **every remaining
+round of every remaining piece**, not just a piece of its own: *"the game
+requires way too much CPU/GPU; we need this to run on weak computers; we are not
+doing anything heavy, it is a retro racing game; become obsessed with small
+performance increases."*
+
+**The instrument comes first, because we do not currently have one.**
+`--measure` counts `FrameAnimation` ticks and has returned 62.5–62.8 fps at
+480×270, 1366×768, 1920×1080 *and* 3840×2160 — across a 64× area range, with and
+without a Pile-Up's effects running. A number that does not move when the work
+changes by 64× is measuring the animation driver's cadence, not the cost of a
+frame, and every performance claim ever made in this project from that number is
+void. No optimisation may be reported against it. Build a real one — per-frame
+CPU time over a fixed frame count, scene-graph node and draw-call counts, texture
+bytes resident, allocation per frame — and prove it responds to a deliberate
+change in load before trusting a single reading from it. This is the same rule as
+everywhere else in this project: *a test that asserts an effect, in an
+environment that can produce that effect by another route, is testing the
+environment.*
+
+**A measured budget, and what is known already.** The kit's twenty-five sheets
+are 1.9 MB on disk and **264 MB decoded as RGBA** — indexed PNGs compress so well
+that the real cost is invisible in a directory listing. `waterTower.png` is 54 KB
+on disk and 28 MB resident, at 2592×2870, for a prop that draws about sixty
+pixels tall. The kit is baked at FINE = 4, four times the karts' pixels per world
+unit, which was the maintainer's decision and is not a builder's to reverse; the
+consequence is recorded here so the decision can be revisited with the number in
+front of it. Whether every sheet is resident at once, whether the scale-0.5 and
+scale-0.25 rows can serve alone on a weak machine, and whether a downscaled
+variant should be baked for it, are open.
+
+**Rules for every builder from here on:**
+
+- **Cheap by default.** This is a 480×270 picture of flat-shaded geometry. Any
+  frame cost beyond that has to earn itself. Prefer a cheaper construction that
+  looks the same to a more expensive one that measures the same.
+- **Nothing runs when it cannot be seen.** Bindings in hidden items still
+  evaluate; one round of this project found idle hood smoke re-evaluating 84 ring
+  colours a frame while invisible, and fixing it moved 39.3 fps to 62.5. Gate
+  idle work on `visible`, and prove the gate.
+- **No per-frame allocation** in anything that runs every frame — no new arrays,
+  strings or objects in a paint or an update path.
+- **Every shader instruction is a cost paid per pixel, per frame, forever.**
+  Noise octaves, shimmer, water and haze are the expensive things in the design's
+  circuit section; each must be justified against what it adds to the picture and
+  measured on its own.
+- **Report cost with every feature.** A round that adds work states what it cost
+  by the real instrument, in the frame being shipped, at a stated resolution.
+- **Texture bytes are a budget.** State resident decoded bytes, not file size.
+
+**Targets** (provisional until the instrument exists, then tightened): 60 fps at
+1080p on integrated graphics; 30 fps in the software-rendered VM at the internal
+resolution; and the whole game comfortable on a machine with no discrete GPU and
+little video memory. The device remains the only place a GPU number is taken.
+
+**The critic's rubric gains a line in every remaining piece:** *what did this
+cost, measured, and is anything here more expensive than it looks?*
+
 ### Stop condition and handoff
 
 The run ends when every open piece's critic has picked ours and CI is green, or when piece 7 is blocked on the VM. Either way the coordinator writes `HANDOFF.md` at the repository root and stops, as v1: verdicts quoted; install and keybinding; what to play in order (Practice on 2–5, a Time trial, the Ghost, a Grand Prix at Pro); frame rates measured on the Mac (software) and in the VM; what is placeholder; what was accepted with a reservation; and, new in v2, a before/after of each screen beside the reference.
