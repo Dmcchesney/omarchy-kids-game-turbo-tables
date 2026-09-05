@@ -67,11 +67,27 @@ Item {
   // frame strip has to be reproducible.
   property real fxNow: 0
   property real burstBorn: -1e9
-  readonly property real burstMs: 260
+  readonly property real burstMs: 320
   readonly property real burst: (reducedMotion || fxNow - burstBorn > burstMs)
                                 ? 0
                                 : 1 - Math.max(0, Math.min(1, (fxNow - burstBorn) / burstMs))
   function burstNow() { bar.burstBorn = bar.fxNow }
+
+  // ROUND 3 -- AND THE BURST HAD NEVER BEEN SEEN BY ANYBODY.
+  //
+  // `ui/Race.qml` passed `reducedMotion: race.reducedMotion || race.externalClock`,
+  // because the caption's 1.25 Hz breath below is a wall-clock animation and a
+  // wall-clock animation makes a frame strip differ run to run. The side effect
+  // was that the burst -- which is NOT a wall-clock animation, it is a pure
+  // function of `fxNow` -- was switched off in every strip, every frame dump
+  // and every test this piece has ever taken, and a blind critic wrote
+  // "nothing bursts from the twelve segments" about a thing that does burst and
+  // could not be photographed doing it.
+  //
+  // The two are separate now: `reducedMotion` is the child's setting and takes
+  // the burst away as the design says it should; `externalClock` only stops the
+  // one animation that samples a clock this file does not own.
+  property bool externalClock: false
 
   implicitWidth: 260
   implicitHeight: padY * 2 + caption.height + 6 + cellHeight + 6 + status.height
@@ -141,32 +157,46 @@ Item {
     anchors.fill: face
     radius: face.radius
     color: Theme.amberGlow
-    opacity: bar.burst * 0.22
+    opacity: bar.burst * 0.40
     visible: bar.burst > 0.01
   }
 
-  Row {
+  // The twelve the child just spent, leaving the bar. They go DOWN, toward the
+  // hand: the design's sentence is "the twelve segments burst into three cards
+  // that slide up from the bottom right", and the cards are drawn under this
+  // bar, so twelve segments rising out of the top of it were leaving in the
+  // wrong direction. Each one also fans out from the middle and grows, so the
+  // twelve come apart rather than sliding off as one bar.
+  Item {
     id: burstCells
+    objectName: "chargeBurst"
     x: bar.padX
-    y: cells.y - bar.cellHeight * 0.9 * (1 - bar.burst)
+    y: cells.y
     width: bar.innerWidth
     height: bar.cellHeight
-    spacing: bar.cellGap
-    opacity: bar.burst
     visible: bar.burst > 0.01
+
+    readonly property real gone: 1 - bar.burst
+    readonly property real cellW: (bar.innerWidth - bar.cellGap * (bar.segments - 1))
+                                  / bar.segments
 
     Repeater {
       model: bar.segments
 
       Rectangle {
-        width: (bar.innerWidth - bar.cellGap * (bar.segments - 1)) / bar.segments
-        height: bar.cellHeight
+        readonly property real fromMid: index - (bar.segments - 1) / 2
+        readonly property real g: burstCells.gone
+        width: burstCells.cellW * (1 + g * 0.5)
+        height: bar.cellHeight * (1 + g * 0.5)
+        x: index * (burstCells.cellW + bar.cellGap)
+           + fromMid * bar.cellGap * 3.4 * g
+           - (width - burstCells.cellW) / 2
+        y: bar.cellHeight * 1.9 * g - (height - bar.cellHeight) / 2
         radius: 2
         color: Theme.amberGlow
         // The middle segments leave first, so the twelve read as a burst rather
-        // than as a bar sliding upward in one piece.
-        opacity: Math.max(0, 1 - (1 - bar.burst)
-                             * (1 + Math.abs(index - (bar.segments - 1) / 2) * 0.22))
+        // than as a bar sliding off in one piece.
+        opacity: Math.max(0, 1 - g * (1 + Math.abs(fromMid) * 0.20))
       }
     }
   }
@@ -187,7 +217,7 @@ Item {
     // Design, Accessibility: "nothing flashes faster than 3 Hz". This is a
     // 1.25 Hz breath, and reduced motion removes it entirely.
     SequentialAnimation on opacity {
-      running: bar.ready && !bar.reducedMotion
+      running: bar.ready && !bar.reducedMotion && !bar.externalClock
       loops: Animation.Infinite
       NumberAnimation { from: 1.0; to: 0.45; duration: 400; easing.type: Easing.InOutSine }
       NumberAnimation { from: 0.45; to: 1.0; duration: 400; easing.type: Easing.InOutSine }

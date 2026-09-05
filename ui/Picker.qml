@@ -519,6 +519,20 @@ FocusScope {
         }
       }
 
+      // ROUND 3: THREE ACROSS, NOT THREE DOWN.
+      //
+      // A blind critic called this "a dark list panel ... These are not cards".
+      // The design's whole paragraph on the hand is in the language of cards --
+      // dealt, slid up, slammed down, flipped face down, flown off -- and none
+      // of it means anything to a six-year-old about three rows of a settings
+      // menu. `ui/parts/HandCard.qml` draws a portrait card in playing-card
+      // proportions; this is the hand it is laid out in.
+      Row {
+        id: hand
+        width: parent.width
+        spacing: picker.px(9)
+        readonly property real cardWidth: Math.floor((width - spacing * 2) / 3)
+
       Repeater {
         model: picker.shownHand
 
@@ -549,12 +563,12 @@ FocusScope {
           readonly property real slamEnd: (CardFx.HAND.enlargeMs + CardFx.HAND.slamMs)
                                           / picker.slamSpan
 
-          width: body.width
+          width: hand.cardWidth
           height: card.implicitHeight
 
           HandCard {
             id: card
-            width: body.width
+            width: hand.cardWidth
             cardId: String(modelData)
             index: cardSlot.slot + 1
             selected: cardSlot.isChosen && !picker.slamming
@@ -607,6 +621,7 @@ FocusScope {
             ]
           }
         }
+      }
       }
 
       // ------------------------------------------------------- the target

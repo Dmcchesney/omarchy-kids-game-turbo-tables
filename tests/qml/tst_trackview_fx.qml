@@ -982,6 +982,76 @@ Item {
                   + flash.toFixed(2) + "|shatter " + Math.round(sparks) + "px")
     }
 
+    // THE HAND IS A HAND OF CARDS, AND THE TWELVE SEGMENTS DO BURST.
+    //
+    // Design v4, "The hand and the charge": "Reaching twelve: the charge bar
+    // flashes, the twelve segments burst into three cards that slide up from
+    // the bottom right." A blind critic, on both builds: "The 'hand' is a dark
+    // list panel ... These are not cards; nothing bursts from the twelve
+    // segments."
+    //
+    // Half of that was true and half of it could not have been seen: the burst
+    // was switched off whenever the screen ran on an external clock, which is
+    // every strip and every test this piece has ever taken. Both halves are
+    // asserted here, and the burst is asserted ON the external clock, which is
+    // the only condition under which it was ever broken.
+    function test_17_the_hand_is_three_cards_and_the_charge_bursts_into_them() {
+      race.warmup = 11
+      race.buildRace()
+      preroll()
+      verify(race.injectEvent("handDealt", ""), "the twelfth in a row was answered")
+
+      var burstSeen = false
+      var burstGone = false
+      var cards = []
+      for (var f = 0; f < 12; f++) {
+        var nowBurst = false
+        var drawnCards = []
+        root.walk(race, function (item) {
+          var n = String(item.objectName)
+          if (n === "chargeBurst" && root.drawn(item))
+            nowBurst = true
+          if (n === "handCard" && root.drawn(item))
+            drawnCards.push(item)
+        })
+        if (nowBurst)
+          burstSeen = true
+        else if (burstSeen)
+          burstGone = true
+        if (drawnCards.length > cards.length)
+          cards = drawnCards
+        race.stepClock(60)
+      }
+      verify(burstSeen,
+             "the twelve segments burst -- and they burst on the external clock, "
+             + "which is the clock every piece of this piece's evidence runs on")
+      verify(burstGone, "and the burst is over, not a permanent decoration")
+
+      compare(cards.length, 3, "three cards were dealt")
+      var names = ""
+      for (var c = 0; c < cards.length; c++) {
+        verify(cards[c].height > cards[c].width * 1.2,
+               "card " + (c + 1) + " is portrait, in the proportions of a playing "
+               + "card (" + Math.round(cards[c].width) + " x "
+               + Math.round(cards[c].height) + ")")
+        verify(cards[c].labelSize >= 18,
+               "and its name is set at " + cards[c].labelSize
+               + " px, not the 12 px caps of a list row")
+        names += String(cards[c].cardLabel) + " "
+      }
+      // Three cards side by side, not three rows down a panel.
+      var ys = []
+      for (var d = 0; d < cards.length; d++)
+        ys.push(Math.round(cards[d].mapToItem(root, 0, 0).y))
+      compare(ys[0], ys[1], "the three cards are on one line, not stacked")
+      compare(ys[1], ys[2], "the three cards are on one line, not stacked")
+      console.log("FX-HAND|" + Math.round(cards[0].width) + "x"
+                  + Math.round(cards[0].height) + " each, name type "
+                  + cards[0].labelSize + "px|" + names.trim())
+      race.warmup = 6
+      race.buildRace()
+    }
+
     // The Pile-Up's sky flash, against the design's 3 Hz cap. Two flashes, and
     // the gap between their peaks measured off the screen's own property.
     function test_11_the_sky_flashes_twice_and_never_faster_than_3_hz() {

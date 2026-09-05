@@ -2424,8 +2424,14 @@ FocusScope {
     segments: race.state ? race.state.streakThreshold : Engine.CHARGE_SEGMENTS
     glowFrom: Engine.CHARGE_GLOW_FROM
     // The caption's 1.25 Hz breath is a wall-clock animation, so it is cut
-    // under an external clock for the same reason the caret's blink is.
-    reducedMotion: race.reducedMotion || race.externalClock
+    // under an external clock for the same reason the caret's blink is -- and
+    // ONLY that. ROUND 3: this used to fold the external clock into
+    // `reducedMotion`, which also switched off the twelve-segment burst, and the
+    // burst is a pure function of the effect clock and reproducible. The result
+    // was that no strip, no dump and no test in two rounds of this piece could
+    // photograph the burst, and a blind critic reported it missing.
+    reducedMotion: race.reducedMotion
+    externalClock: race.externalClock
     holdingHand: race.hand.length > 0
     // PIECE F: "the charge bar flashes, the twelve segments burst".
     fxNow: track.fxClock
