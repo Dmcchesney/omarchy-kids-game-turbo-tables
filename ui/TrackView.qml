@@ -2185,6 +2185,8 @@ Item {
     cageBorn = -1e9
     cageCracked = 0
     cageCount = 0
+    blockBorn = -1e9
+    blockKart = -1
     towBorn = -1e9
     whipBorn = -1e9
     towKart = -1
@@ -2328,14 +2330,26 @@ Item {
   }
 
   function fxBlockedMe(card, fromId) {
-    // The child's own cage taking the hit. The white flash and the ring, and
-    // the cage cracks and goes.
-    fxWorldFlash("#ffffff", 0.42, 160)
+    // The child's own cage taking the hit -- the same five beats as a block on
+    // a rival, off the same numbers, because it is the same event seen from the
+    // other seat. The cage that cracks here is the one that has been drawn
+    // round the child's kart since they played the card, so nothing has to
+    // appear: `cageCracked` starts it coming apart.
+    var rc = CardFx.BEATS.rollCage
+    fxWorldFlash("#ffffff", reducedMotion ? rc.blockFlash * 0.66 : rc.blockFlash,
+                 rc.blockFlashMs)
     fxSound("block", 0)
     fxHold(60)
+    fxShakeBy(rc.blockShake)
     cageCracked = fxClock
-    if (heroIndex >= 0)
-      fxSparks(heroIndex, 12, fxKartSpan(heroIndex) * 0.5, 420, "#f2e6c4", 0)
+    if (heroIndex >= 0) {
+      var hs = fxKartSpan(heroIndex)
+      fxSparks(heroIndex, 22, fxMarkSize(hs * 0.55, 0.042), 460, "#ffffff", 0)
+      fxRing(heroIndex, fxMarkSize(hs * 0.16, 0.010), fxMarkSize(hs * 1.30, 0.115),
+             rc.blockRingMs, "#ffffff", 4, 0)
+      fxRing(heroIndex, fxMarkSize(hs * 0.16, 0.010), fxMarkSize(hs * 0.90, 0.078),
+             rc.blockRingMs, Theme.amber, 2, 90)
+    }
   }
 
   // `swap`. Design, Tow Hook: "the line goes taut and the two karts zip past
@@ -2563,10 +2577,36 @@ Item {
 
     if (entry.blocked === true) {
       // "the wrench shatters against the target's Roll Cage with a white flash
-      // and a ring, the cage outline cracks and vanishes"
-      fxSparks(kart, 16, span * 0.55, 460, "#ffffff", delay)
+      // and a ring, the cage outline cracks and vanishes ... the block is the
+      // payoff and must be loud."
+      //
+      // ROUND 3. Round two had the flash and the callout and neither of the two
+      // things the sentence is actually about, and a blind critic said so of
+      // both builds: "three grey puffs, a screen flash, and a text callout".
+      // Grey is this project's oldest failure. All five beats are here now, in
+      // the order the sentence writes them, and every number is
+      // `CardFx.BEATS.rollCage`'s.
+      var rc = CardFx.BEATS.rollCage
+      // The cage, which is the thing that held. It snaps on white-hot, holds,
+      // and comes apart -- `fx.blockCage` draws it.
+      blockKart = kart
+      blockBorn = fxClock
+      // The shatter: white shards off the bar the wrench hit, not dust.
+      fxSparks(kart, 22, fxMarkSize(span * 0.62, 0.042), 460, "#ffffff", delay)
+      // "a white flash and a RING". Two of them, a beat apart, so the block
+      // reads as something bouncing OFF rather than something landing.
+      fxRing(kart, fxMarkSize(span * 0.16, 0.010), fxMarkSize(span * 1.30, 0.115),
+             rc.blockRingMs, "#ffffff", 4, delay)
+      fxRing(kart, fxMarkSize(span * 0.16, 0.010), fxMarkSize(span * 0.90, 0.078),
+             rc.blockRingMs, Theme.amber, 2, delay + 90)
+      // The light of it on the panel it struck.
+      fxPuffLater(kart, 0, -span * 0.24, fxMarkSize(span * 0.30, 0.030), 2.2, 280,
+                  "#ffffff", 0.06, delay, 1.0)
       fxSound("block", delay)
-      fxWorldFlash("#ffffff", 0.30, 150)
+      fxWorldFlash("#ffffff", reducedMotion ? rc.blockFlash * 0.66 : rc.blockFlash,
+                   rc.blockFlashMs)
+      fxShakeBy(rc.blockShake)
+      fxHold(60)
       fxTag(kart, "BLOCKED", Theme.teal, 1200, false, delay)
       return
     }
@@ -2784,6 +2824,11 @@ Item {
     var b = (t >= fxSkyGap && t < fxSkyGap + 280) ? CardFx.bump((t - fxSkyGap) / 280) : 0
     return Math.max(a, b)
   }
+
+  // The block's own cage, on the victim: which kart, and when the wrench hit
+  // it. See `fx.blockCage`.
+  property real blockBorn: -1e9
+  property int blockKart: -1
 
   // The Roll Cage.
   property real cageBorn: -1e9
@@ -3411,103 +3456,82 @@ Item {
   }
 
   // --------------------------------------------------------- the Roll Cage
-  // "a cage frame draws itself around your kart line by line over 300, then
-  // settles to a soft amber pulse that stays as long as it is active."
   //
-  // Eight lines around the child's own car, each starting a little after the
-  // one before it so the cage is built rather than switched on. Drawn in QML
-  // for the reason the kit lists it as not-baked: it is an outline around a
-  // thing whose size changes every frame.
-  Item {
+  // Two of them. `ui/parts/CageOutline.qml` is the shape; these are the two
+  // cars it goes round.
+  //
+  // THE CAGE IS AROUND THE CAR, NOT BESIDE IT.
+  //
+  // ROUND 2. `span` was 0.52 of the sheet, which made the box 1.04 SHEETS wide
+  // -- and a car is about 0.60 to 0.65 of its own sheet, because the bake
+  // leaves margin on both sides. `tall` was 0.92 of the cell measured up from
+  // the contact point, and the cell's roof line is at 0.62, so the top rail
+  // floated a third of a car above the roof. A blind critic called it "an
+  // oversized plain rectangle offset to the right of the kart, floating in the
+  // road rather than around the car", and it was two of those three.
+  //
+  // The numbers now come off the car, and off the RENDERED frame rather than
+  // off the sheet's nominal geometry, because this file has been caught by that
+  // before (see `kartSheetSpan`). At `playerZ` the sheet draws 400 px wide, the
+  // quantised cell 384, and the rear-view body 208 -- so 0.29 of the sheet
+  // either side is a cage about a tenth wider than the car it is around. The
+  // roof of the tallest body sits about 0.39 of the cell height above the
+  // contact point (`kartRoofFraction`'s 0.62 is where a TAG hangs, which is
+  // deliberately clear of the roof), so the hoop goes at 0.50 and the sill just
+  // under the tyres.
+  CageOutline {
     id: cage
     objectName: "fx.rollCage"
-    // THE CAGE IS AROUND THE CAR, NOT BESIDE IT.
-    //
-    // ROUND 2. `span` was 0.52 of the sheet, which made the box 1.04 SHEETS
-    // wide -- and a car is about 0.60 to 0.65 of its own sheet, because the
-    // bake leaves margin on both sides. `tall` was 0.92 of the cell measured up
-    // from the contact point, and the cell's roof line is at 0.62, so the top
-    // rail floated a third of a car above the roof. A blind critic called it
-    // "an oversized plain rectangle offset to the right of the kart, floating
-    // in the road rather than around the car", and it was two of those three.
-    //
-    // The numbers now come off the car: 0.35 of the sheet either side of the
-    // contact point (a shade wider than the widest body at any yaw, so it
-    // clears the wheels), from just above `kartRoofFraction` down to just
-    // below the tyres.
-    // The two numbers are measured off the rendered frame rather than off the
-    // sheet's nominal geometry, because the sheet is not the car and this file
-    // has been caught by that before (see `kartSheetSpan`). At `playerZ` the
-    // sheet draws 400 px wide, the quantised cell 384, and the rear-view body
-    // 208 -- so 0.29 of the sheet either side is a cage about a tenth wider
-    // than the car it is around. The roof of the tallest body sits about 0.39
-    // of the cell height above the contact point (`kartRoofFraction`'s 0.62 is
-    // where a TAG hangs, which is deliberately clear of the roof), so the hoop
-    // goes at 0.50 and the sill just under the tyres.
-    readonly property real span: view.kartSheetPixels(view.playerZ) * 0.29
-    readonly property real tall: view.kartSpriteH(view.playerZ) * 0.54
-    readonly property real cx: view.uAt(view.heroLane, view.playerZ) * view.width + view.shakeX
-    readonly property real cy: view.vAt(view.playerZ) * view.height + view.shakeY
-    // The crack: the outline breaks up over 260 ms and goes.
-    readonly property real crack: view.cageCrackT < 0 ? 0
-                                  : CardFx.phase(view.cageCrackT, 260)
-    readonly property real amount: view.cageBorn <= -1e8 ? 0
-                                   : (crack > 0 ? Math.max(0, 1 - crack) * (crack < 0.5 ? 1 : 0.4)
-                                                : view.cagePulse)
-
-    // A ROLL CAGE, NOT A LADDER. Round one drew a grid: two horizontals, two
-    // verticals and four more uprights, evenly spaced. What a roll cage is, is
-    // a main hoop over the driver, two tapered uprights down to the sill, a
-    // waist rail, a front hoop and a diagonal cross-brace -- and the brace is
-    // the line that makes the shape read as a cage rather than as a box.
-    //
-    // Each entry is [x1, y1, x2, y2, start] in the item's own 0..1 box, and
-    // `start` is where in the 300 ms draw that member begins, so the frame
-    // assembles hoop-first the way one is welded.
-    readonly property var spec: [
-      // the main hoop, over the roof
-      [0.10, 0.06, 0.90, 0.06, 0.00],
-      // its two uprights, tapering out to the sill
-      [0.10, 0.06, 0.03, 1.00, 0.18],
-      [0.90, 0.06, 0.97, 1.00, 0.18],
-      // the sill, along the bottom of the doors
-      [0.03, 1.00, 0.97, 1.00, 0.40],
-      // the waist rail, at the window line
-      [0.05, 0.60, 0.95, 0.60, 0.52],
-      // the cross-brace: the line that says cage
-      [0.10, 0.06, 0.97, 1.00, 0.64],
-      [0.90, 0.06, 0.03, 1.00, 0.72],
-      // the front hoop
-      [0.20, 0.30, 0.80, 0.30, 0.84]
-    ]
-
-    x: cx - span
-    y: Math.max(view.fxTopFor(cx, span), cy - tall * 0.926)
-    width: span * 2
-    height: tall
+    cx: view.uAt(view.heroLane, view.playerZ) * view.width + view.shakeX
+    cy: view.vAt(view.playerZ) * view.height + view.shakeY
+    span: view.kartSheetPixels(view.playerZ) * 0.29
+    tall: view.kartSpriteH(view.playerZ) * 0.54
+    topLimit: view.fxTopFor(cx, span)
+    draw: view.reducedMotion ? 1 : view.cageDraw
+    crack: view.cageCrackT < 0 ? -1 : CardFx.phase(view.cageCrackT, 260)
+    amount: view.cageBorn <= -1e8 ? 0 : view.cagePulse
+    tone: Theme.amber
     z: 1000 - view.playerZ + 0.007
-    visible: amount > 0.02 && view.cageCrackT < 260
+  }
 
-    // top, bottom, left, right, and the four uprights, each with its own start
-    // in the 300 ms draw so the frame assembles.
-    Repeater {
-      model: cage.visible ? cage.spec : 0
-
-      Line {
-        readonly property real begin: modelData[4]
-        readonly property real g: view.reducedMotion
-                                  ? 1
-                                  : Math.max(0, Math.min(1, (view.cageDraw - begin) / 0.20))
-        x1: modelData[0] * cage.width
-        y1: modelData[1] * cage.height
-        x2: modelData[2] * cage.width
-        y2: modelData[3] * cage.height
-        thickness: 2
-        tone: Theme.amber
-        grow: cage.crack > 0 ? Math.max(0, 1 - cage.crack * (1 + begin)) : g
-        amount: cage.amount
-      }
-    }
+  // THE BLOCK'S OWN CAGE, ON THE VICTIM.
+  //
+  // ROUND 3. Design, Wrench: "the wrench shatters against the target's Roll
+  // Cage with a white flash and a ring, the cage outline cracks and vanishes
+  // ... the block is the payoff and must be loud." A blind critic found, on
+  // both builds: "there is no cage outline on the victim, nothing cracks,
+  // nothing shatters -- three grey puffs, a screen flash, and a text callout."
+  //
+  // A rival's cage is not drawn while they merely hold one: three amber
+  // trapezoids standing over the field for a whole lap would be a HUD, and the
+  // road is not one. It is drawn at the moment it EARNS its existence -- it
+  // snaps on white-hot inside 90 ms as the wrench hits it, holds for a beat,
+  // and comes apart over the design's 260 ms. That is the whole of what the
+  // sentence describes, and it is the only frame of the game where a defensive
+  // card is a picture.
+  CageOutline {
+    id: blockCage
+    objectName: "fx.blockCage"
+    readonly property real age: view.blockBorn <= -1e8 ? -1 : view.fxClock - view.blockBorn
+    readonly property var b: CardFx.BEATS.rollCage
+    cx: view.fxKartX(view.blockKart)
+    cy: view.fxKartY(view.blockKart)
+    span: view.kartSheetPixels(view.fxKartZ(view.blockKart)) * 0.29
+    tall: view.kartSpriteH(view.fxKartZ(view.blockKart)) * 0.54
+    topLimit: view.fxTopFor(cx, span)
+    // It arrives already welded -- a cage that draws itself line by line is the
+    // child EARNING one, and this one is being destroyed.
+    draw: 1
+    crack: age < 0 ? -1
+                   : CardFx.phase(age - (b.blockCageMs - b.blockCrackMs), b.blockCrackMs)
+    amount: age < 0 ? 0 : Math.min(1, age / 90)
+    // White-hot at the shatter, cooling to the card's amber as it comes apart.
+    tone: age >= 0 && age < 140 ? "#ffffff" : Theme.amber
+    thickness: 3
+    z: 1000 - view.fxKartZ(view.blockKart) + 0.007
+    visible: age >= 0 && age < b.blockCageMs
+             && view.fxKartZ(view.blockKart) > view.nearDistance
+             && view.fxKartZ(view.blockKart) < view.drawDistance
   }
 
   // ------------------------------------------------ the world flash and edges

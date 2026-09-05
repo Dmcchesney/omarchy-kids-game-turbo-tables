@@ -927,6 +927,61 @@ Item {
       verify(track.cageBorn > -1e8, "and it is still up, because the effect is still up")
     }
 
+    // THE BLOCK IS THE PAYOFF AND MUST BE LOUD.
+    //
+    // Design, Wrench: "the wrench shatters against the target's Roll Cage with
+    // a white flash and a ring, the cage outline cracks and vanishes, and the
+    // callout reads ROLL CAGE HELD on their side." A blind critic checked that
+    // sentence against both builds in round two and found none of it: "there is
+    // no cage outline on the victim, nothing cracks, nothing shatters -- three
+    // grey puffs, a screen flash, and a text callout."
+    //
+    // Every clause is one line below, measured off the drawn tree.
+    function test_16_the_block_shatters_a_cage_that_is_actually_there() {
+      preroll()
+      verify(race.injectEvent("blocked", "wrench"), "the rules emitted a block")
+      var sawCage = false
+      var cageGoesAway = false
+      var ring = 0
+      var flash = 0
+      var sparks = 0
+      var said = false
+      for (var f = 0; f < 26; f++) {
+        var boxes = root.effectBoxes()
+        var cageNow = false
+        for (var i = 0; i < boxes.length; i++) {
+          if (boxes[i].name === "fx.blockCage")
+            cageNow = true
+          if (boxes[i].name === "fx.ring")
+            ring = Math.max(ring, boxes[i].box.width)
+          if (boxes[i].name === "fx.sparks")
+            sparks = Math.max(sparks, boxes[i].box.width)
+          if (boxes[i].name === "fx.worldFlash")
+            flash = Math.max(flash, boxes[i].opacity)
+        }
+        if (cageNow)
+          sawCage = true
+        else if (sawCage)
+          cageGoesAway = true
+        if (root.calloutSays("ROLL CAGE HELD"))
+          said = true
+        race.stepClock(60)
+      }
+      verify(sawCage, "the victim's cage outline is drawn -- there IS a cage")
+      verify(cageGoesAway, "and it cracks and vanishes rather than staying up")
+      verify(ring >= root.height * 0.07,
+             "the wrench shatters against it with a ring (" + Math.round(ring)
+             + " px across)")
+      verify(flash >= 0.40,
+             "and a white flash worth the name (" + flash.toFixed(2)
+             + ", against round two's 0.30)")
+      verify(sparks >= root.height * 0.06,
+             "the shatter is shards, not three puffs (" + Math.round(sparks) + " px)")
+      verify(said, "and the callout reads ROLL CAGE HELD")
+      console.log("FX-BLOCK|ring " + Math.round(ring) + "px|flash "
+                  + flash.toFixed(2) + "|shatter " + Math.round(sparks) + "px")
+    }
+
     // The Pile-Up's sky flash, against the design's 3 Hz cap. Two flashes, and
     // the gap between their peaks measured off the screen's own property.
     function test_11_the_sky_flashes_twice_and_never_faster_than_3_hz() {
