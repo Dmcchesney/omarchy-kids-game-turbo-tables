@@ -274,8 +274,30 @@ FocusScope {
     letGoTimer.restart()
   }
 
-  readonly property string chosenCard: (chosen >= 0 && chosen < hand.length)
-                                       ? String(hand[chosen]) : ""
+  // ROUND 4 -- `picker.hand`, QUALIFIED, AND FOUR OF THE EIGHT CARDS DEPEND ON IT.
+  //
+  // This read `hand[chosen]` unqualified, and round three's "three across"
+  // rewrite of the panel below introduced `Row { id: handRow }` -- which was
+  // `id: hand`. A file-scope id BEATS the root object's own property in QML's
+  // unqualified lookup, so from that commit on `hand` here was a Row: its
+  // `.length` is undefined, `chosen < undefined` is false, and `chosenCard`
+  // was the empty string on every frame of every race.
+  //
+  // What that cost, because it is not a cosmetic bug: `needsTarget` is false
+  // for the empty string, so `targeting`, `targetId` and `strandedTarget` fell
+  // with it, the panel never offered a rival to aim at, and `confirm()` sent
+  // `cardUsed(index, "")` for a TARGETED card. The engine refuses that. So the
+  // Wrench, the Pothole, the Pile-Up and the Tow Hook -- half the deck, and
+  // every card that attacks anybody -- could be chosen, would print `USE IT`,
+  // and then did nothing at all: the hand came back and the child's twelve-in-
+  // a-row bought them nothing. A blind critic saw exactly that in the
+  // `hand-slam` strip and was right about it.
+  //
+  // The id is renamed AND this reads `picker.` explicitly. Either alone fixes
+  // it; both together mean the next id cannot bring it back.
+  readonly property string chosenCard: (picker.chosen >= 0
+                                        && picker.chosen < picker.hand.length)
+                                       ? String(picker.hand[picker.chosen]) : ""
   // Does the chosen card need a rival at all? This is a property of the card
   // and nothing else, so it stays true when the rival list empties -- which is
   // the whole point. The old `targeting` folded "this card is targeted" and
@@ -302,7 +324,7 @@ FocusScope {
   // needs no rival.
   signal cardUsed(int index, string targetId)
 
-  visible: hand.length > 0 || picker.slamming
+  visible: picker.hand.length > 0 || picker.slamming
 
   // Two invariants the previous version did not keep, and both were reachable
   // in a real Grand Prix.
@@ -528,7 +550,10 @@ FocusScope {
       // menu. `ui/parts/HandCard.qml` draws a portrait card in playing-card
       // proportions; this is the hand it is laid out in.
       Row {
-        id: hand
+        // NOT `id: hand`. See `chosenCard` above: that id shadowed the root's
+        // own `hand` property for every unqualified binding in this file and
+        // silently disabled every targeted card in the deck for a whole round.
+        id: handRow
         width: parent.width
         spacing: picker.px(9)
         readonly property real cardWidth: Math.floor((width - spacing * 2) / 3)
@@ -563,12 +588,12 @@ FocusScope {
           readonly property real slamEnd: (CardFx.HAND.enlargeMs + CardFx.HAND.slamMs)
                                           / picker.slamSpan
 
-          width: hand.cardWidth
+          width: handRow.cardWidth
           height: card.implicitHeight
 
           HandCard {
             id: card
-            width: hand.cardWidth
+            width: handRow.cardWidth
             cardId: String(modelData)
             index: cardSlot.slot + 1
             selected: cardSlot.isChosen && !picker.slamming

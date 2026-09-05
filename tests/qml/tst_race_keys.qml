@@ -1034,6 +1034,63 @@ Item {
       }
     }
 
+    // ROUND 4 OF PIECE F -- THE CARDS THAT ATTACK SOMEBODY ACTUALLY FIRE.
+    //
+    // Every spending case above this line happens to choose a card whose scope
+    // is `self`, so for a whole round the panel could be shipped with
+    // `chosenCard` reading the empty string -- `ui/Picker.qml` had an `id: hand`
+    // on the layout Row shadowing the root's own `hand` property -- and the
+    // suite stayed green while the Wrench, the Pothole, the Pile-Up and the Tow
+    // Hook were all refused by the engine for want of a target. Half the deck,
+    // and every card that does anything to a rival.
+    //
+    // So this case walks to the first TARGETED card in the hand, and asserts
+    // the three things that were false: the panel knows the card needs a rival,
+    // it is aiming at a named one, and the rival's own lap requirement goes up
+    // when Enter lands. The last of those is the engine's number, not the
+    // panel's, so no amount of view state can make it pass.
+    function test_31_a_targeted_card_is_aimed_and_really_lands() {
+      tc.fresh(42)
+      tc.dealHand()
+      var slot = -1
+      for (var i = 0; i < race.hand.length; i++)
+        if (Engine.isCard(race.hand[i])
+            && Engine.CARDS[race.hand[i]].scope === "targeted")
+          slot = slot < 0 ? i : slot
+      verify(slot >= 0, "the hand holds a card that needs a rival: "
+                        + JSON.stringify(race.hand))
+      // A fact whose answer cannot be read as this card's key, so the press is
+      // unambiguously a card choice.
+      tc.hintUntil(tc.startsWithNot(slot + 1))
+      var before = tc.snap()
+      tc.press(String(slot + 1))
+      compare(race.handPanel.chosen, slot, "the card is chosen")
+      compare(race.handPanel.chosenCard, race.hand[slot],
+              "and the panel knows WHICH card it is -- this read \"\" for a round")
+      verify(race.handPanel.needsTarget,
+             "a targeted card asks for a rival: " + race.handPanel.chosenCard)
+      verify(race.handPanel.targetId.length > 0,
+             "and the panel is aiming at one")
+      var victim = race.handPanel.targetId
+      var need = 0
+      for (var b = 0; b < race.state.racers.length; b++)
+        if (race.state.racers[b].id === victim)
+          need = race.state.racers[b].questionsNeededThisLap
+      tc.press("E")
+      var after = tc.snap()
+      var needAfter = 0
+      for (var c = 0; c < race.state.racers.length; c++)
+        if (race.state.racers[c].id === victim)
+          needAfter = race.state.racers[c].questionsNeededThisLap
+      console.log("ROW|F4-TARGET|" + race.hand.length + " left|" + victim
+                  + " needed " + need + " -> " + needAfter)
+      compare(after.cards - before.cards, 1, "the card was played")
+      compare(after.hand, 0, "using one spends all three")
+      verify(needAfter > need,
+             "and the rival it was aimed at really pays for it: " + victim
+             + " needed " + need + ", now needs " + needAfter)
+    }
+
     function after0() { return race.shownEntry }
 
     function cleanup() {
