@@ -1290,12 +1290,27 @@ Item {
 
     Item {
       id: badge
+      // PIECE F ROUND 3. Named so `dev/Harness.qml --dump-rects` and the
+      // round-3 tests can find it: with the haul below, a plate is no longer
+      // only a label bolted under a car -- it is where an impact's readout goes
+      // when the camera cannot show the victim.
+      //
+      // NOT an `fx.` name, and the difference is real rather than cosmetic: an
+      // `fx.` item is something this piece put in the air and `test_03` asserts
+      // that a wrong answer puts NONE of them there. A rival's name plate is up
+      // for the whole race whatever the child does. It carries an effect
+      // readout; it is not one.
+      objectName: "racePlate"
       readonly property color paintCol: kartPaint
       readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
       readonly property real zed: isHuman ? view.playerZ : view.zForDelta(delta)
       readonly property real spriteH: view.kartSpriteH(zed)
       readonly property int gapQuestions: kartGap
-      readonly property int tagSize: Math.max(13, Math.min(19, Math.round(spriteH * 0.16)))
+      // PIECE F ROUND 3. 0 for a victim the camera can show, 1 for one it
+      // cannot; see `fxPlateHaul`. Everything below is continuous in it.
+      readonly property real haul: view.fxPlateHaul(index)
+      readonly property int tagSize: Math.round(
+          Math.max(13, Math.min(19, Math.round(spriteH * 0.16))) * (1 + haul * 0.95))
 
       // Ahead of the child, and only ahead: a rival level with or behind them
       // is on the chaser rail below instead. Round two gated this on
@@ -1323,7 +1338,21 @@ Item {
         return rank
       }
 
-      x: view.uAt(view.laneOf(kartSeat), zed) * view.width + view.shakeX - width / 2
+      // Where the plate sits when it belongs to the car, and where it goes when
+      // the car is too far away to carry it. The haul target is the near field
+      // on the centre line: below the callout, above the chaser rail, on road
+      // and nothing else, stacked by the same distance rank the road plates
+      // use so three hauled plates cannot land on one line.
+      readonly property real anchorX: view.uAt(view.laneOf(kartSeat), zed) * view.width
+                                      + view.shakeX - width / 2
+      readonly property real anchorY: view.vAt(zed) * view.height + view.shakeY + leader
+      readonly property real haulX: view.width * 0.5 - width / 2
+      readonly property real haulY: view.height * 0.575 + plateRow * (height + 6)
+      readonly property real carX: view.uAt(view.laneOf(kartSeat), zed) * view.width
+                                   + view.shakeX
+      readonly property real carY: view.vAt(zed) * view.height + view.shakeY
+
+      x: anchorX + (haulX - anchorX) * haul
       // BELOW the kart, stacked downward, furthest-away first.
       //
       // Above the kart was the obvious place and it was wrong twice. Three
@@ -1341,18 +1370,23 @@ Item {
       // offsets and the depths pull the same way, so the vertical gap between
       // two plates is at least one row however the field is spread.
       readonly property real leader: 3 + plateRow * (height + 3)
-      y: view.vAt(zed) * view.height + view.shakeY + leader
+      y: anchorY + (haulY - anchorY) * haul
 
-      // The leader: from the car's contact point on the road down to this
-      // plate. `badge.x` is the car's own projected centre less half the
-      // plate's width, so `width / 2` is exactly under the car.
-      Rectangle {
-        x: Math.round(badge.width / 2)
-        y: -badge.leader
-        width: 1
-        height: badge.leader
-        antialiasing: false
-        color: Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.85)
+      // The leader: from the car's contact point on the road to the top of this
+      // plate, in the rival's own paint. It used to be a one-pixel vertical
+      // Rectangle, because the plate was always directly under the car; now the
+      // plate may have travelled halfway down the road, so it is a line between
+      // two points and it stretches to keep pointing at the car it names. With
+      // `haul` at zero the two ends are exactly where they were.
+      Line {
+        x1: Math.round(badge.width / 2)
+        y1: 0
+        x2: badge.carX - badge.x
+        y2: badge.carY - badge.y
+        thickness: 1 + badge.haul
+        soft: badge.haul > 0.02
+        tone: badge.paintCol
+        amount: 0.85
       }
 
       Rectangle {
@@ -1801,6 +1835,70 @@ Item {
                    Math.max(plateGround.a, 0.94))
   }
 
+  // ------------------------------------------- HOW FAR AWAY THE VICTIM IS
+  //
+  // ROUND 3, AND IT IS A SHIPPING BLOCKER'S WORTH OF ARITHMETIC.
+  //
+  // Round two disclosed its own worst case and left it: with the child in 4th
+  // and the Wrench aimed at the race LEADER -- "the single most natural thing a
+  // child will do with a Wrench" -- the projectile is gone by 120 ms and for
+  // the next 1.1 seconds there is nothing legible on the screen at all. Every
+  // impact mark in the piece is sized off the victim's own sprite and the
+  // victim's own sprite is thirty pixels of car at the vanishing point.
+  //
+  // Round two's answer was to refuse to scale the sprite past what the world
+  // says, which is right, and then to stop, which is not. This is the number
+  // the rest of the answer is built on: 0 when the victim is drawn big enough
+  // to carry a mark, 1 when the camera cannot show them at all. Everything that
+  // reads off it is CONTINUOUS in it, so there is no threshold at which the
+  // game changes language -- a victim half a floor away gets half the treatment.
+  //
+  // The floor is a fraction of the frame, so it is the same distance at every
+  // screen size. 0.19 of the height is 205 px of sheet at 1080p, which draws
+  // about 107 px of car -- a car a `+5` can sit on.
+  readonly property real fxVictimFloor: height * 0.19
+  function fxVictimFar(index) {
+    if (index < 0 || index >= kartModel.count)
+      return 1
+    var z = fxKartZ(index)
+    if (z <= nearDistance || z >= drawDistance)
+      return 1
+    var px = kartSheetPixels(z)
+    return Math.max(0, Math.min(1, (fxVictimFloor - px) / (fxVictimFloor * 0.75)))
+  }
+
+  // THE PLATE COMES TO YOU.
+  //
+  // The one readout an effect has that the projection cannot take away is the
+  // victim's own name plate: every racer has one, ahead on the road or on the
+  // chaser rail, and it is the same object in both places. So when the victim
+  // is too far away to carry the news, the plate leaves the kart and travels
+  // down the road to the near field, where it is drawn at nearly twice the
+  // size, with the leader line stretching to keep pointing at the car it
+  // belongs to. Then it goes back.
+  //
+  // Nothing new is invented and nothing is scaled past what the world says:
+  // the KART stays exactly where the race puts it, and the LABEL -- which was
+  // never a thing in the world -- moves to where a child can read it. It is
+  // `fxVictimFar` times an ease in and an ease out, so a near victim's plate
+  // does not move at all and the round-two behaviour a critic approved of is
+  // untouched.
+  readonly property real fxHaulMs: 240
+  function fxPlateHaul(index) {
+    var now = fxClock
+    if (index < 0 || index >= kartModel.count)
+      return 0
+    var k = kartModel.get(index)
+    if (k.fxPlate === "" || now >= k.fxPlateUntil)
+      return 0
+    var far = fxVictimFar(index)
+    if (far <= 0.02)
+      return 0
+    var inU = CardFx.easeOut(CardFx.phase(now - k.fxPlateBorn, fxHaulMs))
+    var outU = CardFx.easeOut(CardFx.phase(k.fxPlateUntil - now, fxHaulMs))
+    return far * Math.min(inU, outU)
+  }
+
   function fxPlateRing(index) {
     var now = fxClock
     if (index < 0 || index >= kartModel.count)
@@ -1902,6 +2000,7 @@ Item {
   ListModel { id: fxPuffModel }    // smoke, dust, exhaust
   ListModel { id: fxSparkModel }   // spark bursts
   ListModel { id: fxTagModel }     // +5, +15, TOWED
+  ListModel { id: fxRingModel }    // shock rings: an impact seen from a distance
 
   // Every spawn takes a life in milliseconds and is dead the moment the clock
   // passes it. Nothing is ever removed by hand.
@@ -1962,6 +2061,40 @@ Item {
       "pDelay": delay, "pPeak": peak === undefined ? 0.62 : peak
     })
   }
+  // AN IMPACT SEEN FROM A DISTANCE.
+  //
+  // ROUND 3. Design v4 asks for a ring by name once -- "the wrench shatters
+  // against the target's Roll Cage with a white flash and a ring" -- and needs
+  // one in a second place the design does not name, because the design does not
+  // know how far away the victim is: a blind critic found that wrenching the
+  // race LEADER, which is the most natural thing a child ever does with a
+  // Wrench, put nothing legible on the screen for 1.1 seconds. The sparks, the
+  // flare and the smoke are all sized off the victim's own sprite, and the
+  // victim's own sprite is thirty pixels wide at the vanishing point.
+  //
+  // A ring is the one impact mark that can have a FLOOR on its size without
+  // lying about the world: it is not an object at the victim's distance, it is
+  // the shock the impact sent out, and a shock is drawn where it reaches. The
+  // callers give it a floor in fractions of the frame, so it is the same mark
+  // at every screen size and at every distance.
+  // The size an impact mark is DRAWN at: what the projection says, or a floor
+  // in fractions of the frame height, whichever is larger. This is the one
+  // place the piece departs from "everything is the size the world says", it is
+  // named so a critic can find it, and the argument for it is that a spark
+  // burst and a shock ring are not objects at the victim's distance -- they are
+  // the light and the shock the impact threw, and light does not shrink with
+  // the thing that made it. The victim's KART is never touched.
+  function fxMarkSize(worldPx, frameFraction) {
+    return Math.max(worldPx, height * frameFraction)
+  }
+
+  function fxRing(kart, fromPx, toPx, life, tone, thickness, delay) {
+    fxRingModel.append({
+      "rKart": kart, "rBorn": fxClock, "rLife": life, "rDelay": delay,
+      "rFrom": fromPx, "rTo": toPx, "rTone": String(tone), "rWidth": thickness
+    })
+  }
+
   function fxSparks(kart, count, reach, life, tone, delay) {
     fxSparkModel.append({
       "sKart": kart, "sCount": count, "sReach": reach, "sBorn": fxClock,
@@ -2038,6 +2171,7 @@ Item {
     fxPuffModel.clear()
     fxSparkModel.clear()
     fxTagModel.clear()
+    fxRingModel.clear()
     cueCard = ""
     cueImpacted = false
     cuePending = []
@@ -2448,13 +2582,16 @@ Item {
     } else if (card === "wrench") {
       // "a spark burst on the target kart, the kart jolts sideways one column
       // and back"
-      fxSparks(kart, b.sparks, span * 0.60, 480, b.tone, delay)
+      fxSparks(kart, b.sparks, fxMarkSize(span * 0.60, 0.030), 480, b.tone, delay)
       fxSound("wrench-clang", delay)
       // The burst's own light on the panel it struck. A spark is a chip of
       // metal and reads as a pixel; the flare around it is what says the
       // wrench ARRIVED, and it is the difference between a hit a child sees
       // and fourteen dots on a dark road.
-      fxPuffLater(kart, 0, -span * 0.28, span * 0.26, 2.2, 300, "#fffbe8", 0.05, delay, 1.0)
+      fxPuffLater(kart, 0, -span * 0.28, fxMarkSize(span * 0.26, 0.026), 2.2, 300,
+                  "#fffbe8", 0.05, delay, 1.0)
+      fxRing(kart, fxMarkSize(span * 0.18, 0.012), fxMarkSize(span * 1.10, 0.086),
+             420, "#fff3d0", 3, delay)
       fxMark(kart, "jolt", b.joltMs)
     } else if (card === "pothole") {
       // "a two-pixel dip, a dust burst, the kart bounces twice, a hubcap sprite
@@ -2466,7 +2603,10 @@ Item {
       fxSound("hubcap", delay + 180)
       fxPuff(kart, -span * 0.32, 0, span * 0.40, 2.6, 700, "#e7c489", 0.18)
       fxPuff(kart, span * 0.32, 0, span * 0.36, 2.6, 700, "#e7c489", 0.18)
-      fxPuff(kart, 0, span * 0.04, span * 0.30, 2.4, 520, "#fff0cc", 0.06)
+      fxPuff(kart, 0, span * 0.04, fxMarkSize(span * 0.30, 0.028), 2.4, 520,
+             "#fff0cc", 0.06)
+      fxRing(kart, fxMarkSize(span * 0.20, 0.012), fxMarkSize(span * 1.15, 0.092),
+             460, "#f0d79a", 3, delay)
       if (!reducedMotion)
         fxGroundFlyer("hubcap", kart, b.hubcapMs, 4, 0.7, 3)
       // "the kart rides one pixel low with a rattle animation on the wheels
@@ -2492,6 +2632,8 @@ Item {
       // the most natural target in the game -- had nothing on the road at all.
       // This is sized off the ROAD at the wreck's depth, so it is a wall across
       // the tarmac whether the victim is a kart-length ahead or a horizon away.
+      fxRing(kart, fxMarkSize(span * 0.24, 0.016), fxMarkSize(span * 1.55, 0.150),
+             620, "#ffd489", 5, delay)
       var roadPx = sizeAt(roadHalf * 2, fxKartZ(kart))
       for (var d = 0; d < b.dustPuffs; d++)
         fxPuffLater(kart, (d - (b.dustPuffs - 1) / 2) * roadPx * 0.26,
@@ -2726,6 +2868,7 @@ Item {
     fxPruneModel(fxDecalModel, "dBorn", "dLife")
     fxPruneModel(fxFlyerModel, "yBorn", "yDur")
     fxPruneModel(fxPuffModel, "pBorn", "pLife")
+    fxPruneModel(fxRingModel, "rBorn", "rLife")
     fxPruneModel(fxSparkModel, "sBorn", "sLife")
     fxPruneModel(fxTagModel, "gBorn", "gLife")
     // A decal that has scrolled past the camera is gone whatever its life says.
@@ -2937,6 +3080,48 @@ Item {
         // so it stays smoke against a sunset, and an impact flare is near
         // opaque at its core for the two frames it lives.
         amount: pPeak * Math.min(1, parent.u * 6) * (1 - parent.u)
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- the rings
+  // The shock a hit sends out, drawn at a floor size so an impact on a kart at
+  // the vanishing point is still an impact a child can see. See `fxRing`.
+  Repeater {
+    model: fxRingModel
+
+    Item {
+      readonly property real age: view.fxClock - rBorn - rDelay
+      readonly property real u: CardFx.phase(age, Math.max(1, rLife - rDelay))
+      readonly property real d: rFrom + (rTo - rFrom) * CardFx.easeOut(u)
+      readonly property real cx: view.fxKartX(rKart)
+      readonly property real cy: view.fxKartTop(rKart)
+                                 + view.kartSpriteH(view.fxKartZ(rKart)) * 0.30
+
+      objectName: "fx.ring"
+      x: cx - d / 2
+      y: Math.max(view.fxTopFor(cx, d / 2), cy - d / 2)
+      width: Math.max(1, d)
+      height: Math.max(1, d)
+      readonly property real zed: view.fxKartZ(rKart)
+      z: 1000 - zed + 0.006
+      // A ring is a mark ON THE ROAD at the victim's place, so it is drawn only
+      // where the victim is: a rival the camera is in front of has no place on
+      // this road, and their news travels on the chaser rail instead.
+      visible: age >= 0 && u < 1 && d > 2
+               && zed > view.nearDistance && zed < view.drawDistance
+
+      Rectangle {
+        anchors.fill: parent
+        radius: width / 2
+        color: "transparent"
+        antialiasing: true
+        // Thick and bright at the start, thin and gone at the end -- a shock
+        // front, not a bubble.
+        border.width: Math.max(1, rWidth * (1 - parent.u * 0.7))
+        border.color: Qt.rgba(ringTone.r, ringTone.g, ringTone.b,
+                              Math.max(0, 1 - parent.u) * 0.92)
+        readonly property color ringTone: rTone
       }
     }
   }

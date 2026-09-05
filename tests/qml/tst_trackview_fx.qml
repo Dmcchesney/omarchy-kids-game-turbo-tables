@@ -820,6 +820,96 @@ Item {
              + track.kartPlateText(carrying))
     }
 
+    // THE SHIPPING BLOCKER, ASSERTED RATHER THAN DISCLOSED.
+    //
+    // Round two's own evidence showed that a Wrench aimed at the race LEADER --
+    // "the single most natural thing a child will do with a Wrench" -- put
+    // nothing legible on the screen for 1.1 seconds, and round two left it
+    // there. This drives that exact case, at the warm-up where the field has
+    // spread, and asserts what a child has to be able to do: see that somebody
+    // was hit, and read WHO, at a size that is not the size of a kart at the
+    // vanishing point.
+    //
+    // Everything here is measured off the drawn tree. `racePlate` is the
+    // victim's own name plate, found by name and by the text it is carrying.
+    function test_15_hitting_the_leader_brings_the_news_to_the_child() {
+      race.warmup = 22
+      race.buildRace()
+      preroll()
+      // Aim at the racer furthest up the road, which is what `+leader` does in
+      // the harness and what a child does when they are losing.
+      verify(race.injectEvent("cardUsed", "wrench+leader"), "the leader was hit")
+      var victim = -1
+      var farAt = 0
+      for (var f = 0; f < 16; f++) {
+        for (var k = 0; k < track.kartCount; k++)
+          if (track.fxPlateShowing(k)) {
+            victim = k
+            farAt = track.fxVictimFar(k)
+          }
+        race.stepClock(60)
+      }
+      verify(victim >= 0, "the victim's plate carries the readout")
+      verify(farAt > 0.5,
+             "and this really is the far case (" + farAt.toFixed(2)
+             + " of the way past the legibility floor)")
+
+      // The plate itself, as drawn: the box, the type on it, and where it is.
+      var box = null
+      var says = ""
+      var typeSize = 0
+      root.walk(race, function (item) {
+        if (String(item.objectName) !== "racePlate" || !root.drawn(item))
+          return
+        if (item.haul === undefined || item.haul < 0.5)
+          return
+        var p = item.mapToItem(root, 0, 0)
+        box = Qt.rect(p.x, p.y, item.width, item.height)
+        typeSize = item.tagSize
+        root.walk(item, function (kid) {
+          if (kid.text !== undefined && String(kid.text).length > 0)
+            says += String(kid.text) + " "
+        })
+      })
+      verify(box !== null, "the plate left the kart and came to the child")
+      verify(typeSize >= 22,
+             "and it is drawn at a size a six-year-old can read across a room ("
+             + typeSize + " px against the 13 px floor a plate at the vanishing "
+             + "point gets)")
+      verify(says.indexOf("+5") >= 0,
+             "it says what the card cost them: " + says)
+      verify(says.replace(/[+0-9 ]/g, "").length >= 4,
+             "and it says WHO, by name: " + says)
+      verify(box.y > root.height * 0.45,
+             "it is in the near field, not at the vanishing point (y "
+             + Math.round(box.y) + " of " + root.height + ")")
+      // And it still obeys the rule every mark in this piece obeys.
+      verify(!root.overlaps(box, root.factBox) && !root.overlaps(box, root.fieldBox),
+             "and it covers neither the fact nor the answer field")
+
+      // The other half: something visibly happened up the road, at a size the
+      // projection would never have given it.
+      var ring = 0
+      race.buildRace()
+      preroll()
+      race.injectEvent("cardUsed", "wrench+leader")
+      for (var g = 0; g < 16; g++) {
+        var boxes = root.effectBoxes()
+        for (var b = 0; b < boxes.length; b++)
+          if (boxes[b].name === "fx.ring")
+            ring = Math.max(ring, boxes[b].box.width)
+        race.stepClock(60)
+      }
+      verify(ring >= root.height * 0.08,
+             "the impact drew a shock ring at a floor size (" + Math.round(ring)
+             + " px across, on a victim the projection draws about "
+             + Math.round(track.fxVictimFloor * 0.3) + " px wide)")
+      console.log("FX-FARVICTIM|far " + farAt.toFixed(2) + "|plate type "
+                  + typeSize + "px|ring " + Math.round(ring) + "px|says " + says.trim())
+      race.warmup = 6
+      race.buildRace()
+    }
+
     // The Roll Cage's outline is the whole of that card, so it gets its own
     // case: it draws itself over 300 ms and then stays up.
     function test_10_the_roll_cage_draws_itself_and_stays() {
