@@ -111,15 +111,26 @@ Item {
     }
   }
 
+  // PIECE M ROUND 2. HOVER YIELDS TO FOCUS, ON THIS CONTROL TOO.
+  //
+  // The paragraph below claimed it already did, and on the primary variant it
+  // did -- `activeFocus` is tested first there. The SECONDARY variant read
+  // `button.hovered` on its own for both its fill and its border, so a
+  // secondary button that was focused AND under the pointer was drawn as a
+  // third thing: 42,095 pixels away from the focused one, measured by
+  // `test_21` the moment that test started reading the frame instead of a
+  // boolean. Nothing in round one could see it.
+  readonly property bool hoverOnly: button.hovered && !button.activeFocus
+
   Rectangle {
     id: face
     anchors.fill: parent
     radius: Theme.cornerRadius
     // PIECE M. Hover is a step, not a jump: the primary's fill brightens by
     // half what focus brightens it by, and the secondary's outline goes from
-    // 0.55 of its tone to 0.85. Focus still wins where both are true, so a
-    // pointer resting on the control the keyboard is already standing on does
-    // not invent a third look.
+    // 0.55 of its tone to 0.85. Focus wins where both are true, so a pointer
+    // resting on the control the keyboard is already standing on does not
+    // invent a third look.
     color: button.sign
            ? Qt.rgba(button.surface.r, button.surface.g, button.surface.b, 0.85)
            : button.primary
@@ -127,13 +138,13 @@ Item {
                                    : (button.hovered ? Qt.lighter(button.fillColor, 1.11)
                                                      : button.fillColor))
              : Qt.rgba(button.toneColor.r * 0.20, button.toneColor.g * 0.20,
-                       button.toneColor.b * 0.20, button.hovered ? 0.88 : 0.75)
+                       button.toneColor.b * 0.20, button.hoverOnly ? 0.88 : 0.75)
     border.width: button.sign ? 0 : (button.primary ? (button.activeFocus ? 4 : 3) : 1)
     border.color: button.primary
                   ? (button.activeFocus ? Theme.focusRing
                                         : Qt.lighter(button.toneColor, 1.25))
                   : Qt.rgba(button.toneColor.r, button.toneColor.g, button.toneColor.b,
-                            button.hovered ? 0.85 : 0.55)
+                            button.hoverOnly ? 0.85 : 0.55)
   }
 
   // ROUND-4: the sign is a tile.

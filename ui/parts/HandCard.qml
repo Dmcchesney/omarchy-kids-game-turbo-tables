@@ -142,8 +142,16 @@ Item {
     id: face
     anchors.fill: parent
     radius: Theme.cornerRadiusSmall
+    // PIECE M ROUND 2. A CHOSEN CARD LIGHTS UNDER THE POINTER AS WELL.
+    //
+    // It did not: every branch of this colour and of the border below turned on
+    // `selected` first, so the pointer on the one card the child had chosen
+    // changed nothing on the screen. The ring outside stays off for the reason
+    // it always has -- a chosen card already wears the accent and two accent
+    // rings on one card is not a state -- so the answer is in the face instead,
+    // which is a step of brightness and not a second ring.
     color: card.selected
-           ? Theme.selectedFill
+           ? (card.hovered ? Qt.lighter(Theme.selectedFill, 1.22) : Theme.selectedFill)
            : (card.hovered
               ? Qt.rgba(Theme.panelSunken.r + Theme.hoverFill.r * 0.35,
                         Theme.panelSunken.g + Theme.hoverFill.g * 0.35,

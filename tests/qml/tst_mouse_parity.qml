@@ -44,6 +44,19 @@ Item {
 
   MemoryStore { id: memory }
 
+  // Somewhere for the keyboard to stand that is not a control, so a pixel sweep
+  // can ask what HOVER alone draws. `ui/parts/ActionButton.qml` suppresses hover
+  // on a control that already has focus -- the focus picture wins, which is the
+  // rule -- so a sweep run with the keyboard parked on READY UP would report
+  // that READY UP does not light. `dev/Harness.qml --focus -1` does the same
+  // thing for the same reason.
+  Item {
+    id: focusPark
+    width: 0
+    height: 0
+    activeFocusOnTab: false
+  }
+
   // Every screen that has a control on it, alive at once. They are laid out on
   // top of each other and only one is visible at a time: a click is delivered by
   // position, so two visible screens would race for the same pixel.
@@ -234,6 +247,87 @@ Item {
     }
 
     /**
+     * THE BOX A HOVER STATE IS ALLOWED TO PAINT IN: the whole of the control,
+     * which is every click target that reaches the same focus stop.
+     *
+     * A stepper is one stop with two arrows and an inert face on it, so its
+     * three targets are one control 228 px wide and the 48 px arrow lighting all
+     * of it is the control saying "this is me" -- the arrow's own fill is what
+     * says which half you are about to press. A settings row is one stop with a
+     * 612 px row target and a 101 px CHANGE chip on it, and the chip lights the
+     * row for the same reason. A target with no stop -- a card, a printed key
+     * hint -- is its own control and answers for its own box.
+     *
+     * Defined off the stop rather than off `Accessible.role` because the role is
+     * on the CHIP in `ui/parts/SettingRow.qml` while the control a child sees is
+     * the row; the stop is what both targets agree on.
+     */
+    function controlBoxOf(hit, screen, pad) {
+      if (!hit.stop)
+        return suite.boxAround(hit, pad)
+      var box = suite.boxAround(hit, pad)
+      var targets = suite.clickTargetsIn(screen)
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].stop !== hit.stop || !suite.usable(targets[i], screen))
+          continue
+        var other = suite.boxAround(targets[i], pad)
+        box = { "x": Math.min(box.x, other.x), "y": Math.min(box.y, other.y),
+                "right": Math.max(box.right, other.right),
+                "bottom": Math.max(box.bottom, other.bottom) }
+      }
+      return box
+    }
+
+    /** Is this keycap sitting beside something that says what it does? */
+    function keycapIsLabelled(item, screen) {
+      var node = item.parent
+      for (var depth = 0; depth < 3 && node; depth++) {
+        var near = suite.itemsUnder(node)
+        for (var i = 0; i < near.length; i++) {
+          var other = near[i]
+          if (other === item || typeof other.text !== "string"
+              || other.font === undefined)
+            continue
+          if (String(other.text).trim().length >= 3
+              && !KeyHints.isKeycap(other.text, true)
+              && suite.usable(other, screen))
+            return true
+        }
+        node = node.parent
+      }
+      return false
+    }
+
+    /**
+     * Is this item inside a key LEGEND -- the rail in a title band that states
+     * the whole screen's keyboard rather than offering an action where the
+     * action is? Marked `keyLegend` on the Row that holds it.
+     */
+    function inKeyLegend(item) {
+      var node = item
+      while (node) {
+        if (node.keyLegend === true)
+          return true
+        node = node.parent
+      }
+      return false
+    }
+
+    /** The first click target at or above this item. */
+    function clickTargetOver(item, screen) {
+      var node = item
+      while (node) {
+        var kids = node.children
+        for (var i = 0; kids && i < kids.length; i++) {
+          if (kids[i].isClickTarget === true && suite.usable(kids[i], screen))
+            return kids[i]
+        }
+        node = node.parent
+      }
+      return null
+    }
+
+    /**
      * Connect `bump` to `acted()` on every destructive target under `screen`
      * that is not already in `armed`, and remember it there.
      */
@@ -353,6 +447,103 @@ Item {
       }
       verify(checked >= 20, "only " + checked + " live click targets were found across"
              + " five screens; the walk is not seeing the tree")
+    }
+
+    // DIRECTION ONE, THE OTHER HALF: the key column is a list of KEYS.
+    //
+    // ROUND 2, and a critic named it exactly: round one's gate asked only that
+    // `Clickable.key` was non-empty, so `key: "banana"` passed -- on the column
+    // that IS the claim of this direction. Every name in it is now parsed
+    // against the same table `dev/Harness.qml --do key:<name>` posts events
+    // from, so a key column can no longer name a key no keyboard has. It is not
+    // proof that the key does the same thing; tests 10 to 17 and the harness's
+    // drive pairs are that. It is the difference between a column of keys and a
+    // column of prose.
+    //
+    // The exception is declared and narrow: a FOCUS-ONLY target takes no action
+    // at all -- the stepper's inert centre face, the race's answer box -- so
+    // there is no key for it to be equivalent to. What it must have instead is a
+    // stop to put the keyboard on, and that is checked here rather than waved
+    // through.
+    function test_05_every_key_column_names_keys_that_exist() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var targets = suite.clickTargetsIn(list[s].item)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (!suite.usable(hit, list[s].item))
+            continue
+          checked += 1
+          if (hit.focusOnly) {
+            verify(hit.stop !== null,
+                   list[s].name + ": \"" + hit.label + "\" takes no action and puts"
+                   + " the keyboard nowhere, so a click on it does nothing at all")
+            continue
+          }
+          verify(KeyHints.pressable(hit.key),
+                 list[s].name + ": the click target \"" + hit.label + "\" names \""
+                 + hit.key + "\" as the key that does the same thing, and that is not"
+                 + " a key this game can press")
+        }
+      }
+      verify(checked >= 20, "only " + checked + " live click targets were checked")
+    }
+
+    // DIRECTION TWO, ORACLE THREE: A PRINTED KEY IS A PROMISE.
+    //
+    // The hole round one's gate could not see, and the one the critic found by
+    // reading the screens instead of the tables. The two oracles below can only
+    // find items that DECLARE themselves -- an `Accessible.role`, or a place in
+    // a screen's `stops` array -- and a label declares neither, so the picker's
+    // `ESC  BACK` and the confirm sheet's `ESC  KEEP` were invisible to every
+    // check in the piece while the race's identical `ESC  LEAVE` was a control.
+    //
+    // A child who learns that the little ESC line is pressable on one screen
+    // will press it on the next. So this reads the strings, in the grammar the
+    // game prints them in (`dev/KeyHints.js`, shared with the harness so there
+    // is one copy of it), and asks whether a click over each one does what it
+    // says. The only exception is a key LEGEND -- the rail in a title band that
+    // states a whole screen's keyboard -- which is marked on the rail that holds
+    // it and never lights under the pointer.
+    function test_06_every_printed_key_hint_is_a_control() {
+      var list = suite.states()
+      var hints = 0
+      var legends = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var all = suite.itemsUnder(list[s].item)
+        for (var i = 0; i < all.length; i++) {
+          var item = all[i]
+          if (typeof item.text !== "string" || item.font === undefined
+              || item.textFormat === undefined)
+            continue
+          if (!suite.usable(item, list[s].item) || String(item.text).trim().length === 0)
+            continue
+          if (!KeyHints.isHintLine(item.text)
+              && !(KeyHints.isKeycap(item.text, false)
+                   && suite.keycapIsLabelled(item, list[s].item)))
+            continue
+          if (suite.inKeyLegend(item)) {
+            legends += 1
+            verify(suite.clickTargetOver(item, list[s].item) === null,
+                   list[s].name + ": the key legend line \"" + item.text + "\" is"
+                   + " clickable. A legend states the keyboard and never lights;"
+                   + " a hint that is a control does both.")
+            continue
+          }
+          hints += 1
+          verify(suite.clickTargetOver(item, list[s].item) !== null,
+                 list[s].name + ": \"" + String(item.text).replace(/\n/g, " | ")
+                 + "\" is printed as a key hint and a click on it does nothing."
+                 + " The same idiom is a control on the other screens, and a child"
+                 + " who learns it there will press it here.")
+        }
+      }
+      verify(hints >= 4, "only " + hints + " printed key hints were found across every"
+             + " state; the walk is not reading the screen")
+      verify(legends >= 3, "only " + legends + " legend keys were found")
     }
 
     // DIRECTION TWO, ORACLE ONE: nothing is reachable by key and not by click.
@@ -755,48 +946,251 @@ Item {
     // BEFORE pressing it.
     // ------------------------------------------------------------------
 
+    // ==================================================================
+    // ROUND 2: THESE TWO TESTS READ PIXELS, BECAUSE THEIR NAMES ARE CLAIMS
+    // ABOUT PIXELS.
+    // ==================================================================
+    //
+    // The repository's rule: a test's name is a claim, and a test that passes
+    // under mutation of the rule it names is a defect. A critic mutated
+    // `ui/parts/FocusRing.qml` so hover drew the focus ring, the focus fill,
+    // the full border and the outer halo -- hover and focus one state -- and
+    // all seventeen tests passed. They then set `ActionButton`'s `hovered` to
+    // constant false, so READY UP, LEAVE, RACE AGAIN, GARAGE and all three
+    // RESET buttons painted no hover at all, and all seventeen passed again.
+    //
+    // Both tests read `Clickable.hovered`, which is the raw `MouseArea` state,
+    // and never a painted pixel. The "hover is visible" half of this piece's
+    // gate was held up by four PNG crops a human looked at once.
+    //
+    // So they grab the frame. `grabImage` renders the item synchronously on
+    // this offscreen software backend and a full 1920 x 1080 comparison costs
+    // about half a second, which is affordable for the two tests in this file
+    // whose subject is what the screen LOOKS like.
+
+    /**
+     * How many pixels differ, and the box they are in. Every pixel of the frame
+     * unless `only` names a box, in which case only that box -- which is what a
+     * comparison of two frames that differ ELSEWHERE for a legitimate reason
+     * needs: the keyboard has to be somewhere, so a frame with the focus on one
+     * control and a frame with it on another differ in two places by design.
+     */
+    function diff(a, b, only) {
+      var count = 0
+      var minX = a.width, minY = a.height, maxX = -1, maxY = -1
+      var fromY = only ? Math.max(0, Math.floor(only.y)) : 0
+      var toY = only ? Math.min(a.height, Math.ceil(only.bottom)) : a.height
+      var fromX = only ? Math.max(0, Math.floor(only.x)) : 0
+      var toX = only ? Math.min(a.width, Math.ceil(only.right)) : a.width
+      for (var y = fromY; y < toY; y++) {
+        for (var x = fromX; x < toX; x++) {
+          if (a.red(x, y) === b.red(x, y) && a.green(x, y) === b.green(x, y)
+              && a.blue(x, y) === b.blue(x, y))
+            continue
+          count += 1
+          if (x < minX) minX = x
+          if (y < minY) minY = y
+          if (x > maxX) maxX = x
+          if (y > maxY) maxY = y
+        }
+      }
+      return { "count": count, "x": minX, "y": minY,
+               "right": maxX, "bottom": maxY }
+    }
+
+    /** The control's own box in root coordinates, grown by `pad` on every side. */
+    function boxAround(item, pad) {
+      var b = item.mapToItem(root, 0, 0, item.width, item.height)
+      return { "x": b.x - pad, "y": b.y - pad,
+               "right": b.x + b.width + pad, "bottom": b.y + b.height + pad }
+    }
+
+    function inside(box, outer) {
+      return box.x >= outer.x && box.y >= outer.y
+             && box.right <= outer.right && box.bottom <= outer.bottom
+    }
+
+    function boxText(box) {
+      return "(" + box.x + "," + box.y + ")-(" + box.right + "," + box.bottom + ")"
+    }
+
+    // The pointer's answer to "is this a control", read off the frame: something
+    // inside the control changes, and NOTHING anywhere else on the screen does.
+    //
+    // The ring is drawn outside the control's own edge -- `FocusRing` uses a
+    // gap of 5 and a thickness of 3 on a primary button -- so the allowance is
+    // 12 px, which is the ring plus its halo and nothing like a neighbour.
     function test_20_a_control_lights_under_the_pointer_and_only_that_control() {
       root.showing = "garage"
       garage.forceActiveFocus()
       garage.focusStop(0)
+      suite.settleFrame()
 
       var ready = suite.targetNamed(garage, "READY UP")
       var leave = suite.targetNamed(garage, "LEAVE")
       verify(ready !== null && leave !== null)
       verify(!ready.hovered && !leave.hovered, "something is hovered before the pointer moved")
 
+      mouseMove(root, 0, 0)
+      suite.settleFrame()
+      var idle = grabImage(garage)
+
       var at = suite.centreOf(ready)
       mouseMove(root, at.x, at.y)
       verify(ready.hovered, "READY UP does not light under the pointer")
       verify(!leave.hovered, "LEAVE lights when the pointer is on READY UP")
+      suite.settleFrame()
+      var lit = grabImage(garage)
+
+      var changed = suite.diff(idle, lit)
+      verify(changed.count > 200,
+             "the pointer on READY UP changed " + changed.count + " pixels. A control"
+             + " that does not light under the pointer is a control a child cannot"
+             + " find with a mouse -- and this is the assertion a critic broke by"
+             + " setting ActionButton's `hovered` to constant false, with every"
+             + " test still passing.")
+      var allowed = suite.boxAround(ready, 12)
+      verify(suite.inside(changed, allowed),
+             "the pointer on READY UP changed pixels at " + suite.boxText(changed)
+             + ", outside its own box " + suite.boxText(allowed)
+             + ": hover is leaking onto something the pointer is not on")
 
       var elsewhere = suite.centreOf(leave)
       mouseMove(root, elsewhere.x, elsewhere.y)
       verify(!ready.hovered, "READY UP stays lit after the pointer left it")
       verify(leave.hovered)
+      suite.settleFrame()
+      var moved = suite.diff(idle, grabImage(garage))
+      verify(moved.count > 200, "LEAVE does not light under the pointer")
+      verify(suite.inside(moved, suite.boxAround(leave, 12)),
+             "with the pointer on LEAVE, pixels changed at " + suite.boxText(moved)
+             + " -- READY UP did not go back to how it was drawn before")
 
       mouseMove(root, 0, 0)
       verify(!ready.hovered && !leave.hovered,
              "a control is still lit with the pointer in the corner")
+      suite.settleFrame()
+      compare(suite.diff(idle, grabImage(garage)).count, 0,
+              "the screen does not go back to its idle frame when the pointer leaves")
     }
 
     // Hover is not focus and must not read as it. The two states are drawn by
     // the same ring at two strengths, and a control that is both must draw the
     // focus one: the keyboard's position is the more important fact.
+    //
+    // ROUND 2: all four of those clauses are now read off the frame, on ONE
+    // control, in the four states it can be in. The old version asserted that
+    // hovering did not move the keyboard, which is true of a build where hover
+    // and focus are drawn identically -- and that is the mutation a critic made
+    // to `FocusRing`, with every test still passing.
     function test_21_hover_and_focus_are_two_states_not_three() {
       root.showing = "garage"
       garage.forceActiveFocus()
       garage.focusStop(6)
+      suite.settleFrame()
 
       var ready = suite.targetNamed(garage, "READY UP")
       var leave = suite.targetNamed(garage, "LEAVE")
       verify(ready.stop.activeFocus, "READY UP is not stop 6")
+
+      mouseMove(root, 0, 0)
+      suite.settleFrame()
+      var plain = grabImage(garage)
 
       var at = suite.centreOf(leave)
       mouseMove(root, at.x, at.y)
       verify(leave.hovered, "LEAVE is not hovered")
       verify(!leave.stop.activeFocus, "hovering moved the keyboard")
       verify(ready.stop.activeFocus, "hovering took focus off READY UP")
+      suite.settleFrame()
+      var hovered = grabImage(garage)
+
+      mouseMove(root, 0, 0)
+      garage.focusStop(7)
+      verify(leave.stop.activeFocus, "LEAVE is not stop 7")
+      suite.settleFrame()
+      var focused = grabImage(garage)
+
+      mouseMove(root, at.x, at.y)
+      verify(leave.hovered && leave.stop.activeFocus, "LEAVE is not both at once")
+      suite.settleFrame()
+      var both = grabImage(garage)
+
+      var box = suite.boxAround(leave, 12)
+
+      // Hovering LEAVE, with the keyboard left where it was, changes LEAVE and
+      // changes nothing else on the screen.
+      var hoverChange = suite.diff(plain, hovered)
+      verify(hoverChange.count > 100, "hovering LEAVE draws nothing")
+      verify(suite.inside(hoverChange, box),
+             "hovering LEAVE changed pixels at " + suite.boxText(hoverChange)
+             + ", outside its own box " + suite.boxText(box))
+
+      // Focusing it changes it too. Read inside LEAVE's box only: moving the
+      // keyboard from READY UP to LEAVE takes a ring OFF READY UP as well, and
+      // that difference is the feature working.
+      verify(suite.diff(plain, focused, box).count > 100, "focusing LEAVE draws nothing")
+
+      // THE CLAIM IN THE NAME: two states, and they do not look the same.
+      var difference = suite.diff(hovered, focused, box)
+      verify(difference.count > 100,
+             "hover and focus are drawn the same: " + difference.count + " pixels"
+             + " differ inside LEAVE's own box. This is the assertion a critic broke"
+             + " by making FocusRing ignore `hover`, with every test still passing --"
+             + " and a child who cannot tell where the keyboard is from where the"
+             + " pointer is has three states drawn as one.")
+
+      // AND NOT A THIRD STATE. Both at once is the focus picture, exactly.
+      compare(suite.diff(focused, both).count, 0,
+              "a control that is focused AND hovered is drawn as a third thing")
+    }
+
+    // AND THE SAME QUESTION OF EVERY CONTROL, ENUMERATED.
+    //
+    // Tests 20 and 21 read the frame, and they read it on two named controls.
+    // This one asks the same thing of every click target the tree has, on the
+    // two densest screens in the game -- 27 targets in the garage, 17 in the
+    // settings screen -- so a control whose hover was never drawn, or whose
+    // hover paints something 500 px away, fails without anybody adding a line
+    // here. It is the pixel half of the piece's own doctrine: enumeration
+    // rather than assertion, because the failure is never "this control is
+    // wrong", it is "nobody thought about this control at all".
+    function test_23_every_control_lights_under_the_pointer_and_lights_only_itself() {
+      var list = [{ "name": "Garage", "item": garage, "showing": "garage" },
+                  { "name": "Settings", "item": settings, "showing": "settings" }]
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        focusPark.forceActiveFocus(Qt.OtherFocusReason)
+        mouseMove(root, 0, 0)
+        suite.settleFrame()
+        var idle = grabImage(screen)
+        var targets = suite.clickTargetsIn(screen)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (!suite.usable(hit, screen))
+            continue
+          checked += 1
+          var at = suite.centreOf(hit)
+          mouseMove(root, at.x, at.y)
+          suite.settleFrame()
+          var changed = suite.diff(idle, grabImage(screen))
+          verify(changed.count > 0,
+                 list[s].name + ": the pointer on \"" + hit.label + "\" changes"
+                 + " nothing on the screen. A control a child cannot see with a"
+                 + " mouse is a control they will not press.")
+          var allowed = suite.controlBoxOf(hit, screen, 12)
+          verify(suite.inside(changed, allowed),
+                 list[s].name + ": the pointer on \"" + hit.label + "\" changed"
+                 + " pixels at " + suite.boxText(changed) + ", outside its control's box "
+                 + suite.boxText(allowed))
+          mouseMove(root, 0, 0)
+          suite.settleFrame()
+        }
+      }
+      verify(checked >= 30, "only " + checked + " controls were swept; the walk is not"
+             + " seeing the tree")
     }
 
     // A sign is not a control. RACE A FRIEND has no key and no Tab stop because

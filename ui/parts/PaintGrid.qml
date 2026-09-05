@@ -81,8 +81,18 @@ Item {
                       : (cell.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(0, 0, 0, 0.55))
       }
 
+      // PIECE M ROUND 2. THE CHOSEN SWATCH LIGHTS TOO.
+      //
+      // This read `cell.hovered && index !== grid.selected`, so the one swatch
+      // the child has already chosen was the one swatch that gave the pointer
+      // no answer at all -- and a pixel sweep of every control on the garage
+      // found it, which no boolean test could. The reason round one had for
+      // suppressing it belongs to the CARD, where the chosen state and the
+      // hover ring are both the accent and two accent rings on one card is not
+      // a state. Here they are different colours: the chosen swatch's ring is
+      // white and on the border, the pointer's is the accent and outside it.
       Rectangle {
-        visible: cell.hovered && index !== grid.selected
+        visible: cell.hovered
         anchors.fill: parent
         anchors.margins: -3
         radius: Theme.cornerRadiusSmall + 2
