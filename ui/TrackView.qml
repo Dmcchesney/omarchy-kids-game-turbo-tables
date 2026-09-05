@@ -2516,14 +2516,35 @@ Item {
   function fxDecal(kind, atTravel, lane, worldWidth, life, growMs) {
     fxDecalModel.append({
       "dKind": kind, "dAt": atTravel, "dLane": lane, "dWorld": worldWidth,
-      "dBorn": fxClock, "dLife": life, "dGrow": growMs, "dFall": 0, "dFrame": 0
+      "dBorn": fxClock, "dLife": life, "dGrow": growMs, "dFall": 0, "dFrame": 0,
+      "dKart": -1, "dOff": 0, "dPin": 0
     })
   }
-  // The Pile-Up: the same road decal, but it falls in from above first.
-  function fxFallingDecal(kind, atTravel, lane, worldWidth, life, fallMs) {
+  // THE PILE-UP FALLS ON THE VICTIM, AND ROUND 6 IS WHERE IT STARTS TO.
+  //
+  // The design's telegraph is "a shadow grows on the road AHEAD OF THE TARGET,
+  // and a stack of tyres, barrels and crates tumbles in from the top of the
+  // frame", and the impact is 600 ms later. What the strips showed instead was
+  // the wall arriving at the CAMERA, in the child's own lane, from f05 -- five
+  // frames BEFORE anything happened to anybody -- because the debris was
+  // pinned to a point on the circuit the moment the card was played and the
+  // road then ran a whole second under it. Cause arrived after effect, and a
+  // blind critic called it the card the whole room notices for the wrong
+  // reason.
+  //
+  // So a falling decal is TARGET-RELATIVE while it falls: its depth is the
+  // victim's own depth plus a fixed offset, so it stays over the car it is
+  // about however far the road runs, and it lands where the design says it
+  // lands. `dPin` is the impact reading; `fxAdvance` writes `dAt` once at that
+  // moment, from where the victim actually was, and the decal becomes the
+  // ordinary road prop the aftermath asks for -- "the pile stays on the road
+  // as props until it scrolls out".
+  function fxFallingDecal(kind, kart, offset, lane, worldWidth, life, fallMs, pinAt) {
     fxDecalModel.append({
-      "dKind": kind, "dAt": atTravel, "dLane": lane, "dWorld": worldWidth,
-      "dBorn": fxClock, "dLife": life, "dGrow": 0, "dFall": fallMs, "dFrame": 0
+      "dKind": kind, "dAt": travel + fxKartZ(kart) + offset, "dLane": lane,
+      "dWorld": worldWidth, "dBorn": fxClock, "dLife": life, "dGrow": 0,
+      "dFall": fallMs, "dFrame": 0,
+      "dKart": kart, "dOff": offset, "dPin": fxClock + pinAt
     })
   }
   function fxFlyer(kind, fromKart, toKart, dur, spins, worldWidth, frames) {
@@ -2971,8 +2992,8 @@ Item {
       // out the hit-stop, the shake and the spin, not the event. What goes is
       // the tumble: the fall time is zero, so the pile is simply there.
       var pLane = laneOf(kartModel.count > cueAimed ? kartModel.get(cueAimed).kartSeat : 0)
-      fxFallingDecal("pileUp", travel + fxKartZ(cueAimed) + 0.8, pLane,
-                     3.0, 7000, reducedMotion ? 0 : b.telegraph)
+      fxFallingDecal("pileUp", cueAimed, 0.8, pLane,
+                     3.0, 7000, reducedMotion ? 0 : b.telegraph, b.telegraph)
       // ROUND 3: "a stack of TYRES, BARRELS AND CRATES tumbles in from the top
       // of the frame" is three nouns and round two dropped one sprite. These
       // are the kit's own `tireWall` and `drum` cells -- placed and scaled,
@@ -2980,12 +3001,14 @@ Item {
       // apart, so the telegraph is a wall coming down across the road rather
       // than a single object appearing on it. They are what makes the Pile-Up
       // the loudest thing in the game without a brighter flash.
-      fxFallingDecal("tireWall", travel + fxKartZ(cueAimed) + 1.6,
+      fxFallingDecal("tireWall", cueAimed, 1.6,
                      pLane - 1.55, 1.9, 6600,
-                     reducedMotion ? 0 : Math.round(b.telegraph * 0.78))
-      fxFallingDecal("drum", travel + fxKartZ(cueAimed) + 1.1,
+                     reducedMotion ? 0 : Math.round(b.telegraph * 0.78),
+                     Math.round(b.telegraph * 0.78))
+      fxFallingDecal("drum", cueAimed, 1.1,
                      pLane + 1.5, 1.1, 6600,
-                     reducedMotion ? 0 : Math.round(b.telegraph * 0.92))
+                     reducedMotion ? 0 : Math.round(b.telegraph * 0.92),
+                     Math.round(b.telegraph * 0.92))
     } else if (cueCard === "nitro" || cueCard === "turbo") {
       // "the kart squats one pixel, exhaust flares blue-white" / two pixels.
       // The squat itself is `fxHeroSquat` below; this is the exhaust.
@@ -3570,9 +3593,20 @@ Item {
     fxPruneModel(fxSparkModel, "sBorn", "sLife")
     fxPruneModel(fxTagModel, "gBorn", "gLife")
     // A decal that has scrolled past the camera is gone whatever its life says.
-    for (var i = fxDecalModel.count - 1; i >= 0; i--)
-      if (fxDecalModel.get(i).dAt - travel < nearDistance - 0.5)
+    for (var i = fxDecalModel.count - 1; i >= 0; i--) {
+      var d = fxDecalModel.get(i)
+      // THE PIN. A falling decal rides the victim's own depth until the impact
+      // and is a fixed point on the circuit from then on. This is the one
+      // moment it changes, it happens once, and it happens in `advance()` so a
+      // frame strip written twice is the same bytes.
+      if (d.dKart >= 0 && fxClock >= d.dPin) {
+        fxDecalModel.setProperty(i, "dAt", travel + fxKartZ(d.dKart) + d.dOff)
+        fxDecalModel.setProperty(i, "dKart", -1)
+        d = fxDecalModel.get(i)
+      }
+      if (d.dKart < 0 && d.dAt - travel < nearDistance - 0.5)
         fxDecalModel.remove(i)
+    }
   }
 
   // ==========================================================================
@@ -3590,7 +3624,12 @@ Item {
 
     Item {
       id: decal
-      readonly property real zed: dAt - view.travel
+      // Target-relative until the pin, a point on the circuit afterwards.
+      // See `fxFallingDecal`: this is what puts the debris ON the victim
+      // instead of at the camera five frames before anything happened.
+      readonly property real zed: dKart >= 0
+                                  ? view.fxKartZ(dKart) + dOff
+                                  : (dAt - view.travel)
       readonly property real age: view.fxClock - dBorn
       // "a decal that grows for 400": across the road, from a fifth of its
       // width to all of it.

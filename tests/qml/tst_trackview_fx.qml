@@ -1634,5 +1634,114 @@ Item {
       race.warmup = 6
       race.buildRace()
     }
+
+    // ----------------------------------------------- ROUND 6, DEFECT THREE
+    //
+    // CAUSE BEFORE EFFECT, AND THE DEBRIS SORTS BY DEPTH.
+    //
+    // The verdict: "the debris reaches the camera in the player's lane at
+    // f05-f09, BEFORE the victim is hit at f10. It is also drawn in front of
+    // karts that are nearer than it is, and at the wrong scale. This is the
+    // card the design says the whole room should notice, and right now it
+    // notices it in the wrong order."
+    //
+    // The design's telegraph is "a shadow grows on the road AHEAD OF THE
+    // TARGET, and a stack of tyres, barrels and crates tumbles in from the top
+    // of the frame". Two things are asserted: the debris is never nearer the
+    // camera than the victim before the impact -- it cannot arrive first if it
+    // is always behind them -- and it is drawn behind every kart that is nearer
+    // than it is, on every frame, which is what a depth sort means.
+    //
+    // The sky-flash count and the telegraph length are a recorded maintainer
+    // decision and nothing here touches either.
+    function test_22_the_pile_up_falls_on_its_victim_and_sorts_by_depth() {
+      var cases = ["pileUp", "pileUp+leader"]
+      var nearest = 99
+      var frames = 0
+      var sorted = 0
+      var badSort = null
+      var badOrder = null
+      for (var c = 0; c < cases.length; c++) {
+        race.warmup = (cases[c].indexOf("leader") > 0) ? 22 : 6
+        race.buildRace()
+        preroll()
+        race.injectEvent("cardUsed", cases[c])
+        // The card's own target, as the view was told it: the plate readout
+        // does not exist until after the impact and this is measuring what
+        // happens BEFORE it.
+        var victim = track.cueAimed
+        var impactAt = track.fxClock + CardFx.BEATS.pileUp.telegraph
+        for (var f = 0; f < 24; f++) {
+          var before = track.fxClock < impactAt
+          var decals = []
+          root.walk(race, function (item) {
+            if (String(item.objectName).indexOf("fx.decal.") !== 0)
+              return
+            if (!root.drawn(item) || item.zed === undefined)
+              return
+            decals.push({ "name": String(item.objectName),
+                          "zed": item.zed, "z": item.z })
+          })
+          var cars = []
+          root.walk(race, function (item) {
+            if (String(item.objectName).indexOf("kart.") !== 0 || !root.drawn(item))
+              return
+            var slot = item.parent ? item.parent.parent : null
+            if (!slot || slot.zed === undefined)
+              return
+            cars.push({ "who": String(item.objectName).substring(5),
+                        "zed": slot.zed, "z": slot.z })
+          })
+          if (decals.length > 0)
+            frames += 1
+          for (var d = 0; d < decals.length; d++) {
+            if (before && victim >= 0) {
+              // How far in front of the victim the debris ever gets, as a
+              // fraction of the victim's own depth. Above 1 it is nearer the
+              // camera than the car it is supposed to be falling on.
+              var ratio = decals[d].zed / Math.max(0.01, track.fxKartZ(victim))
+              if (ratio < nearest)
+                nearest = ratio
+              if (ratio < 0.9 && badOrder === null)
+                badOrder = { "card": cases[c], "frame": f, "name": decals[d].name,
+                             "zed": decals[d].zed,
+                             "victim": track.fxKartZ(victim) }
+            }
+            for (var k = 0; k < cars.length; k++) {
+              if (cars[k].zed >= decals[d].zed)
+                continue
+              sorted += 1
+              // A nearer car has a LARGER stacking z, so it draws over the
+              // debris behind it.
+              if (cars[k].z <= decals[d].z && badSort === null)
+                badSort = { "card": cases[c], "frame": f, "name": decals[d].name,
+                            "who": cars[k].who }
+            }
+          }
+          race.stepClock(60)
+        }
+      }
+      verify(badOrder === null,
+             badOrder === null
+             ? "the debris is never nearer the camera than its victim"
+             : ("on " + badOrder.card + " f" + badOrder.frame + ", "
+                + badOrder.name + " is at z " + badOrder.zed.toFixed(2)
+                + " and the victim is at " + badOrder.victim.toFixed(2)
+                + " -- the debris arrived first"))
+      verify(badSort === null,
+             badSort === null
+             ? "and it is drawn behind every kart nearer than it"
+             : ("on " + badSort.card + " f" + badSort.frame + ", "
+                + badSort.name + " is drawn in front of kart." + badSort.who
+                + ", which is nearer the camera"))
+      verify(frames > 20, "the debris was on the screen to be measured ("
+             + frames + " frames)")
+      console.log("FX-PILEUP|" + frames + " frames with debris|nearest the debris"
+                  + " ever gets to the camera before the impact: " + nearest.toFixed(2)
+                  + "x the victim's own depth|" + sorted
+                  + " debris/nearer-kart pairs, 0 mis-sorted")
+      race.warmup = 6
+      race.buildRace()
+    }
   }
 }
