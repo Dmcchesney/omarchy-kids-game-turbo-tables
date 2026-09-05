@@ -977,8 +977,18 @@ Item {
   // is what the shader does to the terrain beside it.
   function dimmed(c, k) { return Qt.rgba(c.r * k, c.g * k, c.b * k, c.a) }
 
-  readonly property color roadTone: dimmed(Qt.rgba(0.133, 0.078, 0.125, 1), surfaceDusk)
-  readonly property color roadToneAlt: dimmed(Qt.rgba(0.173, 0.102, 0.165, 1), surfaceDusk)
+  // THE TARMAC'S OWN SATURATION, WHICH IS A THIRD OF THE LOWER FRAME.
+  //
+  // A critic measured our below-horizon mean saturation at 0.48 to 0.58 against
+  // the reference's 0.66 and called the bottom half of the picture "measurably
+  // paler and flatter than the bar's". The road is the largest single surface
+  // down there and it was the palest thing in the palette: (0.133, 0.078,
+  // 0.125) is saturation 0.41 where every terrain entry is 0.37 to 0.70. The
+  // green channel comes down rather than the red going up, so the tone gets
+  // more purple rather than lighter -- hue holds at 306 against 309, and
+  // luminance falls from 25.5 to 23.7, which is the right direction for dusk.
+  readonly property color roadTone: dimmed(Qt.rgba(0.137, 0.062, 0.129, 1), surfaceDusk)
+  readonly property color roadToneAlt: dimmed(Qt.rgba(0.178, 0.082, 0.170, 1), surfaceDusk)
   readonly property color laneTone: dimmed(Theme.cream, markingDusk)
   readonly property color rumbleTone: dimmed(Theme.hazard, surfaceDusk)
   readonly property color rumbleAltTone: dimmed(Theme.cream, surfaceDusk)
@@ -1574,8 +1584,14 @@ Item {
   // the same hue at a third of the value -- and the two together take the
   // bake's (52,58,82) to H 296 V 0.345 on the first lap and H 297 V 0.235 on
   // the last, against a sky that has halved.
-  readonly property color propWashDay: "#7a2260"
-  readonly property color propWashDusk: "#3d1035"
+  // AND ROUND 3 SATURATED THE WASH WITHOUT STRENGTHENING IT, which is the one
+  // move round 2 said it could not make: pushing the AMOUNT further flattens
+  // the bake's tonal range into one colour, and that range is the only thing
+  // making a rock read as rock. Pushing the wash's own saturation -- 0.72 to
+  // 0.79 by day, 0.74 to 0.84 at dusk, at the same hue and the same value --
+  // carries the tinted result further from grey without touching the range.
+  readonly property color propWashDay: "#7d1a5e"
+  readonly property color propWashDusk: "#3f0a35"
   readonly property color propWashColor: Qt.rgba(
       propWashDay.r + (propWashDusk.r - propWashDay.r) * nightfall,
       propWashDay.g + (propWashDusk.g - propWashDay.g) * nightfall,
