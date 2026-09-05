@@ -2,6 +2,9 @@ import QtQuick
 import "parts"
 import "parts/CarMeta.js" as CarMeta
 import "parts/CardFx.js" as CardFx
+import "parts/PropMeta.js" as PropMeta
+import "parts/Terrain.js" as Terrain
+import "parts/Circuit.js" as Circuit
 
 // Looking down the track.
 //
@@ -153,31 +156,27 @@ Item {
   // measurement it controls: the far road centre at y=510 moves
   // 11846 * curve pixels at 1920x1080, so 0.0255 is a +-302 px swing and a
   // 604 px peak-to-peak excursion, 31% of the frame's width.
-  readonly property int sectorCount: 12
-  readonly property real sectorLength: 36.0
-  readonly property real circuitLength: sectorCount * sectorLength
+  //
+  // PIECE T. The two tables and the blend now live in `ui/parts/Terrain.js`,
+  // because the shader's terrain, the fallback's terrain and the minimap's
+  // outline all read them too and three copies of a circuit is three circuits.
+  // `npm run check:terrain` holds `shaders/road.frag`'s mirror of them to that
+  // one source.
+  readonly property int sectorCount: Terrain.SECTOR_COUNT
+  readonly property real sectorLength: Terrain.SECTOR_LENGTH
+  readonly property real circuitLength: Terrain.CIRCUIT_LENGTH
   readonly property real curveAmplitude: 0.0255
   readonly property real hillAmplitude: 0.030
 
   // Two long straights, one wide left-hand sweep, one tighter right-hander,
   // which is the shape the minimap draws. Positive bends the road right.
-  readonly property var sectorCurve: [0.00, 0.10, -0.45, -1.00, -0.80, -0.20,
-                                      0.00, 0.55, 1.00, 0.62, 0.15, -0.10]
-  readonly property var sectorHill:  [0.00, 0.30, 0.72, 0.40, 0.00, -0.40,
-                                      -0.75, -0.35, 0.10, 0.55, 0.25, -0.20]
+  readonly property var sectorCurve: Terrain.SECTOR_CURVE
+  readonly property var sectorHill: Terrain.SECTOR_HILL
 
   // Sampled at sector boundaries and blended with a smoothstep, so the value
   // is continuous and its slope is zero at every boundary: a corner opens and
   // closes rather than switching on.
-  function sectorBlend(table, at) {
-    var p = at / sectorLength
-    var i = Math.floor(p)
-    var f = p - i
-    var s = f * f * (3 - 2 * f)
-    var a = table[((i % sectorCount) + sectorCount) % sectorCount]
-    var b = table[(((i + 1) % sectorCount) + sectorCount) % sectorCount]
-    return a + (b - a) * s
-  }
+  function sectorBlend(table, at) { return Terrain.sectorBlend(table, at) }
 
   function curveAt(at) { return sectorBlend(sectorCurve, at) * curveAmplitude }
   function hillAt(at) { return sectorBlend(sectorHill, at) * hillAmplitude }
@@ -195,16 +194,22 @@ Item {
   // sector 3 means the reduced-motion picture is a road in a corner rather
   // than a ruler.
   //
-  // AND IT IS A MULTIPLE OF `propSpacing`, WHICH IS THE OTHER HALF OF THAT.
+  // AND NOTHING MAY BE STANDING ON THE LENS THERE, WHICH IS THE OTHER HALF.
   //
-  // At 118 the nearest roadside prop sat at z = 3.25, and a 3.0-unit tyre wall
-  // at that depth is 1,340 px wide: in motion it is a wall whooshing past, but
-  // under reduced motion NOTHING EVER CALLS advance(), so the still a child
+  // At 118 the nearest roadside prop once sat at z = 3.25, and a 3.0-unit tyre
+  // wall at that depth is 1,340 px wide: in motion it is a wall whooshing past,
+  // but under reduced motion NOTHING EVER CALLS advance(), so the still a child
   // with that setting on looks at for the whole race had a tyre wall filling
-  // the right half of the frame, over the sun. The prop loop is 8 units, so a
-  // travel that is a multiple of 8 puts the nearest prop exactly at the near
-  // cull -- z = 1.25, culled -- and the next at z = 9.25, which is a roadside
-  // rather than a wall. 120 is that, and is still inside sector 3's corner.
+  // the right half of the frame, over the sun.
+  //
+  // The roadside is an authored table now rather than an eight-unit loop, so
+  // "a multiple of the spacing" is no longer a thing to aim at; what holds the
+  // rule instead is `nearFade`, which dissolves any prop that reaches
+  // `nearFadeGone` of the frame's height, and `tst_trackview_road`'s case that
+  // walks the whole circuit and fails if any prop is ever drawn bigger than
+  // that. 120 is kept because it is inside sector 3's left-hander -- a road in
+  // a corner rather than a ruler -- with the quarry's near wall already past
+  // the camera and the next one eight units up the road.
   property real travel: 120
   // Derived, not assigned, so it is right on the first frame, right under
   // reduced motion, and cannot fall out of step with `travel`.
@@ -831,6 +836,55 @@ Item {
     shake = Math.min(1, shake + strength * 0.80)
   }
 
+  // ====================================================== GOLDEN HOUR PASSES
+  //
+  // Design v4, The circuit, "Time passes": "Golden hour should actually pass.
+  // The sun sits on the horizon at lap 1 and is half set by lap 12. Sky and
+  // haze shift with it, headlamps light around lap 8, tail lamps get brighter,
+  // the first stars appear by lap 11. Four uniforms driven by lap number, and
+  // the race gains a clock the child can feel without reading."
+  //
+  // The four are here. Everything else in the picture is a function of them:
+  // the sky's sun height and palette, the haze the whole world lerps toward,
+  // the sun's foot on the road, the headlamp cones, the stars. Race.qml sets
+  // `lap` and nothing else; a bare TrackView in the harness is at lap 1.
+  //
+  // `lap` is 1-based and `lapCount` is the design's twelve, so `nightfall` is
+  // 0 on the first lap and 1 on the last -- which is what "half set by lap 12"
+  // means once `SunsetSky.sunLift` is read: 0.80 of the disc above the horizon
+  // at lap 1, 0.50 -- a disc bisected by it -- at lap 12.
+  property int lap: 1
+  property int lapCount: 12
+  readonly property real nightfall: Math.max(0, Math.min(1,
+                                      (lap - 1) / Math.max(1, lapCount - 1)))
+  // The three beats the design names by lap, written as the lap they start on
+  // rather than as a number derived from `nightfall`, so moving `lapCount`
+  // cannot silently move them.
+  readonly property real headlampsOn: Math.max(0, Math.min(1, (lap - 7) / 2))
+  readonly property real starsOut: Math.max(0, Math.min(1, (lap - 10) / 2))
+  // Heat shimmer over the far road: strongest while the sun is still up. Named
+  // `roadShimmer` and not `shimmer` because piece F already owns `shimmerNow`
+  // for Turbo's exhaust, and one name meaning two things in one file is the
+  // defect `npm run check:qmlids` exists for.
+  readonly property real roadShimmer: reducedMotion ? 0 : 0.85 * (1 - nightfall * 0.7)
+  // Seconds of world time, for the things that move without the camera moving:
+  // the lake's ripples, the shimmer's wobble, the crowd's wave, the flags. It
+  // is `fxClock`, which is the deterministic clock the harness drives, so a
+  // strip written twice is the same bytes. Zero under reduced motion, which
+  // stops the water and the shimmer dead rather than slowing them -- the
+  // design's reduced motion "removes all shake, lurch, and streak lines", and
+  // a rippling reflection is a streak by another name.
+  readonly property real worldClock: reducedMotion ? 0 : fxClock / 1000
+  // How dusty the ground under the camera is: the sector table's own scrub
+  // amount, which is 0.22 on the pit's grid floor and 1.00 in the scrub. The
+  // karts' wheel dust reads it, so the design's "dust puffs from every kart's
+  // rear wheels ON DIRT SECTORS" is the same number the shader paints the dirt
+  // with rather than a second opinion about which sectors are dirt.
+  readonly property real dustiness: {
+    var m = Terrain.sectorMix(travel + playerZ)
+    return Terrain.FLAGS[m[0]][3] + (Terrain.FLAGS[m[1]][3] - Terrain.FLAGS[m[0]][3]) * m[2]
+  }
+
   // GOLDEN-HOUR PALETTE. Sampled off the bar (plan v2, "Visual direction v3"):
   // near-black purple ground, neon magenta grid, purple-tinted tarmac, the
   // horizon glow and the sun's pink-orange spill. Held here rather than in the
@@ -848,11 +902,32 @@ Item {
   // vanishing point read as nothing at all. `#d75d6b` is the palette table's
   // own horizon-glow stop and is the colour SunsetSky puts on the horizon
   // line, so the floor and the sky now meet in one tone.
-  readonly property color fogTone: "#d75d6b"
+  //
+  // AND THE HAZE IS WHERE THE HOUR PASSES. Every ground, road and kerb colour
+  // in both renderers lerps toward `fogTone` by distance, so moving this one
+  // colour as the sun drops moves the entire distance of the world with it:
+  // `#d75d6b` at lap 1, a deep dusk plum by lap 12. The sky's own horizon stop
+  // is bound to the same pair (see `SunsetSky.dusk`), so the floor and the sky
+  // still meet in one tone at every lap rather than only at the first.
+  readonly property color fogDay: "#d75d6b"
+  readonly property color fogDusk: "#6b2a55"
+  readonly property color fogTone: Qt.rgba(
+      fogDay.r + (fogDusk.r - fogDay.r) * nightfall,
+      fogDay.g + (fogDusk.g - fogDay.g) * nightfall,
+      fogDay.b + (fogDusk.b - fogDay.b) * nightfall, 1)
   readonly property color roadTone: "#221420"
   readonly property color roadToneAlt: "#2c1a2a"
   readonly property color laneTone: Theme.cream
   readonly property color sunTone: "#f0956e"
+  // The lake. Deep purple water with the sun's own core as the reflected
+  // column; both dim with the hour, because a reflection cannot outlive its
+  // source.
+  readonly property color waterTone: Qt.rgba(0.196 * (1 - 0.35 * nightfall),
+                                             0.086 * (1 - 0.35 * nightfall),
+                                             0.290 * (1 - 0.25 * nightfall), 1)
+  readonly property color waterLitTone: Qt.rgba(0.949 * (1 - 0.28 * nightfall),
+                                                0.784 * (1 - 0.36 * nightfall),
+                                                0.494 * (1 - 0.30 * nightfall), 1)
   // What fraction of the floor's fog density the tarmac and its kerbs take.
   // At 1.0 -- which is what shipped -- the road reached the fog's colour at
   // the same distance the floor did and the two became one number: measured
@@ -939,6 +1014,18 @@ Item {
       unitH: 270
       lateral: view.lateralPlanePx
       sunX: view.planeSunU
+      // PIECE T. The three things that move in the sky, all driven from here so
+      // the garage and the countdown can leave them alone and get the still
+      // golden hour they have always had.
+      //
+      // The clouds drift with the WORLD CLOCK and not with `travel`: a cloud
+      // bank a mile off does not slide past because a kart is doing 90, and
+      // tying it to travel made the sky rush whenever a Turbo landed. Two
+      // layers at 0.35 and 1.0 of this rate, which is the design's "cloud
+      // streaks in two parallax layers drifting slowly".
+      nightfall: view.nightfall
+      drift: view.worldClock * 1.6
+      stars: view.starsOut
     }
 
     ShaderEffect {
@@ -966,6 +1053,11 @@ Item {
       property real sunU: view.planeSunU
       property real glowRx: 0.24 * view.planeKx
       property real glowRy: 0.08 * view.planeKy
+      property real sectorLength: view.sectorLength
+      property real clock: view.worldClock
+      property real heatShimmer: view.roadShimmer
+      property real texelU: 1 / view.planeW
+      property real nightfall: view.nightfall
 
       property color roadColor: view.roadTone
       property color roadAlt: view.roadToneAlt
@@ -977,6 +1069,8 @@ Item {
       property color skyColor: view.fogTone
       property color fogColor: view.fogTone
       property color glowColor: view.sunTone
+      property color waterColor: view.waterTone
+      property color waterLit: view.waterLitTone
 
       onStatusChanged: view.noteShaderStatus(status)
     }
@@ -1005,6 +1099,11 @@ Item {
       sunU: view.planeSunU
       glowRx: 0.24 * view.planeKx
       glowRy: 0.08 * view.planeKy
+      sectorLength: view.sectorLength
+      clock: view.worldClock
+      heatShimmer: view.roadShimmer
+      texelU: 1 / view.planeW
+      nightfall: view.nightfall
 
       roadColor: view.roadTone
       roadAlt: view.roadToneAlt
@@ -1016,6 +1115,8 @@ Item {
       skyColor: view.fogTone
       fogColor: view.fogTone
       glowColor: view.sunTone
+      waterColor: view.waterTone
+      waterLit: view.waterLitTone
 
       // Under reduced motion nothing calls advance(), so the plane repaints
       // only when the camera itself changes -- which is the static plane the
@@ -1072,57 +1173,70 @@ Item {
   }
 
   // ---------------------------------------------------------- the props
-  // The roadside, indexed off the same circuit the corners are.
   //
-  // Design, The view: "a closed circuit of twelve sectors, one per lap-table,
-  // each with its own landmark: the twos pass the tire wall, the sevens run
-  // under the roller door". So each of the twelve sectors opens with its own
-  // signature landmark and then carries two pieces of ordinary furniture, and
-  // the loop the props run on is the same 432 units the sector table runs on:
-  // the roller door is in sector 4's corner on every lap of every race.
+  // THE ROADSIDE IS THE KIT, AND EVERY OBJECT IN IT IS AUTHORED.
   //
-  // Thirty-six items rather than twelve, but the draw cost is unchanged: the
-  // draw distance is 190 world units and the spacing is 12, so about sixteen
-  // are ever visible and the rest are culled before they reach the scene
-  // graph. Each is drawn once into its own canvas at startup and only ever
-  // moved and scaled after that.
+  // Design v4, The circuit: twelve sectors, each with one landmark from the
+  // design's own table, and a furniture rhythm on the verges between them. The
+  // table is `ui/parts/Circuit.js` -- one entry per object, written out --  and
+  // the drawing is `ui/parts/KitProp.qml`, which places one cell of a frozen
+  // baked sheet and does nothing else.
   //
-  // GOLDEN-HOUR PROTOTYPE. The grey lamp posts and the teal diagnostic signs
-  // are gone; the roadside is the genre's: sponsor banners, tyre walls, a
-  // timing board, the checkered start gantry in sector 0, and the design's
-  // roller doors in sectors 4 and 9.
-  readonly property var sectorLandmark: ["gantry", "banner", "tireWall", "timingBoard",
-                                         "rollerDoor", "tireWall", "banner", "drum",
-                                         "timingBoard", "rollerDoor", "banner", "tireWall"]
-  readonly property var sectorFiller: ["cone", "banner", "drum", "tireWall",
-                                       "banner", "cone"]
+  // WHAT THIS REPLACED, AND WHY IT HAD TO GO. The roadside used to be generated:
+  // `propKind(index)` returned `sectorLandmark[floor(index/3) % 12]` on every
+  // third slot and `sectorFiller[index % 6]` otherwise, and each of those was
+  // drawn by `ui/parts/PropSprite.qml`, a Canvas that drew a banner, a tyre wall
+  // and a timing board IN CODE with lines and rectangles. Two consequences, and
+  // both are why this piece exists:
+  //
+  //   * the twelve sectors were four shapes in a repeating order, so no two of
+  //     them were different places -- a drum in the quarry, a drum at the
+  //     overpass and a drum at the finish;
+  //   * the plan forbids it outright: "never draw in code a roadside object the
+  //     kit provides. `ui/parts/PropSprite.qml` (Canvas-drawn) is retired by
+  //     piece T." It is deleted in the same commit as this.
+  //
+  // WHAT IT COSTS. 133 placements on a 432-unit loop and a 190-unit draw
+  // distance, so roughly a third of them can be in front of the camera and the
+  // near-fade and the frame-edge tests cull most of those: measured on the
+  // shipped frame, twelve to thirty are drawn. Each is one textured quad off a
+  // cached sheet -- `sourceClipRect` loads the one cell -- and nothing is ever
+  // painted at run time. The old roadside was fifty-four Canvas items each
+  // repainting itself whenever its distance step changed.
+  readonly property var placements: Circuit.PLACEMENTS
+  readonly property int propCount: placements.length
+  readonly property real propLoop: circuitLength
+
+  // How far down the road placement `i` is, right now.
+  //
+  // NO `nearDistance` OFFSET, WHICH IS A CORRECTION. The generated roadside
+  // added one, so a prop authored at loop position `s` was drawn 1.25 units
+  // further away than the ground the shader painted at `s`. That did not matter
+  // while the ground was one flat grid everywhere; it matters now that the
+  // ground has a sector palette and a start grid, because the gantry has to
+  // stand ON the chequered squares rather than 1.25 units past them.
+  function propZ(i) {
+    var raw = (placements[i].s - travel) % propLoop
+    return raw < 0 ? raw + propLoop : raw
+  }
 
   // ARCHES AND THE ANSWER FIELD: THE FIELD IS WHAT YIELDS.
   //
   // Plan v2, Risks: "Arches vs. the fixed answer field | M4': props that span
   // the road cross under the field's line OR THE FIELD YIELDS FOR THE FRAME."
   // Two remedies. Round four took neither: it measured the arches against the
-  // FACT -- a different object, further up the screen; on a 1920x1080 race
-  // screen the fact's ink ends at y = 286 and the field's box is y 345..443 --
-  // reported no overlap with it, and then suppressed the arches. Measured
-  // against the object the plan actually names, a crossbar is inside the
-  // field's rows at EVERY depth in the draw distance: y 312..389 at z = 10,
-  // 375..413 at z = 20, 406..425 at z = 40, 421..431 at z = 80. So the
-  // criterion was unmet everywhere, and the two landmarks the design names by
-  // name -- "the sevens run under the roller door" -- had been traded away for
-  // nothing.
+  // FACT -- a different object, further up the screen -- reported no overlap
+  // with it, and then suppressed the arches. Measured against the object the
+  // plan actually names, a crossbar is inside the field's rows at EVERY depth
+  // in the draw distance, so the criterion was unmet everywhere and the two
+  // landmarks the design names by name -- "the sevens run under the roller
+  // door" -- had been traded away for nothing.
   //
   // The first remedy really is unavailable, and the arithmetic says so rather
-  // than an opinion. An arch stands on the road and spans it, so its crossbar
-  // is at
-  //
-  //     yBeam(z) = vAt(z) H - sizeAt(archHeight, z) (1 - archBeamTop)
-  //
-  // and with the shipped numbers -- a 9.4-unit span on a 320 x 200 sheet, so
-  // 5.875 units tall, focal 1.20, camHeight 2.20, H = 1080 -- that is above
-  // the field's bottom edge for every depth inside the draw distance at which
-  // an arch is legible at all. There is no depth at which a road-spanning arch
-  // passes UNDER a box that sits above the horizon.
+  // than an opinion: an arch stands on the road and spans it, so its crossbar
+  // is above the field's bottom edge at every depth at which the arch is
+  // legible at all. There is no depth at which a road-spanning arch passes
+  // UNDER a box that sits above the horizon.
   //
   // SO THE FIELD YIELDS. `fieldRect` is the answer field's box on this screen,
   // handed down by Race.qml from the item's own geometry rather than assumed
@@ -1131,41 +1245,65 @@ Item {
   // -- its ground, its border and its sun rim -- and leaves the digits, the
   // caret and the reveal at full strength, so nothing the child typed goes
   // anywhere: the arch is seen through the slab instead of being sliced by it.
-  // It is a paint change and not a behaviour change, which is the whole reason
-  // this is the remedy the plan offers. A bare TrackView in the harness gets an
-  // empty rect and nothing ever yields.
-  //
-  // AND THE ARCHES ARE BACK. Nothing throttles them at any depth: a child sees
-  // the gantry and the roller door come up the road, fill the frame and pass
-  // over them, which is what the sector landmarks are for.
+  // A bare TrackView in the harness gets an empty rect and nothing ever yields.
   property rect fieldRect: Qt.rect(0, 0, 0, 0)
   // The fact's ink box, for the same reason. The fact does not yield -- it is
   // the pillar the design will not trade -- so what this drives is the ground
   // Race.qml puts UNDER the glyphs for the frames a crossbar is behind them.
-  // The fact is drawn over every prop either way; what a chequered beam takes
-  // from it is contrast, not visibility, and a ground is the answer to that.
   property rect factRect: Qt.rect(0, 0, 0, 0)
-  // The arch sheet is 320 x 200, so an arch is 0.625 of its span tall; the
-  // crossbar is drawn between 0.30 and 0.50 of the sheet's height (the
-  // gantry's beam and the roller door's lintel, both in ui/parts/PropSprite).
-  readonly property real archAspect: 200 / 320
-  readonly property real archBeamTop: 0.30
-  readonly property real archBeamBottom: 0.50
-  readonly property real archSpan: 9.4
-  function archTopAt(worldWidth, z) {
-    return vAt(z) * height - sizeAt(worldWidth * archAspect, z)
+
+  // WHERE A CROSSBAR IS, PER PROP, FROM THE KIT'S OWN NUMBERS.
+  //
+  // This used to be four constants -- one span, one aspect and two beam
+  // fractions -- describing a single code-drawn arch. There are four different
+  // arches now and they are baked at four different proportions, so the beam is
+  // a fraction OF EACH PROP'S OWN opaque box, read off the sheet. `top` and
+  // `bottom` are fractions down that box: the gantry's header board and flags,
+  // the roller door's lintel, the bridge's truss, the overpass's deck.
+  readonly property var archBeams: {
+    "gantry": [0.02, 0.30],
+    "rollerDoor": [0.00, 0.32],
+    "bridge": [0.02, 0.42],
+    "overpass": [0.01, 0.37]
   }
 
-  // Which props on the loop span the road. Computed once: `propKind` is a table
-  // lookup and this is read on every frame.
+  // Which placements span the road. Computed once: this is read every frame.
   readonly property var archProps: {
     var out = []
-    for (var i = 0; i < propCount; i++) {
-      var k = propKind(i)
-      if (k === "rollerDoor" || k === "gantry")
+    for (var i = 0; i < placements.length; i++)
+      if (placements[i].spans && archBeams[placements[i].kind] !== undefined)
         out.push(i)
-    }
     return out
+  }
+
+  // The world height of a placement's prop, from the kit's meta.
+  function propWorldHeight(kind) {
+    var m = PropMeta.forProp(kind)
+    return m ? m.world[1] : 1
+  }
+  function propWorldWidth(kind) {
+    var m = PropMeta.forProp(kind)
+    return m ? m.world[0] : 1
+  }
+
+  // The crossbar's box on the screen for one arch placement, or null when the
+  // arch is not in front of the camera. In view coordinates, shake included,
+  // so a caller can intersect it with an item's own rect.
+  function archBeamRect(i) {
+    var place = placements[i]
+    var beam = archBeams[place.kind]
+    if (!beam)
+      return null
+    var zed = propZ(i)
+    if (zed <= nearDistance + 0.2 || zed >= drawDistance)
+      return null
+    var stand = vAt(zed) * height
+    var tall = sizeAt(propWorldHeight(place.kind), zed)
+    var wide = sizeAt(propWorldWidth(place.kind), zed)
+    var top = stand - tall
+    var cx = uAt(place.x, zed) * width + shakeX
+    return Qt.rect(cx - wide / 2, top + tall * beam[0],
+                   wide, tall * (beam[1] - beam[0]))
   }
 
   // HOW FAR INTO YIELDING THE FIELD IS: BY HOW MUCH, NOT WHETHER AT ALL.
@@ -1192,18 +1330,11 @@ Item {
       return 0
     var worst = 0
     for (var i = 0; i < archProps.length; i++) {
-      var raw = (archProps[i] * propSpacing - travel) % propLoop
-      var z = (raw < 0 ? raw + propLoop : raw) + nearDistance
-      if (z <= nearDistance + 0.2 || z >= drawDistance)
+      var bar = archBeamRect(archProps[i])
+      if (!bar)
         continue
-      var top = archTopAt(archSpan, z)
-      var stand = vAt(z) * height
-      var beam0 = top + (stand - top) * archBeamTop
-      var beam1 = top + (stand - top) * archBeamBottom
-      var halfW = sizeAt(archSpan, z) / 2
-      var cx = uAt(0, z) * width + shakeX
-      var down = Math.min(beam1, box.y + box.height) - Math.max(beam0, box.y)
-      var across = Math.min(cx + halfW, box.x + box.width) - Math.max(cx - halfW, box.x)
+      var down = Math.min(bar.y + bar.height, box.y + box.height) - Math.max(bar.y, box.y)
+      var across = Math.min(bar.x + bar.width, box.x + box.width) - Math.max(bar.x, box.x)
       if (down <= 0 || across <= 0)
         continue
       var covered = (down / box.height) * (across / box.width)
@@ -1219,98 +1350,270 @@ Item {
 
   // NEAR PROPS FADE, AND EVERY CLASS OBEYS IT.
   //
-  // Round four applied its throttle to `arch` kinds alone, so the two props
-  // the design names as landmarks were the ONLY ones ever dimmed while every
-  // other class was exempt at any size. A critic measured one 3-unit tyre wall
-  // filling x 1250-1920, y 100-730 on a shipped frame -- 35% of it, top edge
-  // 336 px ABOVE the horizon -- and round five reproduced it on the SHADER path
-  // at t = 18 s: x 1155-1410, y 265-570, top edge 171 px above the horizon,
-  // over the sun and the right-hand hills. The prop that was a landmark was
-  // suppressed and the prop that wrecked the frame was not.
+  // A critic measured one 3-unit tyre wall filling x 1250-1920, y 100-730 on a
+  // shipped frame -- 35% of it, top edge 336 px ABOVE the horizon, over the sun
+  // and the right-hand hills. The rule is on DRAWN SIZE and every roadside
+  // class obeys it: a prop dissolves as it sweeps past the lens, from the depth
+  // at which it is `nearFadeFrom` of the frame's height to `nearFadeGone` of
+  // it. That band is about four tenths of a second of transit at racing speed,
+  // which is where a near prop is a blur anyway.
   //
-  // The rule is now on DRAWN SIZE and every roadside class obeys it: a prop
-  // dissolves as it sweeps past the lens, from the depth at which it is
-  // `nearFadeFrom` of the frame's height to `nearFadeGone` of it. That band is
-  // about four tenths of a second of transit at racing speed, which is where a
-  // near prop is a blur anyway.
+  // AND IT IS THE PROP'S OWN HEIGHT NOW, NOT A NOMINAL ASPECT. The rule used to
+  // multiply a prop's WIDTH by one constant, 176/128, because every prop was
+  // drawn into one 176 x 128 canvas. The kit's twenty-five are baked at their
+  // own proportions -- a pine is 1.8 by 5.28, a hay bale 1.35 by 0.75 -- so a
+  // width-times-constant rule was wrong by a factor of two in both directions:
+  // it would have faded hay bales that fill nothing and left pines standing at
+  // three times the frame height. `nearFade` takes the world HEIGHT, which is
+  // the number the rule is actually about, and every caller reads it from
+  // `PropMeta`.
   //
   // Road-spanning props are exempt, and that is the point of them: an arch you
   // pass under is meant to fill the frame, and the road goes through its
   // opening rather than behind it.
-  readonly property real propAspect: 176 / 128
-  readonly property real nearFadeFrom: 0.45
-  readonly property real nearFadeGone: 0.85
-  function nearFade(worldWidth, z) {
-    var frac = sizeAt(worldWidth * propAspect, z) / Math.max(1, height)
+  readonly property real nearFadeFrom: 0.62
+  readonly property real nearFadeGone: 1.05
+  function nearFade(worldHeight, z) {
+    var frac = sizeAt(worldHeight, z) / Math.max(1, height)
     if (frac <= nearFadeFrom)
       return 1
     if (frac >= nearFadeGone)
       return 0
     return 1 - (frac - nearFadeFrom) / (nearFadeGone - nearFadeFrom)
   }
-  // The one place a prop's opacity is decided, so a test can ask the view the
-  // same question the delegate asks it.
-  function propOpacity(spanning, worldWidth, z) {
-    return spanning ? 1 : nearFade(worldWidth, z)
-  }
-  readonly property var bannerLabels: ["TURBO", "PIT", "BOLT", "PISTON", "GASKET"]
-  // Eight units, not twelve: at twelve the roadside read as two thin rows of
-  // specks. About twenty-four are visible at once; each is one textured quad.
-  readonly property real propSpacing: 8.0
-  readonly property int propCount: Math.round(circuitLength / propSpacing)
-  readonly property real propLoop: circuitLength
 
-  function propKind(index) {
-    var slot = index % 3
-    if (slot === 0)
-      return sectorLandmark[Math.floor(index / 3) % sectorCount]
-    return sectorFiller[index % sectorFiller.length]
+  // ATMOSPHERIC PERSPECTIVE ON THE SPRITES.
+  //
+  // Design v4: "every ground and road colour lerps toward the sky colour at the
+  // horizon by distance ... SPRITES GET THE SAME TREATMENT with an opacity or a
+  // tint overlay by z. This is the single biggest step toward the bar."
+  //
+  // The ground takes `exp(-z^2 * 0.0011)` and the tarmac 0.30 of that rate. A
+  // roadside object is neither: it stands ABOVE the plane, where there is less
+  // air between it and the eye than there is along the ground to the same
+  // point, and it also has to stay a landmark -- the design puts a water tower
+  // in sector 3 and calls it "visible from a long way". So a prop takes 0.42 of
+  // the ground's rate, which is the one number in this file chosen by looking
+  // at the picture rather than derived: it puts a prop at z = 40 at 48% and one
+  // at z = 60 at 19%, so the far roadside is present as a ghost and the near
+  // one is solid.
+  readonly property real propFog: 0.42
+  function hazeClarity(z) {
+    return Math.max(0, Math.min(1, Math.exp(-propFog * z * z * 0.0011)))
+  }
+
+  // The one place a prop's opacity is decided, so a test can ask the view the
+  // same question the delegate asks it. `spanning` exempts an arch from the
+  // near fade only; the haze applies to everything, because an arch a hundred
+  // units away is as far into the dusk as anything else at that distance.
+  function propOpacity(spanning, worldHeight, z) {
+    return (spanning ? 1 : nearFade(worldHeight, z)) * hazeClarity(z)
   }
 
   Repeater {
     model: view.propCount
 
     Item {
-      readonly property string myKind: view.propKind(index)
-      readonly property bool arch: myKind === "rollerDoor" || myKind === "gantry"
-      readonly property real worldWidth: arch ? 9.4
-                                         : (myKind === "tireWall" ? 3.0
-                                            : (myKind === "banner" ? 3.2
-                                               : (myKind === "timingBoard" ? 2.0 : 1.35)))
-      readonly property real zed: {
-        var raw = (index * view.propSpacing - view.travel) % view.propLoop
-        return (raw < 0 ? raw + view.propLoop : raw) + view.nearDistance
-      }
-      // Alternating sides, at three different distances off the kerb, so the
-      // roadside is a place rather than two parallel rows.
-      readonly property real lateral: arch
-                                      ? 0
-                                      : (index % 2 === 0 ? -1 : 1)
-                                        * (view.roadHalf + view.rumbleHalf
-                                           + [0.75, 1.55, 2.60][index % 3])
-      readonly property real sc: view.sizeAt(worldWidth, zed) / furniture.sheetW
+      id: roadside
+      readonly property var place: view.placements[index]
+      readonly property real zed: view.propZ(index)
+      readonly property real worldH: view.propWorldHeight(place.kind)
+      readonly property real clarity: view.propOpacity(place.spans, worldH, zed)
+      readonly property real pxUnit: view.sizeAt(1, Math.max(0.05, zed))
 
-      x: view.uAt(lateral, zed) * view.width + view.shakeX
+      x: view.uAt(place.x, zed) * view.width + view.shakeX
       y: view.vAt(zed) * view.height + view.shakeY
       width: 0
       height: 0
       z: 1000 - zed
-      opacity: view.propOpacity(arch, worldWidth, zed)
-      visible: zed > view.nearDistance + 0.2 && zed < view.drawDistance
-               && sc > 0.010 && x > -view.width * 0.7 && x < view.width * 1.7
-               && opacity > 0.004
+      visible: zed > view.nearDistance && zed < view.drawDistance
+               && clarity > 0.004
+               && x > -view.width * 0.9 && x < view.width * 1.9
 
-      PropSprite {
-        id: furniture
-        kind: parent.myKind
-        label: parent.myKind === "gantry" ? "TURBO" : view.bannerLabels[index % view.bannerLabels.length]
-        // Three steps of distance dimming, quantised on purpose: `dim` is the
-        // one sprite property that repaints the canvas, so it must not be a
-        // continuous function of a position that changes every frame.
-        dim: Math.max(0.34, Math.round(Math.max(0.34, 1.08 - parent.zed / 120) * 3) / 3)
-        x: -sheetW / 2
-        y: -sheetH
-        scale: parent.sc
+      KitProp {
+        id: kitCell
+        kind: roadside.place.kind
+        // R and L are different renders and C spans the road; the frame index
+        // is the animation. `Circuit.viewAt` is the only thing that decides it.
+        viewName: Circuit.viewAt(roadside.place, view.worldClock)
+        pxPerUnit: roadside.pxUnit
+        clarity: roadside.clarity
+      }
+
+      // ------------------------------------------------- THE FACT BILLBOARDS
+      //
+      // Design v4, sector 11: "a row of boards that show the last three facts
+      // the child got right, painted on", and the design says of it: "the fact
+      // billboards in sector 11 are the passion-project idea I would fight for:
+      // the environment shows the child their own answers on the way to the
+      // finish. It is decoration that teaches."
+      //
+      // The kit's `billboard` is a BLANK CREAM BOARD, baked that way on purpose
+      // -- `docs/prop-kit.md`: "blank cream board: print the child's last three
+      // correct facts on it". So this is printing, not drawing a prop: the
+      // board is the kit's, and what goes on it is one string in the shell's
+      // own monospace face, sized and placed off the sprite's opaque box so it
+      // lands on the board however far away the board is.
+      //
+      // It is never a name, never free text, and never anything the child did
+      // not already answer correctly: `factBoards` is filled by Race.qml from
+      // the engine's own history and is empty everywhere else, including in the
+      // garage and in the harness, where the boards simply stay blank.
+      Text {
+        id: painted
+        visible: roadside.place.tag.length === 5
+                 && roadside.place.tag.indexOf("fact") === 0
+                 && text.length > 0 && font.pixelSize >= 7
+                 && roadside.clarity > 0.25
+        text: view.factBoardText(roadside.place.tag)
+        textFormat: Text.PlainText
+        color: view.billboardInk
+        opacity: roadside.clarity
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: Math.round(kitCell.boxHeight * 0.19)
+        horizontalAlignment: Text.AlignHCenter
+        // The board's own face, in the sprite's coordinates: the upper two
+        // thirds of the opaque box, inset by a tenth each side, which is the
+        // cream panel above the posts.
+        x: kitCell.boxLeft + kitCell.boxWidth * 0.10
+        y: kitCell.boxTop + kitCell.boxHeight * 0.28
+        width: kitCell.boxWidth * 0.80
+      }
+    }
+  }
+
+  // What is painted on each of the three boards. Race.qml sets `factBoards` to
+  // the last three facts the child got right, most recent first; anything else
+  // leaves the boards blank, which is what the garage and the harness show.
+  property var factBoards: []
+  readonly property color billboardInk: "#3a1730"
+  function factBoardText(tag) {
+    var slot = parseInt(tag.substring(4), 10)
+    if (!(factBoards instanceof Array) || slot < 0 || slot >= factBoards.length)
+      return ""
+    return String(factBoards[slot])
+  }
+
+  // --------------------------------------------- THE SHADOW UNDER AN ARCH
+  //
+  // Design v4, sector 9: "a bridge over the road, ITS SHADOW CROSSING THE
+  // TARMAC". A shadow is a soft thing and the plan is explicit that a
+  // hard-edged bake of a soft thing reads as gravel, so it is drawn here: a
+  // band of purple across the road, a couple of world units deep, at the arch's
+  // own place on the loop, with the road's own perspective applied to it -- the
+  // near edge is wider than the far one, which is what makes it lie on the
+  // tarmac instead of hanging in front of it.
+  //
+  // It falls to the LEFT of the arch, because the sun is on the right, and it
+  // travels further as the sun sinks: at lap 12 the overpass's shadow reaches
+  // most of a car length up the road.
+  Repeater {
+    model: view.archProps.length
+
+    Item {
+      id: archShade
+      readonly property int at: view.archProps[index]
+      readonly property var place: view.placements[at]
+      // A shadow is on the ground a little to the sunless side of the arch.
+      readonly property real lean: 1.4 + 3.6 * view.nightfall
+      readonly property real zFar: view.propZ(at) - lean
+      readonly property real zNear: zFar - 2.0
+      visible: zNear > view.nearDistance + 0.4 && zFar < 46
+      opacity: Math.max(0, Math.min(0.5, view.hazeClarity(zFar) * 0.5))
+      z: 900
+
+      Canvas {
+        id: shadowBand
+        anchors.fill: parent
+        // The band's own box, in view pixels, with a margin for the shake.
+        readonly property real yF: view.vAt(Math.max(0.2, archShade.zFar)) * view.height
+        readonly property real yN: view.vAt(Math.max(0.2, archShade.zNear)) * view.height
+        readonly property real halfF: view.sizeAt(view.roadHalf + view.rumbleHalf,
+                                                  Math.max(0.2, archShade.zFar))
+        readonly property real halfN: view.sizeAt(view.roadHalf + view.rumbleHalf,
+                                                  Math.max(0.2, archShade.zNear))
+        readonly property real cxF: view.uAt(0, Math.max(0.2, archShade.zFar)) * view.width
+        readonly property real cxN: view.uAt(0, Math.max(0.2, archShade.zNear)) * view.width
+        x: 0
+        y: 0
+        width: view.width
+        height: view.height
+        renderStrategy: Canvas.Immediate
+        renderTarget: Canvas.Image
+        smooth: false
+        antialiasing: false
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.reset()
+          ctx.clearRect(0, 0, width, height)
+          ctx.fillStyle = "#3a0f2c"
+          ctx.beginPath()
+          ctx.moveTo(cxF - halfF + view.shakeX, yF + view.shakeY)
+          ctx.lineTo(cxF + halfF + view.shakeX, yF + view.shakeY)
+          ctx.lineTo(cxN + halfN + view.shakeX, yN + view.shakeY)
+          ctx.lineTo(cxN - halfN + view.shakeX, yN + view.shakeY)
+          ctx.closePath()
+          ctx.fill()
+        }
+        onYFChanged: requestPaint()
+        onYNChanged: requestPaint()
+        Component.onCompleted: requestPaint()
+      }
+    }
+  }
+
+  // ------------------------------------------------- THE BIRDS, ONCE A RACE
+  //
+  // Design v4, Life: "A flock of birds crossing the lake once per race", and
+  // Secrets: none of this is announced anywhere.
+  //
+  // Seven blocks in a loose V, crossing left to right above the lake's horizon
+  // over about six seconds, ONCE. `birdsLap` is -1 until they have flown and is
+  // the lap they flew on afterwards, so a child who reaches the lake on lap 5
+  // sees them and a child who passes it again on lap 17 of a practice does not.
+  // `fxReset()` puts it back, which is what starts a new race.
+  //
+  // They are silhouettes on the sky rather than sprites: the prop kit has no
+  // bird and the plan is explicit that a builder never adds a file under
+  // assets/props/, so a flock is drawn -- and a flock at this distance is seven
+  // dark blocks, which is exactly what the kit would have baked.
+  property int birdsLap: -1
+  property real birdsBorn: -1e9
+  readonly property real birdsAge: (fxClock - birdsBorn) / 6000
+  onSectorNowChanged: {
+    if (sectorNow === 4 && birdsLap < 0 && !reducedMotion) {
+      birdsLap = lap
+      birdsBorn = fxClock
+    }
+  }
+
+  Item {
+    id: flock
+    anchors.fill: parent
+    visible: view.birdsLap >= 0 && view.birdsAge >= 0 && view.birdsAge <= 1
+             && !view.reducedMotion
+    opacity: Math.min(1, Math.min(view.birdsAge, 1 - view.birdsAge) * 6) * 0.8
+    z: 6
+
+    Repeater {
+      model: 7
+
+      Rectangle {
+        readonly property real lag: index * 0.035
+        readonly property real lift: (index % 2 === 0 ? -1 : 1) * (index * 0.6)
+        readonly property real px: Math.max(1, view.fxPixel)
+        // A wing beat: the block is two road pixels tall on the down stroke and
+        // one on the up, at about two beats a second -- slow enough for the
+        // design's 3 Hz ceiling and fast enough to read as a bird.
+        readonly property real beat: Math.floor(view.fxClock / 260 + index) % 2
+        width: px * 2
+        height: px * (1 + beat)
+        color: "#4a1738"
+        antialiasing: false
+        x: Math.round((view.width * (-0.08 + (view.birdsAge - lag) * 1.2)) / px) * px
+        y: Math.round((view.vAt(60) * view.height - view.height * 0.10
+                       + lift * px + Math.sin((view.birdsAge - lag) * 9) * px * 2) / px) * px
       }
     }
   }
@@ -1370,6 +1673,88 @@ Item {
                && x - kartArt.drawnWidth * 0.5 < view.width * 1.2
                && y - kartArt.drawnHeight < view.height * 1.2
 
+      // ------------------------------------------------- THE CONTACT SHADOW
+      //
+      // Design v4, Karts on the ground: "Darker, sharper contact shadows; a
+      // longer shadow as the sun drops."
+      //
+      // Three stacked slabs rather than one soft ellipse, and every edge of
+      // them snapped to the road's own four-pixel lattice. A blurred ellipse
+      // under a nearest-neighbour sprite is the exact defect the piece before
+      // this one closed on its own effects: "smooth full-resolution gaussians
+      // floating over a world that resolves into clean 4-pixel blocks -- there
+      // is not one dithered edge among them". A shadow is the most-looked-at
+      // soft thing in the frame, so it is made of the road's pixels: a dark
+      // core, a mid slab and a wide faint one, each a whole number of road
+      // pixels tall.
+      //
+      // It leans LEFT and lengthens as the hour passes, because the sun is on
+      // the right at `sunU` 0.68 and it is sinking: at lap 1 the shadow is a
+      // patch under the car, at lap 12 it is half a car length of purple
+      // running away from the light. Purple, never grey -- the design's shadow
+      // colour is `#5f255e` and the rule that it is never grey is explicit.
+      Item {
+        id: shade
+        visible: !isGhost && slot.zed > view.playerZ * 0.35
+        readonly property real span: view.kartSheetPixels(slot.zed)
+        readonly property real lean: span * (0.06 + 0.30 * view.nightfall)
+        readonly property real stretch: 1 + 0.55 * view.nightfall
+        z: -1
+
+        Repeater {
+          model: 3
+
+          Rectangle {
+            readonly property real k: [1.00, 0.74, 0.46][index]
+            readonly property real a: [0.20, 0.30, 0.46][index]
+            readonly property real px: Math.max(1, view.fxPixel)
+            width: Math.round(shade.span * (0.52 + 0.30 * k) * shade.stretch / px) * px
+            height: Math.max(px, Math.round(shade.span * 0.075 * (0.5 + k * 0.6) / px) * px)
+            x: Math.round((-width / 2 - shade.lean * k) / px) * px
+            y: Math.round((-height / 2 - shade.span * 0.012 * index) / px) * px
+            color: "#5f255e"
+            opacity: a * (view.reducedMotion ? 0.9 : 1)
+            antialiasing: false
+          }
+        }
+      }
+
+      // -------------------------------------------------- THE HEADLAMP CONE
+      //
+      // Design v4: "headlamp cones on the road after lap 8", and Time passes:
+      // "headlamps light around lap 8". `headlampsOn` is 0 before lap 7, 1 from
+      // lap 9, and the cone is drawn only for the child's own kart -- a rival's
+      // lamps point away from this camera, so its cone is behind its own body
+      // and would be a warm smear with no source.
+      //
+      // Six slabs on the road's lattice, narrowing and dimming up the road, in
+      // the same amber the pit's work lights are. It is the one thing in this
+      // file that is drawn UNDER the kart and OVER the road, which is what a
+      // light on tarmac is.
+      Item {
+        id: beam
+        visible: isHuman && view.headlampsOn > 0.01 && !isGhost
+        opacity: view.headlampsOn * 0.55
+        z: -0.5
+        readonly property real span: view.kartSheetPixels(slot.zed)
+
+        Repeater {
+          model: 6
+
+          Rectangle {
+            readonly property real t: index / 6
+            readonly property real px: Math.max(1, view.fxPixel)
+            width: Math.round(beam.span * (0.30 + t * 0.42) / px) * px
+            height: Math.max(px, Math.round(beam.span * 0.045 / px) * px)
+            x: Math.round((-width / 2) / px) * px
+            y: Math.round((-beam.span * (0.02 + t * 0.30)) / px) * px
+            color: "#f5a524"
+            opacity: 0.34 * (1 - t * 0.85)
+            antialiasing: false
+          }
+        }
+      }
+
       // The car: a sheet cell at the anchor, which is this item's origin --
       // the point the projection put on the road. A ghost is the same car,
       // translucent. The child's own tail lamps glow with the pull-back a hit
@@ -1393,8 +1778,62 @@ Item {
         yaw: (isHuman ? 0 : CarMeta.columnForHeading(view.kartHeadingDeg(slot.zed))) + slot.fxYaw
         sheetScale: slot.cellFit.sheetScale
         pixelScale: slot.cellFit.pixelScale
-        lampGlow: isHuman ? Math.min(1, view.pullback * 1.4) : 0
+        // PIECE T. Design v4, Karts on the ground: "Brake lights brighten in
+        // corners; ... tail lamps get brighter" as the hour passes. So the
+        // glow is the pull-back a hit causes, plus the corner the road is in,
+        // plus the dusk -- and a rival now has lamps at all, which it never
+        // did: at lap 12 the field ahead of the child is a string of red
+        // lights on a dark road, which is what a sunset race looks like.
+        lampGlow: isGhost ? 0
+                          : Math.min(1, (isHuman ? view.pullback * 1.4 : 0)
+                                        + Math.abs(view.curve) / view.curveAmplitude * 0.30
+                                        + view.nightfall * 0.45)
         opacity: isGhost ? 0.55 : 1.0
+      }
+
+      // ----------------------------------------------------- DUST ON DIRT
+      //
+      // Design v4, Life: "Dust puffs from every kart's rear wheels on dirt
+      // sectors, a little from the rivals ahead."
+      //
+      // Four blocks per kart, on the road's own lattice, thrown from behind
+      // the rear wheels and falling back toward the camera. They are bound to
+      // `travel` and to the kart's seat, so a moving field kicks up dust with
+      // no allocation and no timer -- and they are gone entirely on the two
+      // sectors that are not dirt at all (the pit and the finish, where the
+      // floor is the diagnostic grid) because `dustiness` is the sector
+      // table's own scrub amount and it is 0.22 there.
+      //
+      // Separate from the hero's surge dust below, which is about a Turbo
+      // rather than about the ground.
+      Item {
+        id: wheelDust
+        visible: !view.reducedMotion && !isGhost && view.speed > 0.18
+                 && view.dustiness > 0.45 && slot.zed < 26
+        opacity: Math.min(0.85, (view.speed - 0.18) * 1.5)
+                 * (view.dustiness - 0.45) * 1.8 * (isHuman ? 1 : 0.55)
+        z: 0.5
+        readonly property real span: view.kartSheetPixels(slot.zed)
+
+        Repeater {
+          model: 4
+
+          Rectangle {
+            readonly property real phase: {
+              var p = (view.travel * 0.33 + index * 0.29 + kartSeat * 0.17) % 1
+              return p < 0 ? p + 1 : p
+            }
+            readonly property real px: Math.max(1, view.fxPixel)
+            readonly property real side: (index % 2 === 0 ? -1 : 1) * 0.34
+            width: Math.max(px, Math.round(wheelDust.span * (0.035 + phase * 0.05) / px) * px)
+            height: width
+            x: Math.round((wheelDust.span * side * (1 + phase * 0.5) - width / 2) / px) * px
+            y: Math.round((-wheelDust.span * 0.02 - Math.sin(phase * Math.PI) * wheelDust.span * 0.09) / px) * px
+            color: index % 2 === 0 ? "#c98a6a" : "#a15a63"
+            opacity: 1 - phase
+            antialiasing: false
+          }
+        }
       }
     }
   }
@@ -2777,6 +3216,9 @@ Item {
     flashAnchor = -1
     flashAnchor2 = -1
     shakeAxis = 0
+    // PIECE T. The lake's flock is once a race, and this is what a new race is.
+    birdsLap = -1
+    birdsBorn = -1e9
     boostBorn = -1e9
     shimmerBorn = -1e9
     bloomBorn = -1e9

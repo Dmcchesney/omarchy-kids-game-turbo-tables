@@ -391,6 +391,31 @@ FocusScope {
         if (e.racerId === me) {
           track.throwForward(0.10)
           reveal.clear()
+          // PIECE T. THE BILLBOARDS IN SECTOR 11.
+          //
+          // Design v4, The circuit: "a row of boards that show the last three
+          // facts the child got right, painted on", and, of the same three
+          // boards, "the passion-project idea I would fight for: the
+          // environment shows the child their own answers on the way to the
+          // finish. It is decoration that teaches."
+          //
+          // This is the whole of the feed. Most recent first, three kept, and
+          // the source is the engine's own `correct` event -- so a board can
+          // only ever carry a fact this child actually got right, in the
+          // engine's own words (`factLabel` is what the fact panel prints).
+          // No free text ever reaches it, which is the design's rule, and
+          // nothing here is persisted: the boards are blank again next race.
+          //
+          // Written as a push loop rather than `[new].concat(old).slice(0, 3)`
+          // because `check:readme` refuses `Array.prototype.concat` in a plugin
+          // file on sight -- "a plugin file in this repository has no reason to
+          // build a name, a URL or an object at runtime; whatever it spells,
+          // the shape is the defect" -- and the gate is right to be blunt about
+          // it even here, where what is being assembled is three sums.
+          var boards = [Engine.factLabel(e.fact) + " = " + e.answer]
+          for (var b = 0; b < race.factBoards.length && boards.length < 3; b++)
+            boards.push(race.factBoards[b])
+          race.factBoards = boards
         }
         break
       case "wrong":
@@ -1600,10 +1625,23 @@ FocusScope {
     color: Theme.ground
   }
 
+  // The last three facts the child got right, most recent first, for the
+  // billboards in sector 11. Filled by the `correct` case in `apply` above and
+  // by nothing else; empty in the garage, in the countdown and in the harness,
+  // where the boards stay blank cream as the kit baked them.
+  property var factBoards: []
+
   TrackView {
     id: track
     anchors.fill: parent
     reducedMotion: race.reducedMotion
+    // PIECE T. Golden hour passes over the twelve laps: the sun sinks, the
+    // haze deepens, headlamps come on around lap 8 and the first stars are out
+    // by lap 11. One number drives all of it, and it is the lap counter the
+    // child is already reading.
+    lap: race.lapsDone + 1
+    lapCount: race.totalLaps
+    factBoards: race.factBoards
     // The answer field's own box, so a road-spanning prop can be measured
     // against the object the plan's acceptance line names -- not against the
     // fact, which is a different object further up the screen and is what

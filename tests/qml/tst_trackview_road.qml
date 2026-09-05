@@ -2,6 +2,8 @@ import QtQuick
 import QtTest
 import qs.Commons
 import "../../ui"
+import "../../ui/parts/Circuit.js" as Circuit
+import "../../ui/parts/PropMeta.js" as PropMeta
 
 // The three picture rules piece 4 round four added to the road, asserted on
 // the view's OWN functions -- the ones the delegates and the shader uniforms
@@ -99,10 +101,25 @@ Item {
     // in doing so met a criterion the plan did not set while leaving the one it
     // did set (the answer field) unmet. Nothing throttles an arch now, at any
     // depth, and this is what keeps that true.
-    function test_no_road_spanning_prop_is_ever_dimmed() {
+    // PIECE T: and the claim is narrower and more honest than it was. An arch
+    // is exempt from the NEAR FADE -- passing under one is meant to fill the
+    // frame -- but not from the haze, because an arch a hundred units away is
+    // as far into the dusk as anything else at that distance. So the case is
+    // that no arch is ever throttled by SIZE, which is what round four did.
+    function test_no_road_spanning_prop_is_ever_dimmed_by_its_size() {
+      var tall = view.propWorldHeight("gantry")
       for (var z = view.nearDistance; z < view.drawDistance; z += 0.25)
-        compare(view.propOpacity(true, view.archSpan, z), 1,
-                "a road-spanning prop was dimmed at z = " + z.toFixed(2))
+        compare(view.propOpacity(true, tall, z), view.hazeClarity(z),
+                "a road-spanning prop was throttled by its size at z = " + z.toFixed(2))
+      // A MUTATION GUARD, because the case above passes trivially if `nearFade`
+      // has been reduced to a constant 1 for everything. The gantry is 5.24
+      // world units tall, so at z = 3 it is drawn at 105% of the frame height
+      // and a prop that is not exempt would be gone.
+      verify(view.nearFade(tall, 3) <= 0.001,
+             "nearFade does not engage at all: a 5.24-unit prop at z = 3 keeps "
+             + view.nearFade(tall, 3).toFixed(3) + " of its opacity")
+      compare(view.propOpacity(true, tall, 3), view.hazeClarity(3),
+              "the exemption did not survive the depth the fade bites at")
     }
 
     // ------------------------------------------------ and the field yields
@@ -129,7 +146,13 @@ Item {
         else {
           if (covered > worstCoveredWhileNotFull)
             worstCoveredWhileNotFull = covered
-          if (y <= 0.001) {
+          // EXACTLY zero, not "under a thousandth". `crossingOver` divides the
+          // covered fraction by `fieldYieldAt`, so a coverage of 0.02% comes
+          // back as 0.0008 -- which a 0.001 threshold called "untouched" while
+          // a crossbar was measurably over the box. The claim in this case's
+          // last line is that the field never sits still under a crossbar AT
+          // ALL, and 0.0008 is not nothing.
+          if (y <= 0) {
             clear += 1
             if (covered > worstCoveredWhileClear)
               worstCoveredWhileClear = covered
@@ -162,21 +185,28 @@ Item {
     }
 
     // What fraction of `box` a road-spanning prop's crossbar is behind right
-    // now. Written out here rather than called on the view, so the case above
-    // is not asserting `crossingOver` against itself.
+    // now. Written out here from the CIRCUIT TABLE and the KIT'S OWN meta
+    // rather than called on the view, so the case above is not asserting
+    // `crossingOver` against itself.
     function beamCoverage(box) {
       var worst = 0
-      for (var i = 0; i < view.archProps.length; i++) {
-        var raw = (view.archProps[i] * view.propSpacing - view.travel) % view.propLoop
-        var z = (raw < 0 ? raw + view.propLoop : raw) + view.nearDistance
+      for (var i = 0; i < Circuit.PLACEMENTS.length; i++) {
+        var place = Circuit.PLACEMENTS[i]
+        var beam = view.archBeams[place.kind]
+        if (!place.spans || beam === undefined)
+          continue
+        var raw = (place.s - view.travel) % view.propLoop
+        var z = raw < 0 ? raw + view.propLoop : raw
         if (z <= view.nearDistance + 0.2 || z >= view.drawDistance)
           continue
-        var top = view.archTopAt(view.archSpan, z)
+        var meta = PropMeta.forProp(place.kind)
         var stand = view.vAt(z) * view.height
-        var beam0 = top + (stand - top) * view.archBeamTop
-        var beam1 = top + (stand - top) * view.archBeamBottom
-        var halfW = view.sizeAt(view.archSpan, z) / 2
-        var cx = view.uAt(0, z) * view.width
+        var tall = view.sizeAt(meta.world[1], z)
+        var top = stand - tall
+        var beam0 = top + tall * beam[0]
+        var beam1 = top + tall * beam[1]
+        var halfW = view.sizeAt(meta.world[0], z) / 2
+        var cx = view.uAt(place.x, z) * view.width
         var down = Math.min(beam1, box.y + box.height) - Math.max(beam0, box.y)
         var across = Math.min(cx + halfW, box.x + box.width) - Math.max(cx - halfW, box.x)
         if (down <= 0 || across <= 0)
@@ -206,29 +236,123 @@ Item {
     // exempt at any size and one of them measured x 1250-1920, y 100-730 on a
     // shipped frame -- 35% of it, top edge 336 px above the horizon, over the
     // sun. The rule is now on drawn size and every roadside class obeys it.
+    // PIECE T: EVERY KIND THE CIRCUIT ACTUALLY PLACES, at its own baked
+    // height. The rule used to be checked against four hand-typed widths
+    // multiplied by one nominal aspect, which was the right rule measured on
+    // the wrong object: the kit's twenty-five props are baked at their own
+    // proportions -- a pine is 1.8 by 5.28 world units, a hay bale 1.35 by
+    // 0.75 -- so a width-times-constant is wrong by a factor of two in both
+    // directions. This walks the kinds `ui/parts/Circuit.js` puts on the
+    // ground and reads each one's height out of the kit's meta.
     function test_every_roadside_class_fades_before_it_fills_the_frame() {
-      var widths = [3.0, 3.2, 2.0, 1.35]   // tyre wall, banner, timing board, drum/cone
-      for (var i = 0; i < widths.length; i++) {
+      var kinds = Circuit.kindsUsed()
+      var checked = 0
+      for (var i = 0; i < kinds.length; i++) {
+        var meta = PropMeta.forProp(kinds[i])
+        verify(meta !== null, kinds[i] + " is not a prop in the kit")
+        if (view.archBeams[kinds[i]] !== undefined)
+          continue                     // an arch is meant to fill the frame
+        checked += 1
+        var tall = meta.world[1]
         var worstDrawn = 0
         for (var z = view.nearDistance + 0.2; z < view.drawDistance; z += 0.05) {
-          var op = view.propOpacity(false, widths[i], z)
-          if (op <= 0.004)
+          if (view.propOpacity(false, tall, z) <= 0.004)
             continue
-          var drawn = view.sizeAt(widths[i] * view.propAspect, z) / view.height
+          var drawn = view.sizeAt(tall, z) / view.height
           if (drawn > worstDrawn)
             worstDrawn = drawn
         }
         verify(worstDrawn <= view.nearFadeGone + 0.001,
-               "a " + widths[i] + "-unit roadside prop is still drawn at "
+               "a " + kinds[i] + " is still drawn at "
                + (worstDrawn * 100).toFixed(0) + "% of the frame height")
+      }
+      verify(checked >= 12, "only " + checked + " roadside kinds were checked")
+    }
+
+    // ... and the rule leaves ordinary roadside furniture alone: at an ordinary
+    // distance a prop's only loss is the haze, which is the design's own
+    // atmospheric perspective and not a throttle.
+    function test_a_prop_at_an_ordinary_distance_is_only_dimmed_by_the_haze() {
+      var tall = PropMeta.forProp("banner").world[1]
+      for (var z = 6; z < view.drawDistance; z += 0.5)
+        compare(view.propOpacity(false, tall, z), view.hazeClarity(z),
+                "a banner at z = " + z.toFixed(1) + " lost more than the haze")
+    }
+
+    // ---------------------------------------------- and each sector is a place
+    //
+    // The gate on this piece is that "a stranger shown the twelve frames
+    // unlabelled should be able to tell them apart". That is a judgement, but
+    // one half of it is arithmetic and belongs here: every sector has to have
+    // something authored in it, and the twelve landmark props the design names
+    // by name have to be where the design puts them.
+    function test_every_sector_has_a_landmark_and_furniture() {
+      var counts = Circuit.countBySector()
+      for (var i = 0; i < counts.length; i++)
+        verify(counts[i] >= 8,
+               "sector " + (i + 1) + " (" + Circuit.SECTOR_NAMES[i] + ") has only "
+               + counts[i] + " roadside objects")
+      var wanted = { "gantry": 0, "banner": 1, "waterTower": 2, "rockWall": 3,
+                     "jetty": 4, "bridge": 5, "rollerDoor": 6, "overpass": 8,
+                     "scrapyard": 9, "billboard": 10 }
+      for (var kind in wanted) {
+        var found = false
+        for (var p = 0; p < Circuit.PLACEMENTS.length; p++) {
+          var place = Circuit.PLACEMENTS[p]
+          if (place.kind === kind
+              && Math.floor(place.s / Circuit.SECTOR_LENGTH) === wanted[kind])
+            found = true
+        }
+        verify(found, "the design puts a " + kind + " in sector "
+                      + (wanted[kind] + 1) + " and the circuit has none there")
       }
     }
 
-    // ... and the rule leaves ordinary roadside furniture alone.
-    function test_a_prop_at_an_ordinary_distance_is_never_dimmed() {
-      for (var z = 6; z < view.drawDistance; z += 0.5)
-        compare(view.propOpacity(false, 3.2, z), 1,
-                "a banner at z = " + z.toFixed(1) + " was dimmed")
+    // NO PROP IS DRAWN IN CODE. Every object on the roadside has to be a cell
+    // of a sheet under assets/props/, and the view has to be able to find that
+    // cell -- a typo in a view name would otherwise draw nothing at all and
+    // look exactly like a prop that is simply far away.
+    function test_every_roadside_object_is_a_cell_of_the_frozen_kit() {
+      for (var i = 0; i < Circuit.PLACEMENTS.length; i++) {
+        var place = Circuit.PLACEMENTS[i]
+        var meta = PropMeta.forProp(place.kind)
+        verify(meta !== null, "placement " + i + " names " + place.kind
+                              + ", which is not in the kit")
+        // Every frame the animation can reach has to exist in the sheet.
+        for (var c = 0; c < 40; c++) {
+          var name = Circuit.viewAt(place, c * 0.05)
+          verify(meta.views.indexOf(name) >= 0,
+                 place.kind + " has no view " + name
+                 + " (placement " + i + ", " + place.anim + ")")
+          verify(PropMeta.cellRect(place.kind, name, 0) !== null,
+                 place.kind + " " + name + " has no cell")
+        }
+      }
+    }
+
+    // AND NO TWO CROWDS ARE IN PHASE. The design asks for "a wave of jumps and
+    // raised arms rolling along the rail; never two crowds in phase". Measured
+    // over a second of world clock, no two crowd placements may ever show the
+    // same frame at the same moment for the whole of it.
+    function test_no_two_crowds_are_ever_in_step() {
+      var crowds = []
+      for (var i = 0; i < Circuit.PLACEMENTS.length; i++)
+        if (Circuit.PLACEMENTS[i].anim === "crowd")
+          crowds.push(Circuit.PLACEMENTS[i])
+      verify(crowds.length >= 6, "only " + crowds.length + " crowds on the circuit")
+      for (var a = 0; a < crowds.length; a++) {
+        for (var b = a + 1; b < crowds.length; b++) {
+          var same = 0
+          var samples = 0
+          for (var t = 0; t < 1.0; t += 0.02) {
+            samples += 1
+            if (Circuit.viewAt(crowds[a], t) === Circuit.viewAt(crowds[b], t))
+              same += 1
+          }
+          verify(same < samples,
+                 "two crowds are on the same frame for a whole second")
+        }
+      }
     }
   }
 }

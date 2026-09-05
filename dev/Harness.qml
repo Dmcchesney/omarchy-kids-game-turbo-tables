@@ -473,7 +473,15 @@ Window {
     active: !harness.kartMode && harness.ready
     anchors.fill: parent
     focus: true
-    source: Qt.resolvedUrl("../ui/" + harness.screenName + ".qml")
+    // PIECE T. A screen name beginning `dev/` loads from THIS directory rather
+    // than from `ui/`. The one file that needs it is `dev/RoadOnly.qml`, the
+    // rig that renders the road plane on its own so the shader and the canvas
+    // fallback can be differenced against each other pixel for pixel; it has no
+    // business shipping inside the plugin, and the harness is already the one
+    // thing here that never does.
+    source: harness.screenName.indexOf("dev/") === 0
+            ? Qt.resolvedUrl("../dev/" + harness.screenName.substring(4) + ".qml")
+            : Qt.resolvedUrl("../ui/" + harness.screenName + ".qml")
 
     onLoaded: {
       if (item.hasOwnProperty("seed"))

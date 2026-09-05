@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Shapes
 import "parts"
+import "parts/Terrain.js" as Terrain
 
 // The honest picture of the race.
 //
@@ -357,21 +358,93 @@ Item {
   implicitHeight: 170
 
   // -------------------------------------------------------- the circuit
-  // A kidney: two long straights, a wide left-hand sweep and a tighter right
-  // one. Normalised to -1..1 in both axes and mapped into the box below.
+  //
+  // PIECE T: THE MAP IS A PROJECTION OF THE SECTOR TABLE, NOT A DRAWING OF A
+  // TRACK THAT DOES NOT EXIST.
+  //
+  // What stood here was a kidney: `0.98 cos a - 0.11 cos 2a` by
+  // `0.60 sin a + 0.17 sin 2a`, described in the comment as "two long
+  // straights, a wide left-hand sweep and a tighter right one". The circuit is
+  // those things, but this curve was not them -- it was a shape chosen to look
+  // like a track, and it had no arithmetic in common with `SECTOR_CURVE`, which
+  // is what the road actually bends by. A child learning the circuit by sight
+  // was being shown a different circuit, and a map that disagrees with the
+  // world is worse than no map: the header three hundred lines above calls this
+  // "the honest picture of the race".
+  //
+  // The loop is now integrated from `Terrain.SECTOR_CURVE`, the same twelve
+  // numbers `TrackView.curveAt` bends the road by and `road.frag` puts the
+  // kerbs on the inside of. Heading turns at twice the curve -- the road's
+  // lateral offset is `curve * z^2`, so `dx/dz = 2 curve z` and the curvature
+  // is `2 curve` -- and the position is the integral of that heading.
+  //
+  // AND THEN IT IS CLOSED, WHICH IS THE ONE HONEST LIBERTY. The twelve numbers
+  // sum to -0.13, so their integral turns through about -14 degrees over a lap
+  // and does not come back to the start line: a literal plot is a nearly
+  // straight line, not a circuit. So the heading is a full turn PLUS the sector
+  // table's deviation from its own average -- `2 pi t + BEND * (theta(t) -
+  // t theta(1))` -- which closes the loop exactly while keeping every corner's
+  // shape, sign and relative sharpness. The two long straights come out as the
+  // flat runs, sector 4's left-hander as the wide sweep and sector 9's
+  // right-hander as the tight one, because those are what the table says.
+  // `BEND` is the only free number and it is a drawing choice: at 0 the map is
+  // a circle, at 1.6 the corners are as pronounced as the panel can show.
   readonly property real padX: dotPx * 0.9 + 10
   readonly property real padY: dotPx * 0.9 + 8
+  readonly property real bend: 1.6
+  readonly property int loopSamples: 240
 
-  function shapeX(a) { return 0.98 * Math.cos(a) - 0.11 * Math.cos(2 * a) }
-  function shapeY(a) { return 0.60 * Math.sin(a) + 0.17 * Math.sin(2 * a) }
+  // The loop in its own normalised space, closed, centred and scaled to fill
+  // -1..1 in both axes. Computed once: everything else samples it.
+  readonly property var loopPath: {
+    var n = minimap.loopSamples
+    var ds = Terrain.CIRCUIT_LENGTH / n
+    // Integrate the table's own heading, then take out its linear trend.
+    var raw = [0]
+    var acc = 0
+    for (var i = 0; i < n; i++) {
+      acc += 2 * Terrain.curveNormAt(i * ds) * ds
+      raw.push(acc)
+    }
+    var total = raw[n]
+    var xs = [], ys = []
+    var px = 0, py = 0
+    var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9
+    for (var k = 0; k <= n; k++) {
+      var u = k / n
+      var theta = 2 * Math.PI * u + minimap.bend * (raw[k] - total * u)
+      xs.push(px)
+      ys.push(py)
+      if (px < minX) minX = px
+      if (px > maxX) maxX = px
+      if (py < minY) minY = py
+      if (py > maxY) maxY = py
+      px += Math.cos(theta) * ds
+      py += Math.sin(theta) * ds
+    }
+    // Normalise into -1..1, keeping the aspect free: the panel is wider than it
+    // is tall and the circuit should use all of it.
+    var out = []
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+    var hx = Math.max(1e-6, (maxX - minX) / 2), hy = Math.max(1e-6, (maxY - minY) / 2)
+    for (var j = 0; j <= n; j++)
+      out.push(Qt.point((xs[j] - cx) / hx, (ys[j] - cy) / hy))
+    return out
+  }
 
   // t runs 0..1 from the start line, the way the race does.
   function pointAt(t) {
-    var a = (t - 0.25) * 2 * Math.PI
+    var n = minimap.loopSamples
+    var u = t - Math.floor(t)
+    var f = u * n
+    var i = Math.floor(f)
+    var g = f - i
+    var a = loopPath[i]
+    var b = loopPath[Math.min(n, i + 1)]
     var hw = (width - padX * 2) / 2
     var hh = (height - padY * 2) / 2
-    return Qt.point(padX + hw + shapeX(a) * hw / 1.09,
-                    padY + hh - shapeY(a) * hh / 0.72)
+    return Qt.point(padX + hw + (a.x + (b.x - a.x) * g) * hw,
+                    padY + hh + (a.y + (b.y - a.y) * g) * hh)
   }
 
   function tangentAt(t) {
