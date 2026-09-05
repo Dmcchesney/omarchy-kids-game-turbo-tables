@@ -143,8 +143,15 @@ Item {
           color: Qt.rgba(1, 1, 1, 0.30)
         }
 
+        // A wall-clock ColorAnimation, so it is cut under an external clock as
+        // well as under the setting. ROUND 3: splitting `externalClock` out of
+        // `reducedMotion` above put this back in the strips' way, and a strip
+        // whose bytes depend on how long the harness took to save the last PNG
+        // is not evidence -- round two learned that the hard way and wrote it
+        // down. Every wall-clock animation reachable from the race screen is
+        // gated on `externalClock`; this is one of them.
         Behavior on color {
-          enabled: !bar.reducedMotion
+          enabled: !bar.reducedMotion && !bar.externalClock
           ColorAnimation { duration: 140 }
         }
       }

@@ -507,6 +507,19 @@ Item {
       verify(!track.worldFrozen, "the freeze let go")
       race.stepClock(20)
       verify(track.travel > held, "and the road is moving again")
+      // ROUND 3 LOGS THE NUMBER, BECAUSE THE STRIPS CAN NO LONGER SHOW IT.
+      //
+      // Round two's evidence proved the hit-stop off the pixels: the wrench's
+      // frame 8->9 road-band difference measured 0.8 against a 5.3 baseline.
+      // Round three puts a spark burst, a shock ring, a flare and a flash on
+      // exactly that frame, so a frame difference across the freeze is now
+      // dominated by the impact playing over the still world -- which is what a
+      // hit-stop IS, and which makes the pixel measurement useless as a proof.
+      // This is the honest form of it: the one number the whole camera is
+      // derived from, read across the freeze and after it.
+      console.log("FX-HITSTOP|wrench|travel held at " + held.toFixed(4)
+                  + " for the whole " + b.hitStop + " ms freeze, then "
+                  + track.travel.toFixed(4) + " twenty ms after it let go")
     }
 
     // -------------------------------------------------------- reduced motion
