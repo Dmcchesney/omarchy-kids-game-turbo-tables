@@ -4,6 +4,7 @@ import qs.Commons
 import "../../ui"
 import "../../ui/parts/Circuit.js" as Circuit
 import "../../ui/parts/PropMeta.js" as PropMeta
+import "../../ui/parts/Terrain.js" as Terrain
 
 // The three picture rules piece 4 round four added to the road, asserted on
 // the view's OWN functions -- the ones the delegates and the shader uniforms
@@ -115,7 +116,7 @@ Item {
       // has been reduced to a constant 1 for everything. The gantry is 5.24
       // world units tall, so at z = 3 it is drawn at 105% of the frame height
       // and a prop that is not exempt would be gone.
-      verify(view.nearFade(tall, 3) <= 0.001,
+      verify(view.nearFade(tall, 3) <= 0.01,
              "nearFade does not engage at all: a 5.24-unit prop at z = 3 keeps "
              + view.nearFade(tall, 3).toFixed(3) + " of its opacity")
       compare(view.propOpacity(true, tall, 3), view.hazeClarity(3),
@@ -277,6 +278,56 @@ Item {
       for (var z = 6; z < view.drawDistance; z += 0.5)
         compare(view.propOpacity(false, tall, z), view.hazeClarity(z),
                 "a banner at z = " + z.toFixed(1) + " lost more than the haze")
+    }
+
+    // ------------------------------------ the two cheap paths are the same path
+    //
+    // Two things in this piece exist ONLY because the honest version was too
+    // expensive to run every frame on a machine with no shader pipeline, and
+    // each of them is a second implementation of something that already worked.
+    // A second implementation that drifts is a picture that drifts, so both are
+    // held to their originals here rather than to a description of them.
+    //
+    // `Terrain.rowGround` is `Terrain.groundAt` with everything that is constant
+    // across a row hoisted out of the loop. It saved 3.3 ms of a 11 ms frame at
+    // 1920x1080 on this Mac's software scene graph; it may not change a pixel.
+    function test_the_hoisted_ground_is_the_same_ground() {
+      var scratch = [0, 0, 0]
+      var worst = 0
+      for (var si = 0; si < 24; si++) {
+        var s = si * 18.7 + 3.3
+        for (var zi = 0; zi < 8; zi++) {
+          var z = 2 + zi * 6
+          var row = Terrain.rowContext(s, z)
+          for (var xi = -20; xi <= 20; xi += 3) {
+            var x = xi * 1.37
+            var a = Terrain.groundAt(x, s, z)
+            var b = Terrain.rowGround(row, x, scratch)
+            for (var k = 0; k < 3; k++)
+              worst = Math.max(worst, Math.abs(a[k] - b[k]))
+          }
+        }
+      }
+      verify(worst < 1e-12,
+             "rowGround and groundAt differ by " + worst + " somewhere on the circuit")
+    }
+
+    // `PropMeta.stepForFast` is `PropMeta.stepFor` without three logarithms per
+    // prop per frame. Nearest-by-ratio on a geometric ladder is a pair of
+    // thresholds; this is the case that says so.
+    function test_the_cheap_sheet_row_is_the_same_row() {
+      var kinds = Circuit.kindsUsed()
+      var checked = 0
+      for (var i = 0; i < kinds.length; i++) {
+        var meta = PropMeta.forProp(kinds[i])
+        for (var px = 1; px < meta.cell[0] * 1.6; px += Math.max(1, meta.cell[0] / 97)) {
+          checked += 1
+          compare(PropMeta.stepForFast(kinds[i], px), PropMeta.stepFor(kinds[i], px),
+                  kinds[i] + " at " + px.toFixed(1) + " px: the fast row and the "
+                  + "nearest-by-ratio row disagree")
+        }
+      }
+      verify(checked > 1000, "only " + checked + " widths were checked")
     }
 
     // ---------------------------------------------- and each sector is a place

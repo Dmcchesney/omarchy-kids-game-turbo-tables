@@ -43,6 +43,15 @@ var SECTOR_CURVE = [0.00, 0.10, -0.45, -1.00, -0.80, -0.20,
 var SECTOR_HILL = [0.00, 0.30, 0.72, 0.40, 0.00, -0.40,
                    -0.75, -0.35, 0.10, 0.55, 0.25, -0.20]
 
+// What a SECTOR_CURVE entry of 1.0 means in the projection: the road's lateral
+// offset at distance z is `CURVE_AMPLITUDE * curveNorm * z^2`. It lives here
+// rather than in TrackView because `ui/Minimap.qml` integrates the table into
+// the loop it draws, and a heading integrated from the raw table without this
+// factor is out by a factor of forty -- which is exactly the defect the first
+// cut of that map had: the "loop" wound round several times and normalised into
+// a scribble that happened to fit the panel.
+var CURVE_AMPLITUDE = 0.0255
+
 // ------------------------------------------------------------ the palettes
 // One pair per sector, in the design's landmark order: the pit, out of town,
 // the scrub, the quarry, the lake, the pines, the roller door, the dunes, the
@@ -225,6 +234,68 @@ function groundAt(x, s, z) {
     r *= wl; g *= wl; bl *= wl
   }
   return [r, g, bl]
+}
+
+// ------------------------------------------- THE ROW, FOR THE FALLBACK ONLY
+//
+// `groundAt` is the honest statement of the ground and it is what road.frag
+// evaluates per pixel. `ui/CanvasRoad.qml` evaluates it per BLOCK, in rows, and
+// most of what it does is the same for every block in a row: which sector, how
+// the two palettes blend, how much scrub the sector carries, how much of the
+// fine octave survives at that depth. Calling `groundAt` per cell recomputed
+// all of it every time, and measured on this Mac's software scene graph that
+// cost 15.7 ms a frame -- the Race screen fell from 62.8 fps to 23.
+//
+// So a row is set up once and each block is a handful of multiplies after that.
+// `rowContext(s, z)` and `rowGround(ctx, x, out)` together compute EXACTLY what
+// `groundAt(x, s, z)` computes -- the same lattices, the same order of
+// operations -- and `tst_trackview_road` holds them to that, sample by sample,
+// so this cannot quietly become a second, cheaper ground.
+function rowContext(s, z) {
+  var m = sectorMix(s)
+  var a = m[0], b = m[1], t = m[2]
+  var ff = fineFade(z)
+  return {
+    "s": s,
+    "ff": ff,
+    "soil": mix3(SOIL[a], SOIL[b], t),
+    "scrub": mix3(SCRUB[a], SCRUB[b], t),
+    "amount": FLAGS[a][3] + (FLAGS[b][3] - FLAGS[a][3]) * t,
+    "wind": FLAGS[a][2] + (FLAGS[b][2] - FLAGS[a][2]) * t,
+    "water": FLAGS[a][1] + (FLAGS[b][1] - FLAGS[a][1]) * t,
+    "grid": FLAGS[a][0] + (FLAGS[b][0] - FLAGS[a][0]) * t,
+    // The three lattices' `s` cells, which do not change across a row.
+    "coarseS": Math.floor(s / COARSE),
+    "fineS": Math.floor(s / FINE),
+    "rutS": Math.floor(s * 0.24 / RUT),
+    "windS": Math.floor(s * 0.10 / COARSE),
+    "windShear": s * 0.4
+  }
+}
+
+// The ground colour at `x` in a row, written into `out` as three 0..1 numbers.
+// `out` is the caller's scratch array, so a row of two hundred blocks allocates
+// nothing at all.
+function rowGround(c, x, out) {
+  var coarse = hashCell(Math.floor(x / COARSE), c.coarseS)
+  var fine = hashCell(Math.floor(x / FINE), c.fineS)
+  var ff = c.ff
+  var mask = (coarse * 0.78 + fine * 0.22 * ff - 0.42) / 0.30
+  mask = (mask < 0 ? 0 : (mask > 1 ? 1 : mask)) * c.amount
+  var soil = c.soil, scrub = c.scrub
+  var r = soil[0] + (scrub[0] - soil[0]) * mask
+  var g = soil[1] + (scrub[1] - soil[1]) * mask
+  var b = soil[2] + (scrub[2] - soil[2]) * mask
+  var rut = hashCell(Math.floor(x / RUT), c.rutS)
+  var lift = 0.90 + 0.20 * rut + 0.10 * (fine - 0.5) * ff
+  r *= lift; g *= lift; b *= lift
+  if (c.wind > 0.001) {
+    var wn = hashCell(Math.floor((x + c.windShear) / COARSE), c.windS)
+    var wl = 1.0 + c.wind * (wn - 0.5) * 0.34
+    r *= wl; g *= wl; b *= wl
+  }
+  out[0] = r; out[1] = g; out[2] = b
+  return out
 }
 
 // ----------------------------------------------------------------- helpers

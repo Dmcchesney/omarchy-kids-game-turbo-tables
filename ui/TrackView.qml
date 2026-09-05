@@ -165,7 +165,7 @@ Item {
   readonly property int sectorCount: Terrain.SECTOR_COUNT
   readonly property real sectorLength: Terrain.SECTOR_LENGTH
   readonly property real circuitLength: Terrain.CIRCUIT_LENGTH
-  readonly property real curveAmplitude: 0.0255
+  readonly property real curveAmplitude: Terrain.CURVE_AMPLITUDE
   readonly property real hillAmplitude: 0.030
 
   // Two long straights, one wide left-hand sweep, one tighter right-hander,
@@ -1417,25 +1417,34 @@ Item {
       id: roadside
       readonly property var place: view.placements[index]
       readonly property real zed: view.propZ(index)
-      readonly property real worldH: view.propWorldHeight(place.kind)
-      readonly property real clarity: view.propOpacity(place.spans, worldH, zed)
-      readonly property real pxUnit: view.sizeAt(1, Math.max(0.05, zed))
+      // EVERYTHING EXPENSIVE HANGS OFF THIS. About a hundred of the 133
+      // placements are behind the camera at any moment, and a QML binding is
+      // re-evaluated when its dependencies change whether or not the item is
+      // drawn. `inRange` is the one cheap test -- two comparisons on a number
+      // this delegate has to compute anyway -- and the projection, the haze,
+      // the sheet row and the animation frame all short-circuit on it. See the
+      // note on `KitProp.live`: this is worth 6.2 ms a frame.
+      readonly property bool inRange: zed > view.nearDistance && zed < view.drawDistance
+      readonly property real clarity: inRange
+                                      ? view.propOpacity(place.spans, place.worldH, zed) : 0
+      readonly property real pxUnit: inRange ? view.sizeAt(1, Math.max(0.05, zed)) : 0
 
-      x: view.uAt(place.x, zed) * view.width + view.shakeX
-      y: view.vAt(zed) * view.height + view.shakeY
+      x: inRange ? view.uAt(place.x, zed) * view.width + view.shakeX : 0
+      y: inRange ? view.vAt(zed) * view.height + view.shakeY : 0
       width: 0
       height: 0
       z: 1000 - zed
-      visible: zed > view.nearDistance && zed < view.drawDistance
-               && clarity > 0.004
+      visible: inRange && clarity > 0.004
                && x > -view.width * 0.9 && x < view.width * 1.9
 
       KitProp {
         id: kitCell
+        live: roadside.visible
         kind: roadside.place.kind
         // R and L are different renders and C spans the road; the frame index
         // is the animation. `Circuit.viewAt` is the only thing that decides it.
-        viewName: Circuit.viewAt(roadside.place, view.worldClock)
+        viewIndex: roadside.inRange
+                   ? Circuit.viewIndexAt(roadside.place, view.worldClock) : 0
         pxPerUnit: roadside.pxUnit
         clarity: roadside.clarity
       }
@@ -1472,6 +1481,13 @@ Item {
         font.family: Theme.mono
         font.bold: true
         font.pixelSize: Math.round(kitCell.boxHeight * 0.19)
+        // FIT, NEVER SPILL. The board is the kit's and its cream panel is a
+        // fixed fraction of the sprite; the string is the child's own fact and
+        // is between five and eleven characters. `HorizontalFit` shrinks the
+        // type to the panel rather than letting a long sum hang off the board,
+        // which is what "painted on" has to mean.
+        fontSizeMode: Text.HorizontalFit
+        minimumPixelSize: 7
         horizontalAlignment: Text.AlignHCenter
         // The board's own face, in the sprite's coordinates: the upper two
         // thirds of the opaque box, inset by a tenth each side, which is the
@@ -1480,8 +1496,89 @@ Item {
         y: kitCell.boxTop + kitCell.boxHeight * 0.28
         width: kitCell.boxWidth * 0.80
       }
+
+      // The pit board's split, on the flat teal readout the bake left for it.
+      Text {
+        visible: roadside.place.kind === "pitBoard"
+                 && font.pixelSize >= 7 && roadside.clarity > 0.25
+        text: view.pitBoardText
+        textFormat: Text.PlainText
+        color: view.pitBoardInk
+        opacity: roadside.clarity
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: Math.round(kitCell.boxHeight * 0.20)
+        fontSizeMode: Text.HorizontalFit
+        minimumPixelSize: 7
+        horizontalAlignment: Text.AlignHCenter
+        x: kitCell.boxLeft + kitCell.boxWidth * 0.14
+        y: kitCell.boxTop + kitCell.boxHeight * 0.21
+        width: kitCell.boxWidth * 0.72
+      }
     }
   }
+
+  // ------------------------------------------- THE KART IN THE SCRAPYARD
+  //
+  // Design v4, Secrets: "One hidden kart in the scrapyard ... None of this is
+  // announced anywhere." `docs/prop-kit.md` says the same thing from the other
+  // side: "The hidden kart in the scrapyard: one of the six car bodies from
+  // `assets/karts/`, placed behind the stack."
+  //
+  // So it is a real `CarSprite` -- the one renderer, the same sheets the child's
+  // own kart is drawn from -- parked a little further down the road than the
+  // stack it hides behind and a little to the side of it, so what a child sees
+  // on the way past is a wheel and a wing sticking out of a pile of dead karts.
+  // Which body it is comes off the loop position rather than being chosen, so
+  // it is the same kart on every lap of every race and a child can learn it.
+  // Hoisted rather than called inline: `check:readme` refuses a computed member
+  // access on the result of a call in a plugin file -- "a computed member access
+  // on the result of a call is how a named global is reached without naming it"
+  // -- and it is right to refuse it on sight rather than on intent.
+  readonly property var hiddenSpots: Circuit.tagged("hidden")
+
+  Repeater {
+    model: view.hiddenSpots.length
+
+    Item {
+      id: junker
+      readonly property int at: view.hiddenSpots[index]
+      readonly property var place: view.placements[at]
+      readonly property real zed: view.propZ(at) + 1.6
+      readonly property var cellFit: view.kartCell(zed)
+      x: view.uAt(place.x + 1.15, zed) * view.width + view.shakeX
+      y: view.vAt(zed) * view.height + view.shakeY
+      width: 0
+      height: 0
+      z: 1000 - zed - 0.5
+      opacity: view.hazeClarity(zed)
+      visible: zed > view.nearDistance && zed < 60 && opacity > 0.02
+
+      CarSprite {
+        cellName: "hidden"
+        body: 4
+        paint: 6
+        number: 13
+        camera: "road"
+        yaw: 3
+        showNumber: false
+        sheetScale: junker.cellFit.sheetScale
+        pixelScale: junker.cellFit.pixelScale
+      }
+    }
+  }
+
+  // ------------------------------------------------- THE PIT BOARD'S SPLIT
+  //
+  // `docs/prop-kit.md`, `pitBoard`: "the readout is a flat teal tone for the
+  // game to print the split on". So the two pit boards -- one in the pit, one
+  // at the finish -- carry a printed line, the same way the billboards do.
+  //
+  // AND THE LAST LAP SAYS SOMETHING ELSE, which is the design's Secrets line:
+  // "The `WELCOME TO THE PIT` terminal that blinks something different on the
+  // last lap." It is announced nowhere and it is two words.
+  readonly property string pitBoardText: lap >= lapCount ? "LAST LAP" : "P" + lap
+  readonly property color pitBoardInk: "#7fe3d2"
 
   // What is painted on each of the three boards. Race.qml sets `factBoards` to
   // the last three facts the child got right, most recent first; anything else
@@ -1523,43 +1620,39 @@ Item {
       opacity: Math.max(0, Math.min(0.5, view.hazeClarity(zFar) * 0.5))
       z: 900
 
-      Canvas {
-        id: shadowBand
-        anchors.fill: parent
-        // The band's own box, in view pixels, with a margin for the shake.
-        readonly property real yF: view.vAt(Math.max(0.2, archShade.zFar)) * view.height
-        readonly property real yN: view.vAt(Math.max(0.2, archShade.zNear)) * view.height
-        readonly property real halfF: view.sizeAt(view.roadHalf + view.rumbleHalf,
-                                                  Math.max(0.2, archShade.zFar))
-        readonly property real halfN: view.sizeAt(view.roadHalf + view.rumbleHalf,
-                                                  Math.max(0.2, archShade.zNear))
-        readonly property real cxF: view.uAt(0, Math.max(0.2, archShade.zFar)) * view.width
-        readonly property real cxN: view.uAt(0, Math.max(0.2, archShade.zNear)) * view.width
-        x: 0
-        y: 0
-        width: view.width
-        height: view.height
-        renderStrategy: Canvas.Immediate
-        renderTarget: Canvas.Image
-        smooth: false
-        antialiasing: false
-        onPaint: {
-          var ctx = getContext("2d")
-          ctx.reset()
-          ctx.clearRect(0, 0, width, height)
-          ctx.fillStyle = "#3a0f2c"
-          ctx.beginPath()
-          ctx.moveTo(cxF - halfF + view.shakeX, yF + view.shakeY)
-          ctx.lineTo(cxF + halfF + view.shakeX, yF + view.shakeY)
-          ctx.lineTo(cxN + halfN + view.shakeX, yN + view.shakeY)
-          ctx.lineTo(cxN - halfN + view.shakeX, yN + view.shakeY)
-          ctx.closePath()
-          ctx.fill()
+      // FOUR SLABS, NOT A CANVAS, AND THE DIFFERENCE IS 24 MILLISECONDS.
+      //
+      // The first cut of this drew the band into a Canvas the size of the whole
+      // view, one per arch, repainted whenever the arch moved -- which is every
+      // frame. Six 1920 x 1080 canvases repainting sixty times a second took
+      // the Race screen from 62.5 fps to 37 on this Mac's software scene graph,
+      // and the thing being painted was a trapezoid four pixels tall.
+      //
+      // It is four flat slabs now, each positioned by the same projection and
+      // snapped to the road's own four-pixel lattice, so a shadow is made of
+      // the same pixels as the road it lies on and costs four textured quads.
+      Repeater {
+        model: archShade.visible ? 4 : 0
+
+        Rectangle {
+          readonly property real t: index / 4
+          readonly property real zHere: archShade.zFar - t * 2.0
+          readonly property real px: Math.max(1, view.fxPixel)
+          readonly property real halfW: view.sizeAt(view.roadHalf + view.rumbleHalf,
+                                                    Math.max(0.2, zHere))
+          width: Math.max(px, Math.round(halfW * 2 / px) * px)
+          height: Math.max(px, Math.round(
+                    (view.vAt(Math.max(0.2, zHere - 0.55)) * view.height
+                     - view.vAt(Math.max(0.2, zHere)) * view.height) / px) * px)
+          x: Math.round((view.uAt(0, Math.max(0.2, zHere)) * view.width
+                         + view.shakeX - width / 2) / px) * px
+          y: Math.round((view.vAt(Math.max(0.2, zHere)) * view.height
+                         + view.shakeY) / px) * px
+          color: "#3a0f2c"
+          opacity: 0.62
+          antialiasing: false
         }
-        onYFChanged: requestPaint()
-        onYNChanged: requestPaint()
-        Component.onCompleted: requestPaint()
-      }
+            }
     }
   }
 
@@ -1597,7 +1690,7 @@ Item {
     z: 6
 
     Repeater {
-      model: 7
+      model: flock.visible ? 7 : 0
 
       Rectangle {
         readonly property real lag: index * 0.035
@@ -1697,23 +1790,34 @@ Item {
         id: shade
         visible: !isGhost && slot.zed > view.playerZ * 0.35
         readonly property real span: view.kartSheetPixels(slot.zed)
-        readonly property real lean: span * (0.06 + 0.30 * view.nightfall)
-        readonly property real stretch: 1 + 0.55 * view.nightfall
+        readonly property real px: Math.max(1, view.fxPixel)
+        // The sun is on the right at u 0.68, so the shadow falls LEFT, and it
+        // lengthens as the disc drops: a patch under the car at lap 1, half a
+        // car length of purple at lap 12.
+        readonly property real lean: span * (0.04 + 0.26 * view.nightfall)
+        readonly property real stretch: 1 + 0.60 * view.nightfall
         z: -1
 
         Repeater {
-          model: 3
+          // Gated on the shadow's own visibility: an invisible Repeater with a
+          // model still holds three delegates whose bindings re-run on every
+          // frame, and there are four karts.
+          model: shade.visible ? 3 : 0
 
           Rectangle {
-            readonly property real k: [1.00, 0.74, 0.46][index]
-            readonly property real a: [0.20, 0.30, 0.46][index]
-            readonly property real px: Math.max(1, view.fxPixel)
-            width: Math.round(shade.span * (0.52 + 0.30 * k) * shade.stretch / px) * px
-            height: Math.max(px, Math.round(shade.span * 0.075 * (0.5 + k * 0.6) / px) * px)
-            x: Math.round((-width / 2 - shade.lean * k) / px) * px
-            y: Math.round((-height / 2 - shade.span * 0.012 * index) / px) * px
+            // Three nested slabs, darkest and narrowest at the contact point,
+            // each a whole number of ROAD pixels tall. Not one soft ellipse:
+            // the world resolves into four-pixel blocks at 1080p and a blurred
+            // gaussian under a nearest-neighbour sprite is the defect the piece
+            // before this one closed on its own effects.
+            readonly property real k: [0.62, 0.44, 0.28][index]
+            readonly property real a: [0.20, 0.30, 0.42][index]
+            width: Math.max(shade.px, Math.round(shade.span * k * shade.stretch / shade.px) * shade.px)
+            height: Math.max(shade.px, Math.round(shade.span * [0.050, 0.038, 0.026][index] / shade.px) * shade.px)
+            x: Math.round((-width / 2 - shade.lean * k * 1.4) / shade.px) * shade.px
+            y: Math.round((-height * 0.5 - shade.px * index * 0.5) / shade.px) * shade.px
             color: "#5f255e"
-            opacity: a * (view.reducedMotion ? 0.9 : 1)
+            opacity: a
             antialiasing: false
           }
         }
@@ -1722,34 +1826,51 @@ Item {
       // -------------------------------------------------- THE HEADLAMP CONE
       //
       // Design v4: "headlamp cones on the road after lap 8", and Time passes:
-      // "headlamps light around lap 8". `headlampsOn` is 0 before lap 7, 1 from
-      // lap 9, and the cone is drawn only for the child's own kart -- a rival's
-      // lamps point away from this camera, so its cone is behind its own body
-      // and would be a warm smear with no source.
+      // "headlamps light around lap 8". `headlampsOn` is 0 before lap 7 and 1
+      // from lap 9.
       //
-      // Six slabs on the road's lattice, narrowing and dimming up the road, in
-      // the same amber the pit's work lights are. It is the one thing in this
-      // file that is drawn UNDER the kart and OVER the road, which is what a
-      // light on tarmac is.
+      // IT IS A POOL ON THE ROAD, NOT A GLOW AROUND THE CAR, and that is the
+      // whole difference between a headlamp and a lamp. The first cut of this
+      // drew slabs at fractions of the SPRITE's height and every one of them
+      // landed inside the car's own body, where nothing could see them. These
+      // are placed by the ROAD PROJECTION at `z + 1.4` through `z + 9`, so the
+      // pool lies on the tarmac ahead of the car -- which from this camera is
+      // above its roofline -- widening and dimming with distance the way a
+      // beam does. Six slabs, on the road's own lattice, in the amber the pit's
+      // work lights are.
+      //
+      // The child's kart only: a rival's lamps point away from this camera, so
+      // its pool would be behind its own body and would read as a smear with no
+      // source.
       Item {
         id: beam
         visible: isHuman && view.headlampsOn > 0.01 && !isGhost
-        opacity: view.headlampsOn * 0.55
+        opacity: view.headlampsOn
         z: -0.5
-        readonly property real span: view.kartSheetPixels(slot.zed)
 
         Repeater {
-          model: 6
+          model: beam.visible ? 9 : 0
 
           Rectangle {
-            readonly property real t: index / 6
+            readonly property real t: index / 9
+            readonly property real zHere: slot.zed + 0.9 + t * 8.4
             readonly property real px: Math.max(1, view.fxPixel)
-            width: Math.round(beam.span * (0.30 + t * 0.42) / px) * px
-            height: Math.max(px, Math.round(beam.span * 0.045 / px) * px)
-            x: Math.round((-width / 2) / px) * px
-            y: Math.round((-beam.span * (0.02 + t * 0.30)) / px) * px
+            // The pool spreads a little in WORLD units and shrinks a lot in
+            // SCREEN units, which is what a beam does: the light goes further
+            // out the further it travels, and the perspective takes more back
+            // than the spread gives. So it converges on the road ahead instead
+            // of being a rectangle laid over the lane.
+            readonly property real half: view.sizeAt(view.roadHalf * (0.20 + t * 0.34), zHere)
+            width: Math.max(px, Math.round(half * 2 / px) * px)
+            height: Math.max(px, Math.round(view.sizeAt(1.1, zHere) * 0.5 / px) * px)
+            x: Math.round((view.uAt(view.laneOf(kartSeat), zHere) * view.width
+                           + view.shakeX - slot.x - width / 2) / px) * px
+            y: Math.round((view.vAt(zHere) * view.height + view.shakeY - slot.y
+                           - height) / px) * px
             color: "#f5a524"
-            opacity: 0.34 * (1 - t * 0.85)
+            // Brightest a car's length ahead, gone by the end of the throw: a
+            // pool with a hard bright edge at both ends is a decal, not a light.
+            opacity: 0.19 * Math.min(1, t * 6) * (1 - t) * (1 - t)
             antialiasing: false
           }
         }
@@ -1816,7 +1937,7 @@ Item {
         readonly property real span: view.kartSheetPixels(slot.zed)
 
         Repeater {
-          model: 4
+          model: wheelDust.visible ? 4 : 0
 
           Rectangle {
             readonly property real phase: {

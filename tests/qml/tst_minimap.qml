@@ -168,6 +168,65 @@ Item {
       }
     }
 
+    // ------------------------------------------------- the loop is a loop
+    //
+    // PIECE T. The outline is integrated from the sector curve table now, and
+    // the one number that shapes it -- `bend` -- turns the road back through
+    // itself if it is pushed too far: at 0.9 the panel draws a figure of eight
+    // with a spiral in it, which is a circuit that does not exist and which
+    // every other case in this file passes happily. So the shape itself is
+    // asserted: no segment of the loop may cross any other.
+    function test_the_circuit_never_crosses_itself() {
+      var pts = map.outline
+      var n = pts.length - 1
+      var crossings = 0
+      for (var i = 0; i < n; i++) {
+        for (var j = i + 2; j < n; j++) {
+          if (i === 0 && j === n - 1)
+            continue          // the seam, which meets by construction
+          if (segmentsCross(pts[i], pts[i + 1], pts[j], pts[j + 1]))
+            crossings += 1
+        }
+      }
+      compare(crossings, 0, "the minimap's loop crosses itself " + crossings + " time(s)")
+    }
+
+    // ... and two stretches of road that are far apart along the lap are far
+    // apart on the panel, so a dot cannot be read as being on the wrong one.
+    function test_two_distant_stretches_are_not_drawn_on_top_of_each_other() {
+      var pts = map.outline
+      var n = pts.length - 1
+      var worst = 1e9
+      var at = ""
+      for (var i = 0; i < n; i += 2) {
+        for (var j = i + 8; j < n; j += 2) {
+          if (Math.min(Math.abs(i - j), n - Math.abs(i - j)) < 8)
+            continue
+          var dx = pts[i].x - pts[j].x
+          var dy = pts[i].y - pts[j].y
+          var d = Math.sqrt(dx * dx + dy * dy)
+          if (d < worst) {
+            worst = d
+            at = "t=" + (i / n).toFixed(2) + " and t=" + (j / n).toFixed(2)
+          }
+        }
+      }
+      console.log("MINIMAP|closest two distant stretches: " + worst.toFixed(1)
+                  + " px, at " + at)
+      verify(worst >= map.dotPx * 0.5,
+             "two stretches of road a third of a lap apart are " + worst.toFixed(1)
+             + " px apart on the panel (" + at + "), against a " + map.dotPx + " px dot")
+    }
+
+    function segmentsCross(a, b, c, d) {
+      function cross(o, p, q) {
+        return (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x)
+      }
+      var d1 = cross(c, d, a), d2 = cross(c, d, b)
+      var d3 = cross(a, b, c), d4 = cross(a, b, d)
+      return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))
+    }
+
     // ------------------------------------------------------------ the tarmac
     // Round two's `panelRaised` loop measured 1.07:1 against its own panel.
     function test_the_loop_is_visible_against_the_panel() {

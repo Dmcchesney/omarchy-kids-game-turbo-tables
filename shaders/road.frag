@@ -246,8 +246,8 @@ void main()
     // ROW, by a whole plane pixel at a time, in a band a tenth of the frame
     // deep under the horizon. The fallback slides the same band by the same
     // integer, and the two frames stay identical.
-    float band = smoothstep(0.085, 0.006, dy);
-    float wobble = sin(v * 190.0 + clock * 2.6) * 0.55 + sin(v * 71.0 - clock * 1.7) * 0.45;
+    float band = smoothstep(0.230, 0.020, dy);
+    float wobble = sin(v * 34.0 + clock * 2.6) * 0.55 + sin(v * 13.0 - clock * 1.7) * 0.45;
     u += floor(heatShimmer * band * wobble * 1.6 + 0.5) * texelU;
 
     // Invert the projection. v = horizon + focal * camHeight / (2 z), so

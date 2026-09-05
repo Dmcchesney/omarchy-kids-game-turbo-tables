@@ -375,8 +375,14 @@ Item {
   // The loop is now integrated from `Terrain.SECTOR_CURVE`, the same twelve
   // numbers `TrackView.curveAt` bends the road by and `road.frag` puts the
   // kerbs on the inside of. Heading turns at twice the curve -- the road's
-  // lateral offset is `curve * z^2`, so `dx/dz = 2 curve z` and the curvature
-  // is `2 curve` -- and the position is the integral of that heading.
+  // lateral offset is `CURVE_AMPLITUDE * curveNorm * z^2`, so `dx/dz` is
+  // `2 CURVE_AMPLITUDE curveNorm z` and the curvature is `2 CURVE_AMPLITUDE
+  // curveNorm` -- and the position is the integral of that heading. THE
+  // AMPLITUDE IS NOT OPTIONAL: without it the heading integrates forty times
+  // too fast, the "loop" winds round several times, and the normalisation at
+  // the bottom of this block fits the scribble neatly into the panel so that
+  // nothing looks wrong until two dots a dot's width of road apart land on the
+  // same pixel because the road crossed itself.
   //
   // AND THEN IT IS CLOSED, WHICH IS THE ONE HONEST LIBERTY. The twelve numbers
   // sum to -0.13, so their integral turns through about -14 degrees over a lap
@@ -388,10 +394,14 @@ Item {
   // flat runs, sector 4's left-hander as the wide sweep and sector 9's
   // right-hander as the tight one, because those are what the table says.
   // `BEND` is the only free number and it is a drawing choice: at 0 the map is
-  // a circle, at 1.6 the corners are as pronounced as the panel can show.
+  // a circle and at 0.8 the corners are as pronounced as they can be while the
+  // loop is still a loop. Above about 0.85 the deviation is large enough to
+  // turn the road back through itself -- measured, the loop self-intersects
+  // twice at 0.9 and the panel draws a figure of eight with a spiral in it,
+  // which is a circuit that does not exist. `tst_minimap` holds that line.
   readonly property real padX: dotPx * 0.9 + 10
   readonly property real padY: dotPx * 0.9 + 8
-  readonly property real bend: 1.6
+  readonly property real bend: 0.8
   readonly property int loopSamples: 240
 
   // The loop in its own normalised space, closed, centred and scaled to fill
@@ -403,7 +413,7 @@ Item {
     var raw = [0]
     var acc = 0
     for (var i = 0; i < n; i++) {
-      acc += 2 * Terrain.curveNormAt(i * ds) * ds
+      acc += 2 * Terrain.CURVE_AMPLITUDE * Terrain.curveNormAt(i * ds) * ds
       raw.push(acc)
     }
     var total = raw[n]
@@ -422,6 +432,28 @@ Item {
       px += Math.cos(theta) * ds
       py += Math.sin(theta) * ds
     }
+    // CLOSE IT EXACTLY. The heading comes back to where it started, but a
+    // 240-step forward integration of it does not: the last point lands a
+    // fraction of a step from the first, and everything that reads this loop
+    // reads it as CLOSED -- `arcAt` wraps, `chordBetween` measures across the
+    // seam, the dots run round it lap after lap. A residual gap there is a
+    // corner the road does not have, and it showed up exactly where you would
+    // expect: the de-collision failed at t = 0.93 to 0.98 and nowhere else.
+    // A linear correction spreads the residual over the whole lap, which moves
+    // no point by more than the closure error itself.
+    var gapX = xs[n] - xs[0], gapY = ys[n] - ys[0]
+    for (var c = 0; c <= n; c++) {
+      xs[c] -= gapX * c / n
+      ys[c] -= gapY * c / n
+    }
+    minX = 1e9; maxX = -1e9; minY = 1e9; maxY = -1e9
+    for (var e = 0; e <= n; e++) {
+      if (xs[e] < minX) minX = xs[e]
+      if (xs[e] > maxX) maxX = xs[e]
+      if (ys[e] < minY) minY = ys[e]
+      if (ys[e] > maxY) maxY = ys[e]
+    }
+
     // Normalise into -1..1, keeping the aspect free: the panel is wider than it
     // is tall and the circuit should use all of it.
     var out = []

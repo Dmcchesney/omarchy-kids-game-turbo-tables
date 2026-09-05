@@ -173,6 +173,18 @@ Window {
   readonly property bool printFocus: flag("print-focus")
   readonly property string settingsArg: argument("settings", "")
   readonly property string travelArg: argument("travel", "")
+  // PIECE T. `--lap n` puts a screen with a `lap` property at that lap, which is
+  // what drives golden hour passing; `--boards "a|b|c"` fills the sector-11 fact
+  // billboards, which in play are filled by the engine's own correct answers and
+  // are therefore blank in a bare TrackView.
+  readonly property string lapArg: argument("lap", "")
+  // `--clock ms` sets a screen's own effect clock, which is what the things that
+  // move without the camera moving are bound to: the crowd's wave, the gantry's
+  // flags, the roller door's lamp, the lake's ripples, the cloud drift, the
+  // birds. Without it a frame sequence taken by stepping `--travel` shows a
+  // camera moving through a world holding its breath.
+  readonly property string clockArg: argument("clock", "")
+  readonly property string boardsArg: argument("boards", "")
   readonly property string fieldArg: argument("field", "")
   // Settings the save file never holds. `raceMode` and `mathSet` are
   // `Store.sessionOnlyKeys` -- the design's Data row does not persist them --
@@ -497,6 +509,12 @@ Window {
         item.buildRace()
       if (harness.travelArg.length > 0 && item.hasOwnProperty("travel"))
         item.travel = parseFloat(harness.travelArg)
+      if (harness.clockArg.length > 0 && item.hasOwnProperty("fxClock"))
+        item.fxClock = parseFloat(harness.clockArg)
+      if (harness.lapArg.length > 0 && item.hasOwnProperty("lap"))
+        item.lap = parseInt(harness.lapArg, 10)
+      if (harness.boardsArg.length > 0 && item.hasOwnProperty("factBoards"))
+        item.factBoards = harness.boardsArg.split("|")
       if (harness.fieldArg.length > 0 && typeof item.setKarts === "function")
         harness.seedField(item)
       item.forceActiveFocus()

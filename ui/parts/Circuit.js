@@ -62,9 +62,59 @@ function at(kind, side, s, x, anim, frame, phase, tag) {
     "frame": frame || 0,
     "phase": phase || 0,
     "tag": tag || "",
+    // The kit's own world size, copied in once at load. `TrackView` reads it on
+    // every frame for every placement, and going back to `PropMeta` for it there
+    // was a hundred and thirty lookups a frame for numbers that never change.
     "world": PropMeta.META[kind] ? PropMeta.META[kind].world[0] : 1,
-    "spans": side === "C"
+    "worldH": PropMeta.META[kind] ? PropMeta.META[kind].world[1] : 1,
+    "spans": side === "C",
+    // Every view this placement can ever show, as {name, idx} pairs, worked out
+    // once here. `viewAt` and `viewIndexAt` index this rather than building a
+    // string and searching the prop's view list on every frame for every prop.
+    "frames": framesFor(kind, side, anim || "still", frame || 0)
   }
+}
+
+// The views one placement cycles through, in order.
+function framesFor(kind, side, anim, frame) {
+  var meta = PropMeta.META[kind]
+  var names = []
+  if (anim === "crowd")
+    names = [side + "0", side + "1", side + "2", side + "3"]
+  else if (anim === "flag" || anim === "lamp")
+    names = [side + "0", side + "1"]
+  else
+    names = [side + frame]
+  var out = []
+  for (var i = 0; i < names.length; i++)
+    out.push({ "name": names[i],
+               "idx": meta ? meta.views.indexOf(names[i]) : -1 })
+  return out
+}
+
+// WHICH FRAME OF ITS OWN ANIMATION a placement is on, at a world clock in
+// seconds.
+//
+//   crowd  four frames at six a second, offset by the placement's own phase,
+//          so the rail reads as a wave rolling along it and no two crowds are
+//          ever on the same frame;
+//   flag   two frames at three a second -- the gantry's flags;
+//   lamp   the roller door's failing lamp: mostly lit, with a stutter driven by
+//          a hash of the second rather than by a sine, so it reads as a bad
+//          contact instead of a blink. It never changes state faster than about
+//          2.5 Hz, which keeps it under the design's 3 Hz ceiling.
+function frameOf(place, clock) {
+  if (place.anim === "crowd") {
+    var f = Math.floor(clock * 6 + place.phase * 4) % 4
+    return f < 0 ? f + 4 : f
+  }
+  if (place.anim === "flag") {
+    var g = Math.floor(clock * 3 + place.phase * 2) % 2
+    return g < 0 ? g + 2 : g
+  }
+  if (place.anim === "lamp")
+    return Terrain.hashCell(Math.floor(clock * 2.5), 17) > 0.78 ? 1 : 0
+  return 0
 }
 
 var PLACEMENTS = [
@@ -274,30 +324,13 @@ var PLACEMENTS = [
 ]
 
 // Which view name a placement shows at a given world clock, in seconds.
-//
-//   crowd  four frames at six a second, offset by the placement's own phase,
-//          so the rail reads as a wave rolling along it and no two crowds are
-//          ever on the same frame;
-//   flag   two frames at three a second -- the gantry's flags;
-//   lamp   the roller door's failing lamp: mostly lit, with a stutter that is
-//          driven by a hash of the second rather than a sine, so it reads as a
-//          bad contact instead of a blink. It never changes state faster than
-//          about 2.5 Hz, which keeps it under the design's 3 Hz ceiling.
 function viewAt(place, clock) {
-  if (place.anim === "crowd") {
-    var f = Math.floor(clock * 6 + place.phase * 4) % 4
-    return place.side + (f < 0 ? f + 4 : f)
-  }
-  if (place.anim === "flag") {
-    var g = Math.floor(clock * 3 + place.phase * 2) % 2
-    return place.side + (g < 0 ? g + 2 : g)
-  }
-  if (place.anim === "lamp") {
-    var tick = Math.floor(clock * 2.5)
-    var h = Terrain.hashCell(tick, 17)
-    return place.side + (h > 0.78 ? 1 : 0)
-  }
-  return place.side + place.frame
+  return place.frames[frameOf(place, clock)].name
+}
+
+// The same, as the column index into the prop's own sheet.
+function viewIndexAt(place, clock) {
+  return place.frames[frameOf(place, clock)].idx
 }
 
 // Every kit prop this circuit uses, once each. A report that has to prove "no

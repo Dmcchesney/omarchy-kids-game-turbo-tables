@@ -32,11 +32,39 @@ function forProp(name) {
 function cellRect(name, view, step) {
   var m = META[name]
   if (!m) return null
-  var i = m.views.indexOf(view)
-  if (i < 0) return null
+  return cellRectAt(name, m.views.indexOf(view), step)
+}
+
+// The same, by COLUMN INDEX rather than by view name.
+//
+// `ui/parts/KitProp` knows the index already -- `ui/parts/Circuit.js` works it
+// out once when the circuit is authored -- and the linear `indexOf` over a
+// prop's eight view names, run for every roadside prop on every frame, is a
+// string search the picture never sees.
+function cellRectAt(name, i, step) {
+  var m = META[name]
+  if (!m || i < 0 || i >= m.views.length) return null
   var div = [1, 2, 4][step]
   var w = Math.floor(m.cell[0] / div), h = Math.floor(m.cell[1] / div)
   return { x: i * w, y: m.rows[step], width: w, height: h }
+}
+
+// The same answer as `stepFor`, without the logarithms.
+//
+// `stepFor` picks the row whose cell is nearest the target BY RATIO, over the
+// three rows c, c/2 and c/4. Nearest-by-ratio among a geometric ladder is a
+// pair of thresholds at the geometric means -- c/sqrt(2) and c/(2 sqrt(2)) --
+// so the whole thing is two comparisons. It matters because `ui/parts/KitProp`
+// evaluates it for every roadside prop on every frame, and three `Math.log`
+// calls times thirty props times sixty frames is work the picture never sees.
+// `tst_trackview_road` holds the two to the same answer across the range.
+var STEP_HI = 0.70710678
+var STEP_LO = 0.35355339
+function stepForFast(name, targetPx) {
+  var m = META[name]
+  if (!m) return 0
+  var t = Math.max(1, targetPx) / m.cell[0]
+  return t > STEP_HI ? 0 : (t > STEP_LO ? 1 : 2)
 }
 
 // The scale step whose cell is nearest a requested cell width, by ratio.

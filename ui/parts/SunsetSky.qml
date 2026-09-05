@@ -248,7 +248,7 @@ Item {
       id: cloudLayer
       readonly property real par: [0.35, 1.0][index]
       readonly property real depth: index
-      readonly property real slab: Math.max(1, sky.unitH * [0.026, 0.034][index])
+      readonly property real slab: Math.max(1, sky.unitH * [0.013, 0.017][index])
       width: sky.width * 2
       height: sky.skyH
       y: sky.horizonY - height
@@ -263,12 +263,31 @@ Item {
       smooth: false
       antialiasing: false
 
-      // Each streak is [phase across the period, height up the canvas, length,
-      // lit]. The high layer is dark against the sky; the low one is lit on
-      // its underside by the sun beneath it.
+      // Each streak is [phase across the period, height DOWN the canvas, length,
+      // lit]. The reference sky is not four ruled lines: it is a lot of thin,
+      // ragged, uneven bands, densest near the sun and thinning upward. So each
+      // layer carries a dozen of them at eleven different heights, at lengths
+      // from a tenth of the width to two thirds, and the thickness of each is
+      // taken from its own row rather than being one slab for the layer. Round
+      // one of this file had four per layer at one thickness and the top of
+      // every frame read as ruled lines across the sky.
+      //
+      // `lit` marks the ones low enough for the sun to catch from underneath;
+      // they get a bright hairline along their bottom edge, which is the one
+      // thing in the reference that says which way the light is coming from.
       readonly property var streaks: [
-        [[0.02, 0.20, 0.46, 0], [0.30, 0.24, 0.52, 0], [0.58, 0.16, 0.40, 0], [0.74, 0.30, 0.30, 0]],
-        [[0.10, 0.44, 0.40, 1], [0.52, 0.49, 0.46, 1], [0.36, 0.70, 0.44, 1], [0.00, 0.77, 0.34, 1]]
+        [[0.02, 0.06, 0.30, 0, 0.9], [0.26, 0.05, 0.16, 0, 0.6],
+         [0.46, 0.09, 0.42, 0, 1.0], [0.80, 0.07, 0.22, 0, 0.7],
+         [0.10, 0.15, 0.24, 0, 0.8], [0.38, 0.17, 0.38, 0, 1.1],
+         [0.68, 0.14, 0.30, 0, 0.7], [0.90, 0.19, 0.18, 0, 0.5],
+         [0.04, 0.25, 0.36, 0, 0.9], [0.44, 0.27, 0.20, 0, 0.6],
+         [0.62, 0.24, 0.44, 0, 1.2], [0.86, 0.30, 0.26, 0, 0.8]],
+        [[0.06, 0.38, 0.34, 1, 1.0], [0.34, 0.36, 0.22, 0, 0.6],
+         [0.56, 0.41, 0.46, 1, 1.3], [0.84, 0.39, 0.18, 0, 0.5],
+         [0.00, 0.50, 0.26, 1, 0.8], [0.30, 0.52, 0.40, 1, 1.1],
+         [0.64, 0.48, 0.24, 0, 0.7], [0.88, 0.55, 0.32, 1, 0.9],
+         [0.14, 0.64, 0.44, 1, 1.2], [0.48, 0.67, 0.20, 0, 0.6],
+         [0.70, 0.62, 0.36, 1, 1.0], [0.20, 0.76, 0.52, 1, 0.8]]
       ][index]
 
       onPaint: {
@@ -299,10 +318,11 @@ Item {
             var x = base + st[0] * period
             var y = Math.round(st[1] * height)
             var len = st[2] * period
-            streak(x, y, len, slab, dark, 0.56 - depth * 0.08)
+            var thick = Math.max(1, Math.round(slab * st[4]))
+            streak(x, y, len, thick, dark, (0.40 - depth * 0.06) * st[4])
             if (st[3] === 1)
-              streak(x + len * 0.05, y + slab, len * 0.88,
-                     Math.max(1, slab * 0.35), rep === 0 ? bright : glow, 0.80 * fade)
+              streak(x + len * 0.06, y + thick, len * 0.86,
+                     Math.max(1, Math.round(thick * 0.4)), bright, 0.70 * fade)
           }
         }
       }

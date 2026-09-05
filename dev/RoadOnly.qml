@@ -106,7 +106,21 @@ Item {
   // Every uniform the shader is given, as one JSON line. The reference renderer
   // reads this and nothing else, so a number changed in TrackView reaches the
   // reference without anybody editing the reference.
-  Component.onCompleted: {
+  //
+  // PRINTED ON A TIMER, NOT AT `Component.onCompleted`, and the difference cost
+  // an afternoon. The harness assigns `--travel` in its Loader's `onLoaded`,
+  // which runs AFTER the loaded item's own `Component.onCompleted`: the first
+  // version of this printed the uniforms at travel 120 -- the default -- while
+  // the canvas beside it went on to render at whatever travel was asked for.
+  // The reference and the fallback were then pictures of two different places
+  // on the circuit, and the parity figure they produced was meaningless.
+  Timer {
+    interval: 300
+    running: true
+    onTriggered: rig.dumpUniforms()
+  }
+
+  function dumpUniforms() {
     console.log("UNIFORMS|" + JSON.stringify({
       "planeW": camera.planeW, "planeH": camera.planeH,
       "horizon": camera.planeHorizon, "camHeight": camera.camHeight,

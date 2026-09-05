@@ -125,6 +125,12 @@ Canvas {
   // `detail` below, and the sample ladder uses this one to know when it is
   // allowed to stop landing on stripe boundaries.
   readonly property real detailEnd: 52.0
+  // Where the ground stops being drawn as blocks: `hazeFloor` is the fraction
+  // of the ground's own colour that has to survive the haze for the lattice to
+  // be worth filling (0.05 is z = 47), and `coarseOut` is where the one-unit
+  // rut lattice gives way to the two-unit one.
+  readonly property real hazeFloor: 0.05
+  readonly property real coarseOut: 30.0
 
   renderStrategy: Canvas.Immediate
   renderTarget: Canvas.Image
@@ -145,15 +151,27 @@ Canvas {
   // is why the shimmer is row-based rather than per-pixel: a per-pixel warp
   // would be free in the shader and unreachable here, and the two paths drawing
   // the same picture is a gate on this piece.
+  // How much of a surface's own colour survives the haze at that distance. The
+  // ground takes the full rate and the tarmac `surfaceFog` of it; road.frag
+  // does the same two exponentials per pixel. Member functions rather than
+  // locals inside `onPaint`, because the terrain pass needs them too.
+  function fog(zz) {
+    return Math.max(0, Math.min(1, Math.exp(-fogDensity * zz * zz * 0.0011)))
+  }
+  function fogSurface(zz) {
+    return Math.max(0, Math.min(1,
+      Math.exp(-fogDensity * surfaceFog * zz * zz * 0.0011)))
+  }
+
   function shimmerPx(v) {
     if (heatShimmer <= 0.001)
       return 0
     var dy = v - horizon
     if (dy <= 0)
       return 0
-    var band = Terrain.smooth(0.085, 0.006, dy)
-    var wobble = Math.sin(v * 190.0 + clock * 2.6) * 0.55
-                 + Math.sin(v * 71.0 - clock * 1.7) * 0.45
+    var band = Terrain.smooth(0.230, 0.020, dy)
+    var wobble = Math.sin(v * 34.0 + clock * 2.6) * 0.55
+                 + Math.sin(v * 13.0 - clock * 1.7) * 0.45
     return Math.floor(heatShimmer * band * wobble * 1.6 + 0.5)
   }
 
@@ -165,6 +183,23 @@ Canvas {
       return
 
     ctx.reset()
+
+    // EVERY UNIFORM READ ONCE. See the note on `drawTerrain`: `fogColor.r`
+    // inside a loop is a trip through the QML property system, and this loop
+    // runs it about three thousand times a repaint.
+    var uCurve = curve, uFocal = focal, uAspect = aspect, uTravel = travel
+    var uCamH = camHeight, uRoadHalf = roadHalf, uRumbleHalf = rumbleHalf
+    var uStripe = stripe, uFog = fogDensity, uSurfaceFog = surfaceFog
+    var uSectorLength = sectorLength
+    var fr = fogColor.r, fg = fogColor.g, fb = fogColor.b
+    var rdr = roadColor.r, rdg = roadColor.g, rdb = roadColor.b
+    var rar = roadAlt.r, rag = roadAlt.g, rab = roadAlt.b
+    var rur = rumbleColor.r, rug = rumbleColor.g, rub = rumbleColor.b
+    var rlr = rumbleAlt.r, rlg = rumbleAlt.g, rlb = rumbleAlt.b
+
+    function screenU(x, zz) {
+      return (0.5 + ((x + uCurve * zz * zz) * uFocal) / (zz * 2 * uAspect))
+    }
 
     // ------------------------------------------------------------- the sky
     // Nothing. The sky is an item behind this plane; clear to it.
@@ -229,13 +264,6 @@ Canvas {
     // of the ground's density so the road stays legible into the distance. So
     // each fill is blended toward `fogColor` before it is filled -- the same
     // arithmetic the shader does per pixel, at no extra draw call.
-    function fog(zz) {
-      return Math.max(0, Math.min(1, Math.exp(-fogDensity * zz * zz * 0.0011)))
-    }
-    function fogSurface(zz) {
-      return Math.max(0, Math.min(1,
-        Math.exp(-fogDensity * surfaceFog * zz * zz * 0.0011)))
-    }
     // The shader's smoothstep(edge0, edge1, z), written the same way round:
     // 0 at `far`, 1 at `near`, eased at both ends.
     function fade(zz, far, near) {
@@ -277,6 +305,10 @@ Canvas {
     ctx.fillStyle = fogColor
     ctx.fillRect(0, hy, w, Math.max(0, h - hy))
 
+    // The ground, in its own pass and on its own ladder. Everything after this
+    // is drawn over it.
+    drawTerrain(ctx, w, h)
+
     // ------------------------------------------------------------ the road
     for (var i = 0; i < zs.length - 1; i++) {
       var zFar = zs[i]
@@ -301,103 +333,9 @@ Canvas {
       // shifts the whole band by the same integer. Applied to every x below.
       var sx = -shimmerPx(yNear / h)
 
-      // ------------------------------------------------------ the terrain
-      // One row of lattice blocks across the visible floor, evaluated by the
-      // same `Terrain.groundAt` road.frag evaluates per pixel. Adjacent cells
-      // whose colour rounds the same way are merged into one quad, which is
-      // most of them on the flatter sectors.
-      //
-      // The step is the finest lattice that can still contribute at this depth:
-      // half a unit while the fine octave survives, one unit (the rut lattice)
-      // past it. Every lattice in Terrain.js is a multiple of half a unit for
-      // exactly this reason -- so one loop lands on every cell boundary all
-      // three octaves have, and the fallback's blocks are the shader's blocks
-      // rather than an average of them.
-      var ff = Terrain.fineFade(zFar)
-      var gstep = ff > 0.02 ? Terrain.FINE : Terrain.RUT
-      var reach = zFar * aspect / focal
-      var mid0 = -curve * zFar * zFar
-      var pitchPx = (gstep * focal * w) / (2 * zFar * aspect)
-      if (pitchPx >= 0.75) {
-        var cLo = Math.floor((mid0 - reach) / gstep)
-        var cHi = Math.ceil((mid0 + reach) / gstep)
-        if (cHi - cLo > 400) {
-          cLo = Math.floor(mid0 / gstep) - 200
-          cHi = cLo + 400
-        }
-        var runStart = cLo
-        var runKey = ""
-        var runColor = null
-        for (var c = cLo; c <= cHi; c++) {
-          var cx0 = c * gstep
-          var rgb = Terrain.groundAt(cx0 + gstep * 0.5, sMid, zFar)
-          var col = hazed(rgb, fFloor)
-          var key = Math.round(col.r * 255) + "," + Math.round(col.g * 255)
-                    + "," + Math.round(col.b * 255)
-          if (runColor === null) {
-            runStart = c
-            runKey = key
-            runColor = col
-          } else if (key !== runKey || c === cHi) {
-            var endAt = (key !== runKey) ? c : c + 1
-            ctx.fillStyle = runColor
-            var aF = uAt(runStart * gstep, zFar) * w + sx
-            var bF = uAt(endAt * gstep, zFar) * w + sx
-            var aN = uAt(runStart * gstep, zNear) * w + sx
-            var bN = uAt(endAt * gstep, zNear) * w + sx
-            quad(aF, yFar, bF, yFar, bN, yNear + 1, aN, yNear + 1)
-            runStart = c
-            runKey = key
-            runColor = col
-          }
-        }
-      } else {
-        // Past the pitch at which a block is under a pixel, the blocks average
-        // out; the shader's derivative-free hash does not, but at this depth
-        // the haze has taken almost everything anyway. One fill of the sector's
-        // own soil, which is what the average converges to.
-        ctx.fillStyle = hazed(Terrain.groundAt(mid0, sMid, zFar), fFloor)
-        ctx.fillRect(0, yFar, w, Math.max(1, yNear - yFar + 1))
-      }
-
-      // --------------------------------------------------------- the lake
-      // Water on the right of the road, with the sun's column reflected in it
-      // as rungs that stretch toward the eye. road.frag's `water` block.
+      // The terrain and the lake are drawn in their own pass, before this
+      // loop -- see `drawTerrain` below and the note on what it costs.
       var flags = sectorFlags(sMid)
-      if (flags[1] > 0.001) {
-        var shore = roadHalf + rumbleHalf + 2.6
-        var ripple = Math.sin(sMid * 2.7 - clock * 1.9) * 0.5
-                     + Math.sin(sMid * 6.1 + clock * 1.1) * 0.5
-        var rungs = ripple >= 0 ? 1 : 0
-        var lakeR = waterColor.r * (rungs ? 1.18 : 1)
-        var lakeG = waterColor.g * (rungs ? 1.18 : 1)
-        var lakeB = waterColor.b * (rungs ? 1.18 : 1)
-        var xShoreF = uAt(shore + 1.1, zFar) * w + sx
-        var xShoreN = uAt(shore + 1.1, zNear) * w + sx
-        // THE REFLECTED COLUMN IS IN SCREEN u, because that is what a
-        // reflection is: the sun's image is under the disc, not at a fixed
-        // place on the lake. Twelve slices from the shore to the right edge,
-        // each one flat, so the ladder is made of the same blocks as the rest
-        // of the ground rather than being a smooth beam laid over it.
-        var xStart = Math.max(0, Math.min(xShoreF, xShoreN))
-        if (xStart < w) {
-          var slices = 12
-          for (var q = 0; q < slices; q++) {
-            var px0 = xStart + (w - xStart) * q / slices
-            var px1 = xStart + (w - xStart) * (q + 1) / slices
-            var uc = ((px0 + px1) * 0.5 - sx) / w
-            var colm = Math.max(0, 1 - Math.abs(uc - sunU) / 0.075)
-            colm *= colm
-            var ladder = colm * (0.45 + 0.55 * rungs)
-            var lr = lakeR + (waterLit.r - lakeR) * ladder
-            var lg = lakeG + (waterLit.g - lakeG) * ladder
-            var lb = lakeB + (waterLit.b - lakeB) * ladder
-            ctx.fillStyle = hazed([lr, lg, lb], fFloor)
-            quad(Math.max(px0, xShoreF), yFar, Math.max(px1, xShoreF), yFar,
-                 Math.max(px1, xShoreN), yNear + 1, Math.max(px0, xShoreN), yNear + 1)
-          }
-        }
-      }
 
       // ------------------------------------------------- the pit's grid
       // The diagnostic floor grid, in three octaves, and ONLY at the pit --
@@ -410,14 +348,14 @@ Canvas {
 
       // ------------------------------------------------------- the surface
       var edge = roadHalf + rumbleHalf
-      var lFarOut = uAt(-edge, zFar) * w + sx
-      var lFarIn = uAt(-roadHalf, zFar) * w + sx
-      var lNearOut = uAt(-edge, zNear) * w + sx
-      var lNearIn = uAt(-roadHalf, zNear) * w + sx
-      var rFarIn = uAt(roadHalf, zFar) * w + sx
-      var rFarOut = uAt(edge, zFar) * w + sx
-      var rNearIn = uAt(roadHalf, zNear) * w + sx
-      var rNearOut = uAt(edge, zNear) * w + sx
+      var lFarOut = screenU(-edge, zFar) * w + sx
+      var lFarIn = screenU(-roadHalf, zFar) * w + sx
+      var lNearOut = screenU(-edge, zNear) * w + sx
+      var lNearIn = screenU(-roadHalf, zNear) * w + sx
+      var rFarIn = screenU(roadHalf, zFar) * w + sx
+      var rFarOut = screenU(edge, zFar) * w + sx
+      var rNearIn = screenU(roadHalf, zNear) * w + sx
+      var rNearOut = screenU(edge, zNear) * w + sx
 
       // How much of the zebra survives at this distance. Between the horizon
       // and about y = 480 a band is a couple of pixels tall, and a hard
@@ -434,20 +372,25 @@ Canvas {
       var bend = Terrain.smooth(0.22, 0.72, Math.abs(cHere))
       var soilRgb = sectorSoil(sMid)
       var shoulder = [soilRgb[0] * 0.72, soilRgb[1] * 0.72, soilRgb[2] * 0.72]
-      var zebra = blend(rumbleColor, rumbleAlt, soft)
+      var zebra = Qt.rgba(rur + (rlr - rur) * soft, rug + (rlg - rug) * soft,
+                          rub + (rlb - rub) * soft, 1)
       var kerbR = cHere > 0 ? bend : 0
       var kerbL = cHere < 0 ? bend : 0
 
-      ctx.fillStyle = blend(hazed(shoulder, fSurf), blend(fogColor, zebra, fSurf), kerbL)
+      var shoulderCol = hazed(shoulder, fSurf)
+      var zebraCol = blend(fogColor, zebra, fSurf)
+      ctx.fillStyle = blend(shoulderCol, zebraCol, kerbL)
       quad(lFarOut, yFar, lFarIn, yFar, lNearIn, yNear + 1, lNearOut, yNear + 1)
-      ctx.fillStyle = blend(hazed(shoulder, fSurf), blend(fogColor, zebra, fSurf), kerbR)
+      ctx.fillStyle = blend(shoulderCol, zebraCol, kerbR)
       quad(rFarIn, yFar, rFarOut, yFar, rNearOut, yNear + 1, rNearIn, yNear + 1)
 
       // THE TARMAC, IN LATERAL SLICES, because it now has a crown, two tyre
       // lines per lane and, at a corner's exit, skid marks -- all of which are
-      // functions of x. Sixteen slices across the road is one slice per eighth
-      // of a lane, which is finer than the narrowest feature on it.
-      var wear = Terrain.blockNoise(mid0, sMid, Terrain.COARSE * 3.0)
+      // functions of x.
+      // The road's own worn patches, sampled on the road centre line: the far
+      // road-centre offset `-curve z^2` is where `x = 0` lands in world space,
+      // and the terrain pass no longer computes it for us.
+      var wear = Terrain.blockNoise(-curve * mid * mid, sMid, Terrain.COARSE * 3.0)
       var cAhead = Terrain.curveNormAt(sMid + 7.0)
       var exiting = Math.max(0, Math.min(1, (Math.abs(cHere) - Math.abs(cAhead)) * 7.0))
                     * Terrain.smooth(0.30, 0.62, Math.abs(cHere))
@@ -456,15 +399,23 @@ Canvas {
       var gp = ((sMid % (sectorLength * 12)) + sectorLength * 12) % (sectorLength * 12)
       var inGrid = (gp >= 2 && gp <= 5) ? detail : 0
 
-      var slices2 = 16
+      // EIGHT SLICES, AND EIGHT IS NOT A ROUND NUMBER PICKED FOR SPEED. The
+      // start grid's chequer is `floor((x + roadHalf) / (roadHalf * 0.25))`,
+      // which is exactly eight columns across the road, so eight slices land on
+      // its own boundaries and the chequer comes out square rather than
+      // approximated. The tyre lines at 0.30 and 0.70 of `roadHalf` fall one
+      // per slice at this pitch, and `detail` has dissolved them before the
+      // slices are wider than they are.
+      var slices2 = 8
+      var baseR = rdr + (rar - rdr) * soft * 0.34
+      var baseG = rdg + (rag - rdg) * soft * 0.34
+      var baseB = rdb + (rab - rdb) * soft * 0.34
       for (var t2 = 0; t2 < slices2; t2++) {
         var xa = -roadHalf + (2 * roadHalf) * t2 / slices2
         var xb = -roadHalf + (2 * roadHalf) * (t2 + 1) / slices2
         var xc = (xa + xb) * 0.5
         var axc = Math.abs(xc)
-        var rr = roadColor.r + (roadAlt.r - roadColor.r) * soft * 0.34
-        var rg = roadColor.g + (roadAlt.g - roadColor.g) * soft * 0.34
-        var rb = roadColor.b + (roadAlt.b - roadColor.b) * soft * 0.34
+        var rr = baseR, rg = baseG, rb = baseB
         var lift = (0.94 + 0.12 * wear) * (0.88 + 0.20 * (1 - (axc / roadHalf) * (axc / roadHalf)))
         var tyre = (Math.abs(axc - roadHalf * 0.30) < roadHalf * 0.055
                     || Math.abs(axc - roadHalf * 0.70) < roadHalf * 0.055) ? 1 : 0
@@ -479,16 +430,17 @@ Canvas {
           var chequer = (Math.floor((xc + roadHalf) / (roadHalf * 0.25))
                          + Math.floor((gp - 2) / 0.75)) % 2
           chequer = chequer < 0 ? chequer + 2 : chequer
-          var gr = chequer ? rumbleAlt.r : roadColor.r * 0.55
-          var gg = chequer ? rumbleAlt.g : roadColor.g * 0.55
-          var gb = chequer ? rumbleAlt.b : roadColor.b * 0.55
+          var gr = chequer ? rlr : rdr * 0.55
+          var gg = chequer ? rlg : rdg * 0.55
+          var gb = chequer ? rlb : rdb * 0.55
           rr += (gr - rr) * inGrid * 0.88
           rg += (gg - rg) * inGrid * 0.88
           rb += (gb - rb) * inGrid * 0.88
         }
-        ctx.fillStyle = hazed([rr, rg, rb], fSurf)
-        quad(uAt(xa, zFar) * w + sx, yFar, uAt(xb, zFar) * w + sx, yFar,
-             uAt(xb, zNear) * w + sx, yNear + 1, uAt(xa, zNear) * w + sx, yNear + 1)
+        ctx.fillStyle = Qt.rgba(fr + (rr - fr) * fSurf, fg + (rg - fg) * fSurf,
+                                fb + (rb - fb) * fSurf, 1)
+        quad(screenU(xa, zFar) * w + sx, yFar, screenU(xb, zFar) * w + sx, yFar,
+             screenU(xb, zNear) * w + sx, yNear + 1, screenU(xa, zNear) * w + sx, yNear + 1)
       }
 
       // Lane markings: two solid inner edge lines and a dashed centre. The
@@ -501,8 +453,8 @@ Canvas {
         var innerX = roadHalf * 0.88
         var markF = Math.max(0.5, (rFarIn - lFarIn) * 0.012)
         var markN = Math.max(0.5, (rNearIn - lNearIn) * 0.012)
-        var eLF = uAt(-innerX, zFar) * w + sx, eLN = uAt(-innerX, zNear) * w + sx
-        var eRF = uAt(innerX, zFar) * w + sx, eRN = uAt(innerX, zNear) * w + sx
+        var eLF = screenU(-innerX, zFar) * w + sx, eLN = screenU(-innerX, zNear) * w + sx
+        var eRF = screenU(innerX, zFar) * w + sx, eRN = screenU(innerX, zNear) * w + sx
         quad(eLF - markF, yFar, eLF + markF, yFar, eLN + markN, yNear + 1, eLN - markN, yNear + 1)
         quad(eRF - markF, yFar, eRF + markF, yFar, eRN + markN, yNear + 1, eRN - markN, yNear + 1)
         // road.frag: `dash = step(0.45, fract(s / (stripe * 2.0)))` -- a mark
@@ -511,7 +463,7 @@ Canvas {
         if (dashPhase < 0)
           dashPhase += 1
         if (dashPhase >= 0.45) {
-          var cF = uAt(0, zFar) * w + sx, cN = uAt(0, zNear) * w + sx
+          var cF = screenU(0, zFar) * w + sx, cN = screenU(0, zNear) * w + sx
           quad(cF - markF, yFar, cF + markF, yFar, cN + markN, yNear + 1, cN - markN, yNear + 1)
         }
       }
@@ -534,6 +486,196 @@ Canvas {
       ctx.fillStyle = foot
       ctx.fillRect(-1, 0, 2, 1)
       ctx.restore()
+    }
+  }
+
+  // ============================================================ THE TERRAIN
+  //
+  // ONE PASS, ITS OWN LADDER, AND THE LADDER IS THE WHOLE OF WHAT IT COSTS.
+  //
+  // The ground is blocks, and a block is flat, so drawing it is a matter of how
+  // many blocks land on the screen. The first cut of this drew a row of them for
+  // every ROAD band -- and the road's bands are cut on half-stripe boundaries so
+  // the zebra never crawls, which near the camera is a band every third of a
+  // world unit. That is five times finer in depth than a block is deep, so four
+  // rows in five were redrawing the same blocks. 5,923 cells a repaint, 15.7 ms
+  // of JavaScript and 2.4 ms of fill, and the Race screen -- which repaints this
+  // every frame -- fell from 62.8 fps to 23.3 at 1920x1080 on this Mac's
+  // software scene graph.
+  //
+  // The ground has its own ladder now, and two rules set it:
+  //
+  //   * a row is at least `rowPx` plane pixels tall, and never shallower in
+  //     world units than the lattice it is drawing;
+  //   * a block is at least `cellPx` plane pixels wide, which chooses between
+  //     the half-unit, one-unit and two-unit lattices by distance rather than
+  //     by a depth guessed in advance.
+  //
+  // and one more that is not about cost: past `hazeOut` the haze has taken 94%
+  // of the ground, so the whole of the rest is one fill of what the blocks
+  // average to -- which is what the shader converges on there anyway.
+  //
+  // WHAT IT GIVES UP, stated rather than left to be found. At twenty world
+  // units a two-unit block is 1.8 plane pixels deep, so a four-pixel row spans
+  // two or three blocks in `s` and paints them as one. The shader dithers there
+  // and this does not. The piece T evidence measures exactly that, against a CPU
+  // reference of road.frag at the same camera.
+  readonly property real rowPx: 6.0
+  readonly property real cellPx: 10.0
+  readonly property real hazeOut: 42.0
+
+  // EVERY UNIFORM IS READ ONCE, INTO A LOCAL, AND THAT IS WORTH 13 MILLISECONDS.
+  //
+  // `fogColor`, `curve`, `focal` and the rest are QML properties, and every
+  // `fogColor.r` inside a loop is a trip through the property system. The first
+  // cut of this pass read six of them per BLOCK and called `uAt`, which reads
+  // three more, four times per run: with eleven hundred blocks that is about
+  // twenty thousand property reads a repaint, and measured it cost 16.6 ms of
+  // the 22 ms this pass was taking. Hoisted, the same eleven hundred blocks
+  // cost about three. Nothing about the picture changed.
+  function drawTerrain(ctx, w, h) {
+    var uCurve = curve, uFocal = focal, uAspect = aspect, uTravel = travel
+    var uCamH = camHeight, uRoadHalf = roadHalf, uRumbleHalf = rumbleHalf
+    var uSunU = sunU, uClock = clock, uHorizon = horizon
+    var fr = fogColor.r, fg = fogColor.g, fb = fogColor.b
+    var wr = waterColor.r, wg = waterColor.g, wb = waterColor.b
+    var lr0 = waterLit.r, lg0 = waterLit.g, lb0 = waterLit.b
+    var uFog = fogDensity
+    var scratch = [0, 0, 0]
+    var z = nearDistance
+    var guard = 0
+    // A COLOUR IS ALLOCATED ONCE PER TONE, NOT ONCE PER BLOCK.
+    //
+    // `Qt.rgba` builds a colour value, and the ground quantises to 8 bits a
+    // channel, so a row of sixty blocks over one sector's two-tone palette
+    // produces a few dozen distinct tones and hundreds of allocations. Keyed by
+    // the packed 24-bit tone, the whole pass allocates once per tone it actually
+    // uses -- and plan v3's rule is "no per-frame allocation in anything that
+    // runs every frame".
+    var tones = {}
+    function toneFor(key, rr, gg, bb) {
+      var c = tones[key]
+      if (c === undefined) {
+        c = Qt.rgba(rr / 255, gg / 255, bb / 255, 1)
+        tones[key] = c
+      }
+      return c
+    }
+
+    function screenU(x, zz) {
+      return (0.5 + ((x + uCurve * zz * zz) * uFocal) / (zz * 2 * uAspect)) * w
+    }
+    function screenY(zz) {
+      return (uHorizon + (uFocal * uCamH) / (2 * zz)) * h
+    }
+
+    while (z < hazeOut && ++guard < 200) {
+      // The lattice: the coarsest that is still finer than the eye at this
+      // depth, so a block is never under `cellPx` plane pixels across.
+      var want = (2 * z * uAspect * cellPx) / Math.max(1e-6, uFocal * w)
+      var gstep = want <= Terrain.FINE ? Terrain.FINE
+                  : (want <= Terrain.RUT ? Terrain.RUT : Terrain.COARSE)
+      var dz = Math.max(gstep, (z * z * rowPx * 2) / Math.max(1, h * uFocal * uCamH))
+      var zFar = Math.min(hazeOut, z + dz)
+      var zNear = z
+      var yFar = screenY(zFar)
+      var yNear = screenY(zNear)
+      z = zFar
+      if (yNear - yFar < 0.5)
+        continue
+
+      var mid = (zFar + zNear) * 0.5
+      var sMid = mid + uTravel
+      var fFloor = Math.max(0, Math.min(1, Math.exp(-uFog * mid * mid * 0.0011)))
+      var sx = -shimmerPx(yNear / h)
+      var row = Terrain.rowContext(sMid, mid)
+
+      var reach = mid * uAspect / uFocal
+      var mid0 = -uCurve * mid * mid
+      var cLo = Math.floor((mid0 - reach) / gstep)
+      var cHi = Math.ceil((mid0 + reach) / gstep)
+      if (cHi - cLo > 300) {
+        cLo = Math.floor(mid0 / gstep) - 150
+        cHi = cLo + 300
+      }
+
+      var runStart = cLo
+      var runKey = -1
+      var runColor = null
+      var rowH = Math.max(1, yNear - yFar + 1)
+      for (var c = cLo; c <= cHi; c++) {
+        Terrain.rowGround(row, c * gstep + gstep * 0.5, scratch)
+        var rr = Math.round((fr + (scratch[0] - fr) * fFloor) * 255)
+        var gg = Math.round((fg + (scratch[1] - fg) * fFloor) * 255)
+        var bb = Math.round((fb + (scratch[2] - fb) * fFloor) * 255)
+        var key = (rr << 16) | (gg << 8) | bb
+        if (runColor === null) {
+          runStart = c
+          runKey = key
+          runColor = toneFor(key, rr, gg, bb)
+        } else if (key !== runKey || c === cHi) {
+          var endAt = (key !== runKey) ? c : c + 1
+          ctx.fillStyle = runColor
+          var aF = screenU(runStart * gstep, zFar) + sx
+          var bF = screenU(endAt * gstep, zFar) + sx
+          var aN = screenU(runStart * gstep, zNear) + sx
+          var bN = screenU(endAt * gstep, zNear) + sx
+          if (Math.abs(aN - aF) < 1 && Math.abs(bN - bF) < 1) {
+            var rx = Math.min(aF, aN)
+            ctx.fillRect(rx, yFar, Math.max(1, Math.max(bF, bN) - rx), rowH)
+          } else {
+            ctx.beginPath()
+            ctx.moveTo(aF, yFar)
+            ctx.lineTo(bF, yFar)
+            ctx.lineTo(bN, yNear + 1)
+            ctx.lineTo(aN, yNear + 1)
+            ctx.closePath()
+            ctx.fill()
+          }
+          runStart = c
+          runKey = key
+          runColor = toneFor(key, rr, gg, bb)
+        }
+      }
+
+      // --------------------------------------------------------- the lake
+      // Water on the right of the road, with the sun's column reflected in it
+      // as rungs that stretch toward the eye. road.frag's `water` block. The
+      // column is in SCREEN u, because that is what a reflection is: the sun's
+      // image is under the disc, not at a fixed place on the lake.
+      if (row.water > 0.001) {
+        var shore = uRoadHalf + uRumbleHalf + 2.6
+        var ripple = Math.sin(sMid * 2.7 - uClock * 1.9) * 0.5
+                     + Math.sin(sMid * 6.1 + uClock * 1.1) * 0.5
+        var rungs = ripple >= 0 ? 1 : 0
+        var lakeR = wr * (rungs ? 1.18 : 1)
+        var lakeG = wg * (rungs ? 1.18 : 1)
+        var lakeB = wb * (rungs ? 1.18 : 1)
+        var xShoreF = screenU(shore + 1.1, zFar) + sx
+        var xShoreN = screenU(shore + 1.1, zNear) + sx
+        var xStart = Math.max(0, Math.min(xShoreF, xShoreN))
+        if (xStart < w) {
+          for (var q = 0; q < 8; q++) {
+            var px0 = xStart + (w - xStart) * q / 8
+            var px1 = xStart + (w - xStart) * (q + 1) / 8
+            var uc = ((px0 + px1) * 0.5 - sx) / w
+            var colm = Math.max(0, 1 - Math.abs(uc - uSunU) / 0.075)
+            colm *= colm
+            var ladder = colm * (0.45 + 0.55 * rungs)
+            ctx.fillStyle = Qt.rgba(
+              fr + ((lakeR + (lr0 - lakeR) * ladder) - fr) * fFloor,
+              fg + ((lakeG + (lg0 - lakeG) * ladder) - fg) * fFloor,
+              fb + ((lakeB + (lb0 - lakeB) * ladder) - fb) * fFloor, 1)
+            ctx.beginPath()
+            ctx.moveTo(Math.max(px0, xShoreF), yFar)
+            ctx.lineTo(Math.max(px1, xShoreF), yFar)
+            ctx.lineTo(Math.max(px1, xShoreN), yNear + 1)
+            ctx.lineTo(Math.max(px0, xShoreN), yNear + 1)
+            ctx.closePath()
+            ctx.fill()
+          }
+        }
+      }
     }
   }
 
