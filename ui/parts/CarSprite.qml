@@ -63,6 +63,13 @@ Item {
   property int pixelScale: 1
 
   property bool showNumber: true
+  // PIECE F ROUND 6. What the drawn cell calls itself in `--dump-rects` and in
+  // `findChild`. It defaults to "cell", which is what every existing caller
+  // and `tst_carsprite` already look for; the track overrides it per racer
+  // (`kart.bolt`) so a measurement can ask which box belongs to which car.
+  // Round 6's first defect -- a victim's tag drawn on top of a different kart
+  // -- could not be measured at all while every car's box had the same name.
+  property string cellName: "cell"
   // 0..1: how brightly the tail lamps glow, on the road camera, from the
   // lamp centres meta.json lists. The track drives it from a hit.
   property real lampGlow: 0.0
@@ -135,7 +142,7 @@ Item {
   // the stretch is exact and, with `smooth: false`, nearest-neighbour.
   Image {
     id: cell
-    objectName: "cell"
+    objectName: car.cellName
     x: -car.anchorDx
     y: -car.anchorDy
     width: car.drawnWidth

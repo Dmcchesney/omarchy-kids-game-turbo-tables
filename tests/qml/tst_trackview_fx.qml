@@ -1004,7 +1004,7 @@ Item {
       var says = ""
       var typeSize = 0
       root.walk(race, function (item) {
-        if (String(item.objectName) !== "racePlate" || !root.drawn(item))
+        if (String(item.objectName).indexOf("racePlate") !== 0 || !root.drawn(item))
           return
         if (item.haul === undefined || item.haul < 0.5)
           return

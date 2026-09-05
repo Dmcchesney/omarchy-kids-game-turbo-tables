@@ -1319,6 +1319,11 @@ Item {
         id: kartArt
         x: 0
         y: 0
+        // PIECE F ROUND 6. The car's own drawn box, named for the racer it is.
+        // `--dump-rects` now reports four boxes a measurement can tell apart,
+        // which is what turns "the tag is on the wrong kart" from an eye
+        // judgement into an arithmetic one -- see `fxTagClearOf` below.
+        cellName: "kart." + kartId
         body: kartBody
         paint: slot.paintIdx
         number: kartNumber
@@ -1435,7 +1440,7 @@ Item {
       // that a wrong answer puts NONE of them there. A rival's name plate is up
       // for the whole race whatever the child does. It carries an effect
       // readout; it is not one.
-      objectName: "racePlate"
+      objectName: "racePlate." + kartId
       readonly property color paintCol: kartPaint
       readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
       readonly property real zed: isHuman ? view.playerZ : view.zForDelta(delta)
@@ -1604,6 +1609,7 @@ Item {
 
     Item {
       id: chaser
+      objectName: "chaserPlate." + kartId
       readonly property color paintCol: kartPaint
       readonly property real delta: isHuman ? 0 : (kartProgress - view.humanProgress)
       readonly property int gapQuestions: kartGap
@@ -1905,6 +1911,11 @@ Item {
   property int heroPaint: 0
   property int heroNumber: 7
 
+  // Which racer a model index is, as the id the rest of the game uses. The
+  // round-6 tag proof reads it out of `--dump-rects` to say whose box is whose.
+  function fxKartIdOf(i) {
+    return (i >= 0 && i < kartModel.count) ? String(kartModel.get(i).kartId) : "none"
+  }
   function fxIndexOfId(id) {
     for (var i = 0; i < kartModel.count; i++)
       if (kartModel.get(i).kartId === id)
@@ -3741,7 +3752,7 @@ Item {
           Math.min(Math.round(view.height * (gBig ? 0.062 : 0.040)),
                    Math.round(view.kartSpriteH(zed) * (gBig ? 0.46 : 0.26))))
 
-      objectName: "fx.tag"
+      objectName: "fx.tag." + view.fxKartIdOf(gKart)
       x: cx - width / 2
       y: Math.max(view.fxTopFor(cx, width / 2),
                   view.fxKartTop(gKart) + view.kartSpriteH(zed) * 0.14
@@ -3823,6 +3834,9 @@ Item {
       opacity: view.boostNow * (0.34 - index * 0.09)
 
       CarSprite {
+        // Not a kart: a ghost of one. Named apart so the round-6 tag proof
+        // counts the four cars and not their trails.
+        cellName: "fx.trailCell"
         body: view.heroBody
         paint: view.heroPaint
         number: view.heroNumber
@@ -3875,6 +3889,9 @@ Item {
       opacity: view.towNow * (0.40 - index * 0.10)
 
       CarSprite {
+        // Not a kart: a ghost of one. Named apart so the round-6 tag proof
+        // counts the four cars and not their trails.
+        cellName: "fx.trailCell"
         body: view.heroBody
         paint: view.heroPaint
         number: view.heroNumber
@@ -3917,6 +3934,7 @@ Item {
       opacity: view.towNow * (0.40 - index * 0.10)
 
       CarSprite {
+        cellName: "fx.trailCell"
         body: parent.victim.kartBody
         paint: parent.paintIdx
         number: parent.victim.kartNumber
