@@ -2460,8 +2460,13 @@ Item {
     fxSound("hit", 0)
     pullBack(Math.min(1, 0.35 + Math.max(0, delta) / 18))
     shake = reducedMotion ? 0 : Math.min(1, 0.85)
-    fxWorldFlash(CardFx.HIT.edgeHot,
-                 reducedMotion ? Math.min(0.30 * 0.66, CardFx.FLASH_CAP) : 0.30, 220)
+    // ROUND 5: NO FULL-SCREEN GRADE HERE. The design's sentence is "a red-amber
+    // frame AT THE EDGES", and `fx.edges` below draws it. Round 4 drew the frame
+    // AND laid `edgeHot` over the whole picture at 0.30, which is the one place
+    // a blind critic preferred the losing build: the grade turned the sky, the
+    // hills and the road orange and cost the fact contrast, for no information
+    // the frame was not already carrying. The frame is the beat now, and it is
+    // deeper, stronger and two-toned to pay for what the grade used to add.
     if (heroIndex >= 0) {
       // "Your own hood smokes until the effect ends." The floor is the stall
       // the engine reported; Race.qml renews it from the lap requirement.
@@ -4024,6 +4029,25 @@ Item {
     }
   }
 
+  // ------------------------------------------------- BEING HIT IS A FRAME
+  //
+  // ROUND 5, AND IT IS A REGRESSION BEING TAKEN BACK. The design writes the
+  // child's own damage as "a red-amber frame AT THE EDGES", and round 4 also
+  // laid a full-screen `#f7768e` wash over it at 0.30 -- a modern colour grade
+  // that turned the sky, the hills and the road orange and dropped the contrast
+  // of the fact. A blind critic compared the two builds and gave this one line
+  // to the build that lost everywhere else: the frame is right and the grade is
+  // wrong, because the frame leaves the middle of the screen -- where the fact
+  // lives, and where a stalled child is being asked to hold a question in their
+  // head -- alone.
+  //
+  // So the wash is gone from `fxHitMe` and the frame carries the whole beat.
+  // It is deeper (0.24 of the frame against 0.16), stronger (0.86 against
+  // 0.62), and it is genuinely RED-AMBER rather than amber: `HIT.edgeHot` at
+  // the very rim running to `HIT.edgeTone` a third of the way in, so the two
+  // words in the design's sentence are two colours in the picture. Turbo's
+  // telegraph darkening is unchanged in every respect -- same depth, same
+  // strength, same single tone -- and is measured as such in the report.
   Item {
     id: edgeFrame
     objectName: "fx.edges"
@@ -4034,8 +4058,13 @@ Item {
     // child something happened TO them.
     readonly property real dark: view.fxEdgeDark
     readonly property real hot: view.hitEdge
-    readonly property color tone: hot > dark ? CardFx.HIT.edgeTone : "#1a0612"
-    readonly property real amount: Math.max(dark * 0.55, hot * 0.62)
+    readonly property bool hitting: hot > dark
+    readonly property color tone: hitting ? CardFx.HIT.edgeTone : "#1a0612"
+    // The rim itself, which is the red half of "red-amber". Turbo's darkening
+    // has one tone and keeps it.
+    readonly property color rim: hitting ? CardFx.HIT.edgeHot : tone
+    readonly property real amount: Math.max(dark * 0.55, hot * 0.86)
+    readonly property real depth: hitting ? 0.24 : 0.16
     readonly property real washAlpha: amount
     visible: amount > 0.004
 
@@ -4045,24 +4074,23 @@ Item {
       Rectangle {
         readonly property bool vertical: index < 2
         readonly property bool atEnd: index === 1 || index === 3
-        width: vertical ? Math.round(edgeFrame.width * 0.16) : edgeFrame.width
-        height: vertical ? edgeFrame.height : Math.round(edgeFrame.height * 0.16)
+        width: vertical ? Math.round(edgeFrame.width * edgeFrame.depth) : edgeFrame.width
+        height: vertical ? edgeFrame.height : Math.round(edgeFrame.height * edgeFrame.depth)
         x: index === 1 ? edgeFrame.width - width : 0
         y: index === 3 ? edgeFrame.height - height : 0
+        // Three stops, not two: the rim colour for the outermost third, the
+        // frame colour through the middle, and transparent where it meets the
+        // picture. `atEnd` is the right or bottom band, whose gradient runs the
+        // other way, so the two positions are mirrored rather than duplicated.
+        readonly property color rimColor: Qt.rgba(edgeFrame.rim.r, edgeFrame.rim.g,
+                                                  edgeFrame.rim.b, edgeFrame.amount)
+        readonly property color midColor: Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
+                                                  edgeFrame.tone.b, edgeFrame.amount * 0.78)
         gradient: Gradient {
           orientation: vertical ? Gradient.Horizontal : Gradient.Vertical
-          GradientStop {
-            position: 0.0
-            color: atEnd ? "transparent"
-                         : Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
-                                   edgeFrame.tone.b, edgeFrame.amount)
-          }
-          GradientStop {
-            position: 1.0
-            color: atEnd ? Qt.rgba(edgeFrame.tone.r, edgeFrame.tone.g,
-                                   edgeFrame.tone.b, edgeFrame.amount)
-                         : "transparent"
-          }
+          GradientStop { position: 0.0; color: atEnd ? "transparent" : rimColor }
+          GradientStop { position: atEnd ? 0.66 : 0.34; color: midColor }
+          GradientStop { position: 1.0; color: atEnd ? rimColor : "transparent" }
         }
       }
     }

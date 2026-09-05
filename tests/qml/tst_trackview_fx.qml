@@ -264,6 +264,50 @@ Item {
       verify(seen > 0, "being hit drew effect items")
     }
 
+    // ROUND 5. BEING HIT IS A FRAME AT THE EDGES, NOT A GRADE OVER THE PICTURE.
+    //
+    // Design, "Being hit, from the child's seat": "hit-stop 80, A RED-AMBER
+    // FRAME AT THE EDGES, a 200 ms shake with decay". Round 4 drew the frame
+    // and ALSO laid `HIT.edgeHot` over the whole screen at 0.30, and a blind
+    // critic comparing the two builds gave this one line to the build that lost
+    // everywhere else -- the grade turns the sky, the hills and the road orange
+    // and drops the contrast of the fact, for nothing the frame was not already
+    // saying. The frame leaves the middle of the screen alone; a grade cannot.
+    //
+    // So: over the whole life of a hit, the frame is up and strong, and NOTHING
+    // full-frame reaches the middle at all. `fxWashOverFact` is the view's own
+    // published answer to "how much light is over the fact", which is the same
+    // number `ui/Race.qml` raises the plate from, so a grade coming back would
+    // move it whether it arrived as a world flash, a sky flash or a bloom.
+    function test_02b_being_hit_is_a_frame_at_the_edges_not_a_grade() {
+      preroll()
+      verify(race.injectEvent("hit", "wrench"), "the hit was delivered")
+      var frame = 0
+      var overTheFact = 0
+      var fullFrame = 0
+      for (var f = 0; f < 26; f++) {
+        var boxes = root.effectBoxes()
+        for (var i = 0; i < boxes.length; i++) {
+          if (boxes[i].name === "fx.edges")
+            frame = Math.max(frame, boxes[i].opacity)
+          if (boxes[i].name === "fx.worldFlash" || boxes[i].name === "fx.worldFlashUnder")
+            fullFrame = Math.max(fullFrame, boxes[i].opacity)
+        }
+        overTheFact = Math.max(overTheFact, race.trackView.fxWashOverFact)
+        race.stepClock(60)
+      }
+      verify(frame > 0.55,
+             "the red-amber frame is up and strong (peak " + frame.toFixed(3) + ")")
+      verify(fullFrame <= 0.004,
+             "and no full-frame wash was drawn at all (peak " + fullFrame.toFixed(3) + ")")
+      verify(overTheFact <= 0.01,
+             "so no light reached the middle of the frame, where the fact is (peak "
+             + overTheFact.toFixed(4) + ")")
+      console.log("FX-HIT-FRAME|edges " + frame.toFixed(3)
+                  + "|full-frame wash " + fullFrame.toFixed(3)
+                  + "|light over the fact " + overTheFact.toFixed(4))
+    }
+
     // ---------------------------------------------------------------- rule 2
     //
     // A WRONG ANSWER IS NEVER PUNISHED WITH MOTION.
