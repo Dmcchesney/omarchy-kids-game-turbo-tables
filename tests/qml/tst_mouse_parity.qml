@@ -57,6 +57,51 @@ Item {
     activeFocusOnTab: false
   }
 
+  // ONE FOCUS RING, IN ITS TWO STATES, OVER THE SAME PIXELS.
+  //
+  // `test_21` reads hover and focus off a real control, which is the right
+  // subject for the claim -- and a control draws more than its ring, so a
+  // mutation that made the RING alone stop telling the two apart was still
+  // caught by the button's own fill. That is a pass for the wrong reason: the
+  // ring is the affordance every control in this game shares, and it has to
+  // carry the distinction on its own.
+  //
+  // So the ring is also photographed by itself, in one place, switched between
+  // its two states with nothing else on the screen changing. Nothing here is
+  // for the test's convenience: it is `ui/parts/FocusRing.qml` with `hover`
+  // true and `hover` false, which is exactly the pair of pictures the component
+  // exists to draw.
+  property bool ringHover: false
+
+  Item {
+    id: ringLab
+    anchors.fill: parent
+    visible: root.showing === "rings"
+
+    Rectangle {
+      anchors.fill: parent
+      color: Theme.panel
+    }
+
+    Item {
+      x: 300
+      y: 300
+      width: 400
+      height: 120
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Theme.cornerRadius
+        color: Theme.panelSunken
+      }
+
+      FocusRing {
+        on: true
+        hover: root.ringHover
+      }
+    }
+  }
+
   // Every screen that has a control on it, alive at once. They are laid out on
   // top of each other and only one is visible at a time: a click is delivered by
   // position, so two visible screens would race for the same pixel.
@@ -1191,6 +1236,30 @@ Item {
       }
       verify(checked >= 30, "only " + checked + " controls were swept; the walk is not"
              + " seeing the tree")
+    }
+
+    // The ring itself: two states, two pictures. See the note on `ringLab`.
+    function test_24_the_focus_ring_draws_hover_and_focus_differently() {
+      root.showing = "rings"
+      root.ringHover = false
+      suite.settleFrame()
+      var focusRing = grabImage(ringLab)
+
+      root.ringHover = true
+      suite.settleFrame()
+      var hoverRing = grabImage(ringLab)
+
+      var changed = suite.diff(focusRing, hoverRing)
+      verify(changed.count > 50,
+             "FocusRing draws its hover state and its focus state identically: "
+             + changed.count + " pixels differ between the two. Hover and focus are"
+             + " two facts -- where the pointer is, and where the keyboard is -- and"
+             + " a child who cannot tell them apart has lost the second one. This is"
+             + " the assertion a critic broke by making the component ignore `hover`,"
+             + " with every test in this file still passing.")
+
+      root.ringHover = false
+      root.showing = "garage"
     }
 
     // A sign is not a control. RACE A FRIEND has no key and no Tab stop because
