@@ -691,7 +691,7 @@ FocusScope {
       // What puts light BACK is `parts/CarLight.qml` below.
       washAmount: 0
       washColor: "#3a0f34"
-      shadeAmount: 0.92
+      shadeAmount: 0.72
       shadeColor: "#190616"
     }
 
@@ -848,7 +848,7 @@ FocusScope {
               // Measured: at rest the eight chips were the highest-chroma
               // object on the screen and the first thing a squint found. 0.72
               // of value, hue untouched.
-              rest: 0.72
+              rest: 0.78
               selected: garage.paintIndex
               onPicked: function (index) {
                 Store.setSetting("kartPaint", index)
