@@ -253,9 +253,24 @@ Item {
     width: slot.u(122)
     height: slot.u(74)
     radius: Theme.cornerRadiusSmall
-    color: slot.sunkenSurface
-    border.width: 1
-    border.color: Theme.line
+    // ROUND 4 OF PIECE M -- THIS WAS THE WORST SIGN IN THE GAME, AND IT WAS THE
+    // CHILD'S OWN ROW.
+    //
+    // A critic, on the shipped frame: "The YOU row carries a large sunken
+    // circular lamp reading IN STALL, unlit, while the three rows below it read
+    // READY with lit lamps -- next to a primary button called READY UP. That is
+    // a toggle. Every visual convention in the frame says it is a toggle. A
+    // child will press their own lamp to become ready, nothing will happen, and
+    // they will press it again."
+    //
+    // They are right, and the fix is not to make it pressable -- there is no key
+    // that readies a seat, so a click would be the mouse-only path this whole
+    // piece exists to remove. It is to stop the readout being drawn as a
+    // control. The sunken fill and the border are what made it a pill; without
+    // them the word and its lamp sit on the row's own card, which is what a
+    // state readout looks like everywhere else in this game.
+    color: "transparent"
+    border.width: 0
 
     Text {
       id: lampLabel
@@ -278,7 +293,10 @@ Item {
     Rectangle {
       anchors.horizontalCenter: parent.horizontalCenter
       y: lampLabel.y + lampLabel.height + slot.u(8)
-      width: slot.u(26)
+      // Smaller with the pill gone: a lamp beside a word rather than the face of
+      // a button. 26 units read as something to press when it had a sunken
+      // surface around it; 18 reads as an indicator.
+      width: slot.u(18)
       height: width
       radius: width / 2
       color: slot.lit ? Theme.amber : "#1c0a18"

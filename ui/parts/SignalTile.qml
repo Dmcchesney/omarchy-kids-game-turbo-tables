@@ -57,12 +57,33 @@ Item {
   Accessible.name: caption
   Accessible.description: "A signal a racer can send. Rivals send it too."
 
+  // ROUND 4 -- A SIGN THAT SAYS SO IN THE TABLE AND SAYS THE OPPOSITE ON THE
+  // SCREEN IS STILL A LIE.
+  //
+  // Round three's answer to "a child cannot tell a decided display from a
+  // forgotten control" was to declare `isSign` and print it in the parity table.
+  // A critic accepted the mechanism and rejected the judgement, in the only
+  // words that matter: these four were "bordered cards with an icon and a
+  // caption in a bordered panel, laid out exactly like a row of four buttons,
+  // immediately left of the loudest button on the screen. A CHILD WILL PRESS
+  // THESE. Every one of them." A declaration in a table is read by a maintainer;
+  // the border is read by the child.
+  //
+  // So the border and the fill are gone and the icon and its word sit on the
+  // panel's own ground. The panel around them keeps its border and its caption
+  // -- "These are the only signals in a race. The rivals send them too." -- so
+  // the four read as a vocabulary list, which is what the design calls them:
+  // "the four-signal catalog SHOWN so the child learns them". The one sign a
+  // critic accepted without reservation, RACE A FRIEND, is accepted for exactly
+  // this reason: dashed border, no fill, a notice rather than a button.
+  //
+  // `surface` is kept and unused by the tile itself, because callers set it and
+  // a screen that wants a ground behind a legend can still draw one.
   Rectangle {
     anchors.fill: parent
     radius: Theme.cornerRadiusSmall
-    color: tile.surface
-    border.width: 1
-    border.color: Theme.line
+    color: "transparent"
+    border.width: 0
   }
 
   Column {
