@@ -15,37 +15,31 @@ import "../"
 // ---------------------------------------------------------------------------
 //
 // What is here: the cue table, the URL for each cue, the `sound` setting's
-// gate, a re-trigger guard, and a log of what was asked for. Every effect in
-// `ui/TrackView.qml` and `ui/Race.qml` calls `Sfx.play(cue)` on the beat the
-// design puts the sound on, and `tests/qml/tst_sfx.qml` asserts the right cue
-// fires on the right event -- so the WIRING is built and proved.
+// gate, and a log of what was asked for. Every effect in `ui/TrackView.qml`,
+// `ui/Race.qml` and `ui/Picker.qml` calls `Sfx.play(cue)` on the beat the
+// design puts the sound on, and `tests/qml/tst_sfx.qml` and
+// `tests/qml/tst_trackview_fx.qml` assert the right cue fires on the right
+// event -- so the WIRING is proved by test rather than by assertion.
 //
-// What is NOT here: a `SoundEffect`, a `MediaPlayer`, or an `import QtMultimedia`.
-// `voice` is the seam a host plugs a player into, and it is null, so the game
-// is silent. Three reasons, all of which outrank "the piece would look more
-// finished with it":
+// What is NOT here, and deliberately: a `SoundEffect`, a `MediaPlayer`, or an
+// `import QtMultimedia`. `voice` is the seam, and in the shipping plugin
+// `TurboTables.qml` fills it with `shell/AudioLoader.qml`, whose bank
+// (`shell/SoundBank.qml`) holds the only multimedia import in the tree. That
+// split is the design's "Qt Multimedia behind a loader, so a machine without it
+// gets a silent game rather than a broken one": an unresolved import fails the
+// whole component carrying it, so it is kept in the one component nothing
+// imports directly. If it fails, `voice.play()` answers false and everything
+// on this side of the seam carries on unchanged.
 //
-//   1. `docs/plan.md` v3 assigns the multimedia component to piece 6, at M6':
-//      "the eight card sounds and engine loop behind `AudioLoader`, with the
-//      README's audio sentences moved to present tense IN THE SAME COMMIT as
-//      the `SoundEffect` lands, or the gate fails."
-//   2. `npm run check:readme` enforces exactly that, and it is not a formality:
-//      a multimedia token anywhere in the plugin makes README.md's "There is no
-//      sound yet" and "no audio loader has been built" stale denials, and the
-//      gate fails the build. Landing the token here without rewriting those
-//      sentences would break `npm run check`; rewriting them is piece 6's job
-//      and would put a present-tense audio claim in the README.
-//   3. NOBODY IN THIS BUILD LOOP CAN HEAR. Wiring an unheard sound into the
-//      shipping game and then telling a parent in the README that the game
-//      plays sounds is precisely the kind of claim this project has been caught
-//      making before. The files, the bake and the routing are reviewable as
-//      text and provable by test; the sound itself is not, and it waits for
-//      somebody with ears.
+// With `voice` null -- the harness, the tests, a host with no audio -- the game
+// plays exactly as it always has, silently, and the cue log still records what
+// was asked for. That is what makes the routing checkable without ears.
 //
-// A host that HAS an audio backend assigns `Sfx.voice` an object with a
-// `play(url)` method, and every cue below starts working with no other change.
-// With `voice` null the game plays exactly as it does today, silently, which is
-// also the fallback a machine without Qt Multimedia gets.
+// AND NOBODY HAS USED ANY EARS. Not one of the fifteen WAVs has been heard by
+// anybody in the build loop, and nothing in this repository can hear one. Every
+// claim made about sound here is about format, length, hash, routing and
+// whether Qt reports a sound started. Whether these files sound like a clang, a
+// whoosh or a siren is the maintainer's to judge and he has not judged it yet.
 QtObject {
   id: sfx
 
@@ -75,8 +69,21 @@ QtObject {
     "slam":          "slam"            // the chosen card slams down
   })
 
-  // The seam. Null in the shipping plugin; a host with an audio backend assigns
-  // an object with `play(url)`. Nothing else in the game touches it.
+  // Every cue's URL, in one list, derived from the table above so the table
+  // stays the only place a cue is written down. `TurboTables.qml` hands this to
+  // `shell/AudioLoader.qml`, which hands it to the bank, which loads one
+  // `SoundEffect` per entry. A second list of file names anywhere else is a
+  // list that could drift from this one, so there is not one.
+  readonly property var sources: {
+    var list = []
+    for (var cue in sfx.cues)
+      list.push(sfx.url(cue))
+    return list
+  }
+
+  // The seam. Null until something fills it -- which the harness and the tests
+  // never do, and `TurboTables.qml` always does, with `shell/AudioLoader.qml`.
+  // Whatever is here offers `play(url)`. Nothing else in the game touches it.
   property var voice: null
 
   // What was last asked for, and the whole list since `clearLog()`. The log is

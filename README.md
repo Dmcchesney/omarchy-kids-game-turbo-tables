@@ -21,7 +21,10 @@ from the one before it with the keyboard alone, and `Escape` meaning back one ev
 kart, paint, number and race settings a child chooses are written to one file the game owns and are
 still there next time, because the file the engine defines is the file the shell reads and writes.
 When that file cannot be read, the game leaves it exactly as it is and says so on screen for the rest
-of the session instead of quietly starting over. There is no sound yet. The settled design and the
+of the session instead of quietly starting over. Each power-up, each hit taken, each block and each
+hand dealt plays its own short recorded cue through Qt Multimedia, and the settings screen switches
+all of it off. Nobody involved in building this has heard those cues; they are checked for format,
+length and routing, and they wait on an ear. The settled design and the
 build plan are in
 [docs/design.md](docs/design.md) and [docs/plan.md](docs/plan.md).
 
@@ -150,7 +153,7 @@ Turbo Tables:
   configuration
 
 What that one file holds: chosen kart body, paint and number; the stored preferences for reduced
-motion, scanlines and the timer, plus a `sound` key that nothing reads yet; the rival level; best
+motion, scanlines, the timer and the sound switch; the rival level; best
 times and ghost timelines per preset; and one correct-answer count per multiplication fact. Nothing
 that identifies anybody, nothing that leaves the machine.
 
@@ -163,9 +166,12 @@ stays true.
 
 - **Omarchy 4** with the Quattro shell. The overlay and bar widget use only the documented plugin
   contract.
-- **Qt Multimedia** for sound, and it will be an optional one. There is no audio in the plugin yet and
-  no audio loader has been built. When it lands, the sound component will sit behind a loader and the
-  game will fall back to a silent stub with the same interface when the module is absent.
+- **Qt Multimedia** for sound, and it is an optional one. The only `import QtMultimedia` in the
+  repository is in `shell/SoundBank.qml`, which nothing imports directly: `shell/AudioLoader.qml`
+  pulls it in through a `Loader` at runtime. On a machine without the module that component alone
+  fails to load, the loader reports it in one line, every call it offers answers false, and the game
+  runs silently instead of breaking. Fifteen short PCM WAVs under `assets/sfx/` are what it plays.
+  Nobody who worked on this repository has listened to any of them.
 
 Nothing else. The repository has no runtime dependencies, no lockfile, and no `node_modules`; the build
 and check tooling is fetched on demand by `npx` and never lands inside the checkout, because a
@@ -251,18 +257,26 @@ reproduce.
   forbidden object by a route nobody has named here, and then indexes it with a plain variable, is
   not caught by shape. What stands behind it there is the token search plus `check:boundary`, both of
   which read concatenated, array-assembled and constant-folded strings.
-- **An `Image`'s `source` may be an expression; a `Loader`'s may not.** The runtime-assembly rule
+- **An `Image`'s or a `SoundEffect`'s `source` may be an expression; a `Loader`'s may not.** The
+  runtime-assembly rule
   holds every `source:` to a single string literal, or to one the file's own constants fold to, with
-  one exemption: the innermost enclosing element is `Image`, `AnimatedImage`, `BorderImage` or
+  one exemption: the innermost enclosing element is `Image`, `AnimatedImage`, `BorderImage`,
   `ColorImage` — the last of which is a subclass of the first and reaches the same image loader, and
-  is how piece T tints the frozen prop kit on a scene graph with no shaders. The car
+  is how piece T tints the frozen prop kit on a scene graph with no shaders — or `SoundEffect`. The car
   sprite chooses one of 48 sheets by body and paint, which cannot be a literal, and what an image
-  loader decodes is pixels — it cannot be run. The limit is that such a source can still name a file
-  outside the plugin and display it. `check:boundary`'s content rule governs what may sit under
+  loader decodes is pixels — it cannot be run. A `SoundEffect` is the same argument about a WAV: the
+  bank holds one per cue per voice behind an `Instantiator`, so its source is the model's value, and
+  what Qt's sample cache decodes is audio. The limit is that such a source can still name a file
+  outside the plugin and display or play it. `check:boundary`'s content rule governs what may sit under
   `assets/`; nothing governs what a computed `Image` path points at, so that is a fact only a reader
-  of `ui/parts/CarSprite.qml` can confirm. Found while adding this exemption: the rule also used to
+  of `ui/parts/CarSprite.qml` can confirm, and the same holds for `shell/SoundBank.qml`, whose list
+  comes from `ui/parts/Sfx.qml`'s cue table and is held to the files on disk by `npm run check:sfx`.
+  Found while adding this exemption: the rule also used to
   accept any value that *began* with a quote, so `"ui/" + expr + ".qml"` on a `Loader` passed. It
-  now requires the whole value to be one literal.
+  now requires the whole value to be one literal. Found while adding the second one: the walk that
+  decides which element encloses a `source:` only recognised a type name at the start of a line, so
+  an element written as a property value — `delegate: SoundEffect {` — was skipped and the `source:`
+  inside it was attributed to the element outside. The walk recognises both spellings now.
 - **Only three file types are held to those shape rules: `.qml`, `.js` and `.mjs`** — the languages
   Qt can load off disk. The TypeScript under `src/engine/` is not, because Qt cannot run it; its output
   `engine/engine.mjs` is, with three exemptions it needs honestly (`join`, `concat` and

@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import "ui"
+import "ui/parts"
 import "shell"
 
 // The overlay entry point: the whole game, in one fullscreen layer-shell
@@ -308,9 +309,24 @@ Item {
   }
 
   // ----------------------------------------------------------------- sound
+  //
+  // PIECE 6, M6'. Three objects and one assignment, and the assignment is the
+  // whole of it: `ui/parts/Sfx` is the cue table every screen already plays
+  // through, `shell/AudioLoader` is the optional-dependency loader, and
+  // `shell/SoundBank` behind it is the only `import QtMultimedia` in the tree.
+  // The loader IS the seam's `voice`: `Sfx.play(cue)` resolves the cue to a URL
+  // and hands that URL to `audio.play()`, which hands it to the bank.
+  //
+  // This is layer 3's job because it is the only layer that may touch the
+  // outside world, and an audio device is the outside world. Nothing under
+  // `ui/` gained an import; if the bank fails to load, `audio.play()` answers
+  // false and every screen behaves exactly as it did when there was no sound.
+  //
+  // Nobody in the build loop has heard any of these sounds.
   AudioLoader {
     id: audio
     enabled: root.soundOn
+    sources: Sfx.sources
   }
 
   // `Store.setting()` is a function, so it cannot be bound to; the Store
@@ -382,6 +398,12 @@ Item {
     root.soundOn = Store.setting("sound") !== false
     root.storeQuarantined = (typeof Store.quarantined === "boolean") ? Store.quarantined : false
 
+    // Fill the seam. Done here rather than declaratively because `Sfx` is a
+    // singleton -- one object shared by every screen -- and a binding on a
+    // singleton property from an instantiated component is a binding that
+    // fights whichever copy loaded last. The overlay is instantiated once.
+    Sfx.voice = audio
+
     // Pay the first full-size frame now rather than at the child's first
     // summon. See the header: this is the whole of the cold-start key leak.
     root.warmingUp = true
@@ -395,7 +417,14 @@ Item {
     onTriggered: root.warmingUp = false
   }
 
-  Component.onDestruction: saveFile.flushNow()
+  Component.onDestruction: {
+    saveFile.flushNow()
+    // The `Sfx` singleton outlives this component in the same engine, and the
+    // loader it points at does not. Leaving the seam full would leave every
+    // later `Sfx.play()` calling into a destroyed object.
+    if (Sfx.voice === audio)
+      Sfx.voice = null
+  }
 
   // ----------------------------------------------------------- the window
   PanelWindow {

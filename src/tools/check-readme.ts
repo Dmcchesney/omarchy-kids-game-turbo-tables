@@ -695,9 +695,19 @@ for (const file of tree.files) {
     // an Animation source or anything else stays held to the literal rule.
     // Limit, stated in README's "does not check": an Image source can still
     // name a file outside the plugin; it can display it, not execute it.
+    //
+    // M6' widened the opener pattern by exactly one optional prefix: an element
+    // written as the value of a property -- `delegate: SoundEffect {`,
+    // `contentItem: Image {` -- opens an element as much as one written bare,
+    // and the pattern required the type name to be the first thing on the line.
+    // The walk therefore skipped past such an opener and attributed the
+    // `source:` inside it to whatever element enclosed THAT, which is the wrong
+    // element in both directions: it would have exempted a `Loader` sitting
+    // inside an `Image`, and it did fail a `SoundEffect` sitting inside an
+    // `Instantiator`. Only the attribution changes; the exemption list does not.
     let element = "";
     for (let back = line - 1; back >= 0 && back > line - 80; back--) {
-      const opener = codeLines[back]?.match(/^\s*([A-Z][\w.]*)\s*\{/);
+      const opener = codeLines[back]?.match(/^\s*(?:[a-z][\w.]*\s*:\s*)?([A-Z][\w.]*)\s*\{/);
       if (opener) { element = opener[1]!; break; }
     }
     // `ColorImage` is on this list for the same reason and no other: it is
@@ -708,7 +718,18 @@ for (const file of tree.files) {
     // chosen by kind, which cannot be a literal. Nothing about the exemption
     // changes: the path is decoded as pixels, it is never run, and it can still
     // name a file outside the plugin, which is the same stated limit.
-    if (/^(Image|AnimatedImage|BorderImage|ColorImage)$/.test(element)) continue;
+    // `SoundEffect` joins them at M6', on exactly the same argument and with
+    // exactly the same stated limit: its `source` is a WAV, decoded by Qt's
+    // sample cache and played through an audio device. It is never compiled and
+    // never run. `shell/SoundBank.qml` holds one `SoundEffect` per cue per
+    // voice behind an `Instantiator`, so its source is `modelData` and cannot
+    // be a literal -- and writing it as forty-five literal blocks would put the
+    // cue list in a third place, which is the drift `npm run check:sfx` exists
+    // to stop. The limit is the Image limit word for word: such a source can
+    // still name a file outside the plugin and play it. What governs the list
+    // it is fed is that the list is `ui/parts/Sfx.qml`'s cue table, derived from
+    // it in one place, and `check:sfx` holds that table to the files on disk.
+    if (/^(Image|AnimatedImage|BorderImage|ColorImage|SoundEffect)$/.test(element)) continue;
     fail(
       "runtime name assembly in a plugin file",
       `${file.path}:${line}: a \`source\` bound to an expression this gate cannot resolve to a string literal. Whatever it names is loaded and run; name it literally.\n    ${(file.text.split(/\r?\n/)[line - 1] ?? "").trim().slice(0, 120)}`,
