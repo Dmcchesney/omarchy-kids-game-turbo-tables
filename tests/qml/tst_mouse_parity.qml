@@ -233,6 +233,12 @@ Item {
     function init() {
       memory.reset()
       Store.reload()
+      // The repeat guard is shared and outlives a screen, so a case that armed
+      // it would eat the first press of the next one.
+      Actions.clear()
+      // `test_29` stops the race's clock to compare two states; every other case
+      // wants the real one back.
+      race.externalClock = false
       root.showing = "garage"
       root.raceRequests = 0
       root.leaveRequests = 0
@@ -273,6 +279,14 @@ Item {
     function resetScreens() {
       picker.clearChoice()
       picker.slamBorn = -1e9
+      // ROUND 4, and the same class again. `clearChoice()` raises the one-beat
+      // line that says a card went back -- `CARD PUT BACK · ALL THREE STILL
+      // YOURS` -- and a wall-clock Timer takes it down. In the game that beat
+      // belongs to the child's own press; in a state list it is a leftover of
+      // the reset, and a comparison of two states photographed milliseconds
+      // apart cannot be about a line that is on its way out. Put down here,
+      // after the clear that raised it, rather than excluded from the reading.
+      picker.letGoShowing = false
       settings.pending = ""
       // ROUND 3, and it is the same class of leak as the two above. The one
       // question in the game goes on swallowing POINTER presses over its own
@@ -537,6 +551,16 @@ Item {
         suite.clickNamed(state.item, state.prepare)
         suite.settleFrame()
       }
+      // ROUND 4. THE PRESSES THAT DROVE US HERE ARE NOT THE CHILD'S.
+      //
+      // The repeat guard is shared across controls now (`ui/parts/Actions.qml`)
+      // and it is real state that outlives a screen. A state list that clicks
+      // its way in therefore arms it, and the very next press -- the one the
+      // case is actually about -- was refused as the tail of a click nobody in
+      // the case made. Measured: three clicks on the picker's `⏎  USE` did
+      // nothing at all, because the previous state's own drive had armed
+      // `handFooter` less than 400 ms earlier.
+      Actions.clear()
     }
 
     // DIRECTION ONE: nothing is reachable by click and not by key.
@@ -630,6 +654,380 @@ Item {
         }
       }
       verify(checked >= 20, "only " + checked + " live click targets were checked")
+    }
+
+    // ==================================================================
+    // ROUND 4. THE KEY COLUMN, CHECKED FOR BEING TRUE.
+    // ==================================================================
+    //
+    // A critic set `ui/parts/ActionButton.qml`'s `key: "Enter or Space"` to
+    // `key: "Escape"` -- READY UP, LEAVE, RACE AGAIN, GARAGE, BACK and all
+    // three RESETs now declaring that Escape is the key that does what a click
+    // does -- and this file reported 27 passed, 0 failed while
+    // `--print-controls` went on printing `parity verdict PASS`.
+    //
+    // The column was checked for being non-empty (test_01) and for naming keys
+    // a keyboard has (test_05). It was never checked for naming the key that
+    // DOES THE THING, which is the one claim the whole piece rests on. Seven
+    // hand-written drive pairs (tests 10 to 18) asserted it on seven controls
+    // out of sixty-odd, and a hand-written list is exactly what cannot catch
+    // this: the column that lies is the one nobody wrote a pair for.
+    //
+    // So the two drive routes are crossed over EVERY control, generated from
+    // the tree like everything else here:
+    //
+    //   1. enter the state, put the keyboard where the control's own stop is,
+    //      CLICK the target, take the pointer off, photograph the screen;
+    //   2. enter the same state again, put the keyboard in the same place,
+    //      PRESS THE KEYS THE COLUMN NAMES, photograph the screen;
+    //   3. the two photographs must be identical.
+    //
+    // The photograph is `fingerprint()` -- every drawn string with its box,
+    // every named item with its box, every click target with its label and
+    // whether it is live, the whole save file, and every signal the screens
+    // have emitted. It is the same comparison `dev/Harness.qml --do ...
+    // --dump-text` makes between a click-only and a key-only drive, which a
+    // critic already accepted as evidence, widened from the strings to the tree
+    // and run over every control instead of over one route.
+    //
+    // WHAT A KEY ROUTE IS, and why it is not a hand-written list coming back.
+    // Almost every control's route is "the first key the column names, once",
+    // computed here from `key` with no help from anybody. The exceptions are
+    // controls that PICK a member of a set the keys STEP through -- a paint
+    // swatch, a rival tag, an answer on the question -- where the honest
+    // statement is "Right, that many times", and `ui/parts/Clickable.qml`'s
+    // `keyRoute` says so at the control, in presses, next to the `key` column
+    // that says the same thing in the words the child reads. A control that
+    // cannot be crossed over at all declares `keyGap` with the reason, and this
+    // test prints every one it found rather than passing over it in silence.
+    function test_29_the_declared_key_does_what_the_click_does() {
+      var list = suite.states()
+      var checked = 0
+      var stepped = 0
+      var gaps = []
+      for (var s = 0; s < list.length; s++) {
+        suite.freshState(list[s])
+        var count = suite.clickTargetsIn(list[s].item).length
+        for (var i = 0; i < count; i++) {
+          // ------------------------------------------------- the click route
+          suite.freshState(list[s])
+          var screen = list[s].item
+          var targets = suite.clickTargetsIn(screen)
+          if (i >= targets.length)
+            break
+          var hit = targets[i]
+          if (hit.barrier === true || !suite.usable(hit, screen))
+            continue
+          var label = String(hit.label)
+          var keySpec = String(hit.key)
+          if (String(hit.keyGap).length > 0) {
+            gaps.push(list[s].name + ": \"" + label + "\" -- " + hit.keyGap)
+            continue
+          }
+          var route = suite.routeFor(hit)
+          // A route of NO presses is a real answer and is only ever a declared
+          // one: the swatch whose paint is already on, the answer already armed,
+          // a focus-only target whose whole equivalent is the keyboard standing
+          // on its stop. An UNDECLARED empty route means the key column named
+          // nothing pressable, which is a hole rather than a claim.
+          verify(route.length > 0 || hit.focusOnly === true
+                 || (hit.keyRoute !== null && hit.keyRoute !== undefined),
+                 list[s].name + ": \"" + label + "\" names \"" + keySpec + "\" as the"
+                 + " key that does what a click does, and no press can be made from it."
+                 + " Either name a key, or declare `keyGap` with the reason.")
+          if (route.length > 1)
+            stepped += 1
+          suite.armKeyboard(screen, hit)
+          var at = suite.centreOf(hit)
+          mouseMove(root, at.x, at.y)
+          mouseClick(root, at.x, at.y)
+          wait(1)
+          mouseMove(root, 0, 0)
+          suite.settleFrame()
+          var afterClick = suite.settledFingerprint(screen)
+          if (list[s].name === "Settings, reset asked")
+            console.log("DEBUG click", label, "confirming=" + settings.confirming,
+                        "banner=" + JSON.stringify(settings.bannerText),
+                        "turns=" + suite.settleTurns)
+
+          // ------------------------------------------------- the key route
+          suite.freshState(list[s])
+          var again = suite.clickTargetsIn(screen)
+          verify(i < again.length && String(again[i].label) === label,
+                 list[s].name + ": the tree came back a different shape at target " + i
+                 + " (\"" + label + "\" became \"" + (i < again.length ? again[i].label : "nothing")
+                 + "\"), so the two routes are not being compared on the same control")
+          suite.armKeyboard(screen, again[i])
+          for (var k = 0; k < route.length; k++) {
+            var code = suite.keyCodeFor(route[k])
+            verify(code >= 0, list[s].name + ": \"" + label + "\" names the key \""
+                   + route[k] + "\", which this game cannot press")
+            keyClick(code)
+          }
+          mouseMove(root, 0, 0)
+          suite.settleFrame()
+          var afterKey = suite.settledFingerprint(screen)
+          if (list[s].name === "Settings, reset asked")
+            console.log("DEBUG key  ", label, "confirming=" + settings.confirming,
+                        "banner=" + JSON.stringify(settings.bannerText),
+                        "turns=" + suite.settleTurns)
+          checked += 1
+
+          // `verify` rather than `compare`, because a fingerprint is thousands
+          // of characters and two of them printed side by side is not a message
+          // anybody reads. `firstDifference` says the one line that differs.
+          verify(afterKey === afterClick,
+                  list[s].name + ": the click target \"" + label + "\" says \"" + keySpec
+                  + "\" is the key that does the same thing, and it is not. Pressing "
+                  + JSON.stringify(route) + " left the screen "
+                  + suite.firstDifference(afterClick, afterKey) + ". The key column is"
+                  + " the whole claim of this piece -- that no path is mouse-only --"
+                  + " and until this case existed it was a string nobody verified: a"
+                  + " critic set every button's key to Escape and the suite stayed"
+                  + " green.")
+        }
+      }
+      verify(checked >= 40, "only " + checked + " controls had their key column crossed"
+             + " over against their click; the walk is not seeing the tree")
+      verify(stepped >= 8, "not one control declared a stepping key route, so the"
+             + " swatches and the aim tags -- the controls whose keys step through a"
+             + " set a click lands in -- were not really crossed over")
+      // THE CASE'S OWN TEETH. A comparison that cannot tell two states apart
+      // passes every control, so it is pointed at a key that is NOT the one the
+      // column names -- the exact mutation that survived round three -- and it
+      // has to see the difference.
+      suite.freshState(list[0])
+      var ready = suite.targetNamed(garage, "READY UP")
+      verify(ready !== null, "the garage has no READY UP to prove this case with")
+      suite.armKeyboard(garage, ready)
+      var readyAt = suite.centreOf(ready)
+      mouseMove(root, readyAt.x, readyAt.y)
+      mouseClick(root, readyAt.x, readyAt.y)
+      wait(1)
+      mouseMove(root, 0, 0)
+      suite.settleFrame()
+      var pressed = suite.settledFingerprint(garage)
+      suite.freshState(list[0])
+      suite.armKeyboard(garage, suite.targetNamed(garage, "READY UP"))
+      keyClick(Qt.Key_Escape)
+      mouseMove(root, 0, 0)
+      suite.settleFrame()
+      verify(suite.settledFingerprint(garage) !== pressed,
+             "Escape and a click on READY UP leave this screen in states this case"
+             + " cannot tell apart, so the comparison above is blind and every control"
+             + " it passed was passed for nothing. This is the mutation that survived"
+             + " round three: every button's key set to Escape, 27 tests green.")
+      if (gaps.length > 0)
+        console.log("key column, declared gaps:\n  " + gaps.join("\n  "))
+    }
+
+    /**
+     * The fingerprint once the screen has stopped moving.
+     *
+     * Two states reached by two routes are photographed a few milliseconds
+     * apart, and this game has things that ARRIVE: the settings banner fades in
+     * over 180 ms, the question's extent goes on swallowing presses for one
+     * double-click interval after the sheet has gone. The first run of this
+     * case reported the KEEP answer's key column a liar because one route was
+     * photographed on the frame before `NOTHING WAS CHANGED` was drawn and the
+     * other on the frame after.
+     *
+     * Two identical reads in a row is the stop condition, so a still screen
+     * costs one turn of the loop and a moving one costs as long as it moves.
+     * Bounded, because a screen that never settles has to fail loudly on the
+     * comparison rather than hang here.
+     */
+    function settledFingerprint(screen) {
+      var last = suite.fingerprint(screen)
+      for (var i = 0; i < 64; i++) {
+        wait(16)
+        // AND A FRAME IS DRAWN, or nothing arrives at all. On this offscreen
+        // software backend `wait()` turns the event loop without rendering, and
+        // a `Behavior on opacity` that no frame has advanced stays at zero for
+        // ever -- so two reads in a row agreed that the banner was not there,
+        // the loop stopped, and the case failed on a state that was still
+        // arriving. `grabImage` renders synchronously; it is the same trick
+        // `settleFrame` uses and for the same reason.
+        grabImage(root)
+        var now = suite.fingerprint(screen)
+        if (now === last)
+          return now
+        last = now
+      }
+      return last
+    }
+
+
+    /**
+     * The state, from the beginning, twice over.
+     *
+     * `enter()` shows a screen and drives it into its state; it does not put
+     * the WORLD back, and the crossover needs that. The two routes have to
+     * start from the same save file, the same race and the same signal counts,
+     * or the second one is measuring what the first one left behind: the first
+     * run of this case clicked the kart body down from body 5 and then pressed
+     * Left from body 4, and reported the key column a liar on the one control
+     * where it was telling the truth.
+     */
+    function freshState(state) {
+      memory.reset()
+      Store.reload()
+      // AND THE GUARD COMES DOWN. It is shared, it outlives a screen being
+      // rebuilt, and that is the whole point of it -- which is also how it leaks
+      // between two runs meant to be comparable: the click half of this pair
+      // clicked `ESC  LEAVE` and armed `escape`, and the key half then pressed
+      // an Escape that was correctly refused as the tail of it.
+      Actions.clear()
+      root.raceRequests = 0
+      root.leaveRequests = 0
+      root.againRequests = 0
+      root.garageRequests = 0
+      root.cardsUsed = 0
+      root.countdownAborts = 0
+      root.raceLeaves = 0
+      // AND THE CLOCK STOPS, for the reason `dev/Harness.qml` stops it before a
+      // drive: the race screen's lap drum, its road and its readouts are bound
+      // to a FrameAnimation, so two states photographed a few milliseconds apart
+      // differ in a lap drum that has rolled on, and the diff is noise on every
+      // line. `externalClock` is the screen's own answer and it is already
+      // trusted for the piece F strips. Set before `buildRace`, so the race is
+      // built under the clock it will run on.
+      if (state.item.hasOwnProperty("externalClock"))
+        state.item.externalClock = true
+      if (typeof state.item.buildRace === "function")
+        state.item.buildRace()
+      suite.enter(state)
+    }
+
+    /**
+     * The presses that reach a control's own state from the keyboard.
+     *
+     * The default is the first key the parity column names, once, which is true
+     * of every control in this game but the ones that pick a member of a set the
+     * keys step through. Those declare `keyRoute` themselves -- see
+     * `ui/parts/Clickable.qml` -- and a FOCUS-ONLY target takes no action at
+     * all, so its whole route is the keyboard being on its stop, which
+     * `armKeyboard` has already done.
+     */
+    function routeFor(hit) {
+      var declared = hit.keyRoute
+      if (declared !== undefined && declared !== null) {
+        var out = []
+        for (var i = 0; i < declared.length; i++)
+          out.push(String(declared[i]))
+        return out
+      }
+      if (hit.focusOnly === true)
+        return []
+      var names = KeyHints.keyNames(hit.key)
+      return names.length > 0 ? [names[0]] : []
+    }
+
+    /**
+     * Put the keyboard exactly where BOTH routes need it, so the two states
+     * being compared differ by the input device and by nothing else.
+     *
+     * A click is the Tab that lands on the control and the Enter that fires it,
+     * so the key half of the pair has to start from the stop the click would
+     * have moved to -- otherwise the arrow that steps a stepper reaches whatever
+     * the keyboard happened to be standing on. A target with no stop is reached
+     * by a named key from the screen itself (a card, a printed hint, the pit
+     * crew), so the screen's own catcher gets the keyboard and the click does
+     * not move it either.
+     */
+    function armKeyboard(screen, hit) {
+      screen.forceActiveFocus()
+      if (screen.focusTarget)
+        screen.focusTarget.forceActiveFocus(Qt.TabFocusReason)
+      if (hit && hit.stop)
+        hit.stop.forceActiveFocus(Qt.MouseFocusReason)
+    }
+
+    readonly property var keyCodes: ({
+      "tab": Qt.Key_Tab, "backtab": Qt.Key_Backtab, "up": Qt.Key_Up,
+      "down": Qt.Key_Down, "left": Qt.Key_Left, "right": Qt.Key_Right,
+      "enter": Qt.Key_Return, "return": Qt.Key_Return, "space": Qt.Key_Space,
+      "esc": Qt.Key_Escape, "escape": Qt.Key_Escape, "backspace": Qt.Key_Backspace
+    })
+
+    function keyCodeFor(name) {
+      var key = String(name).toLowerCase()
+      if (suite.keyCodes.hasOwnProperty(key))
+        return suite.keyCodes[key]
+      if (key.length === 1 && key >= "0" && key <= "9")
+        return Qt.Key_0 + (key.charCodeAt(0) - 48)
+      if (key.length === 1 && key >= "a" && key <= "z")
+        return Qt.Key_A + (key.charCodeAt(0) - 97)
+      return -1
+    }
+
+    /**
+     * EVERYTHING THE SCREEN IS, IN ONE STRING.
+     *
+     * Every drawn string with its box, every named item with its box, every
+     * click target with its label and whether it is live, the whole save file,
+     * and the count of every signal the screens have emitted. Nothing here is a
+     * list somebody maintains: it is the same depth-first walk the rest of this
+     * file uses, so a control added tomorrow is inside the comparison tomorrow.
+     *
+     * Not a pixel diff, and on purpose. `grabImage` plus a full-frame compare
+     * costs about six tenths of a second (test_23 is 29 s of this file for that
+     * reason), and it is also the wrong instrument here: two states reached at
+     * different points of a fade differ in pixels for a reason that has nothing
+     * to do with which key was pressed. This reads what the screen SAYS and
+     * where it says it, which is the comparison the harness's own two-drive
+     * evidence has always been made on.
+     */
+    function fingerprint(screen) {
+      var out = []
+      var all = suite.itemsUnder(screen)
+      for (var i = 0; i < all.length; i++) {
+        var item = all[i]
+        if (typeof item.text === "string" && item.font !== undefined
+            && item.textFormat !== undefined && item.horizontalAlignment !== undefined) {
+          if (!suite.drawn(item, screen) || item.text.length === 0)
+            continue
+          var p = item.mapToItem(root, 0, 0)
+          out.push("text|" + Math.round(p.x) + "|" + Math.round(p.y) + "|"
+                   + String(item.text).replace(/\n/g, " "))
+          continue
+        }
+        if (item.isClickTarget === true) {
+          out.push("hit|" + item.label + "|" + (suite.usable(item, screen) ? 1 : 0)
+                   + "|" + item.key)
+          continue
+        }
+        // A named item is recorded as PRESENT OR NOT, and not by its box. The
+        // garage's stall is a turntable: the kart's own plate and digits sit a
+        // pixel or two from where they sat a frame ago, for ever, whatever the
+        // child pressed. A box would make every comparison on that screen a
+        // coin toss; whether a thing is on the screen at all is the fact this
+        // is here for, and the strings above carry the layout.
+        if (String(item.objectName).length > 0)
+          out.push("item|" + item.objectName + "|" + (suite.drawn(item, screen) ? 1 : 0))
+      }
+      out.push("settings|" + JSON.stringify(Store.settings))
+      out.push("records|" + JSON.stringify(Store.records))
+      if (typeof screen.stopIndex === "function")
+        out.push("stop|" + screen.stopIndex())
+      out.push("signals|" + root.raceRequests + "|" + root.leaveRequests + "|"
+               + root.againRequests + "|" + root.garageRequests + "|" + root.cardsUsed
+               + "|" + root.countdownAborts + "|" + root.raceLeaves)
+      return out.join("\n")
+    }
+
+    /** The first line the two states disagree on, said in one sentence. */
+    function firstDifference(a, b) {
+      var left = String(a).split("\n")
+      var right = String(b).split("\n")
+      for (var i = 0; i < Math.max(left.length, right.length); i++) {
+        var l = i < left.length ? left[i] : "(nothing)"
+        var r = i < right.length ? right[i] : "(nothing)"
+        if (l !== r)
+          return "showing " + JSON.stringify(r) + " where the click left it showing "
+                 + JSON.stringify(l)
+      }
+      return "in a state this comparison cannot tell from the click's"
     }
 
     // DIRECTION TWO, ORACLE THREE: A PRINTED KEY IS A PROMISE.
@@ -1092,6 +1490,15 @@ Item {
                   list[s].name + ": three clicks on \"" + label + "\", 16 ms apart,"
                   + " did " + (after - before) + " destructive things. A double-click"
                   + " is what a child does with a mouse and there is no undo in this game.")
+          // AND THE COUNTER IS PUT AWAY. `var` is function-scoped in this
+          // dialect, so `acts` and `bump` are ONE variable across every turn of
+          // this loop: a connection left behind by an earlier target went on
+          // incrementing the counter the current one is read from. It never
+          // showed until round four made the question's two answers destructive
+          // -- two destructive controls on one screen, both of which survive
+          // their own press -- and then one click on RESET counted as two.
+          for (var d = 0; d < armed.length; d++)
+            armed[d].acted.disconnect(bump)
           suite.enter(list[s])
         }
       }

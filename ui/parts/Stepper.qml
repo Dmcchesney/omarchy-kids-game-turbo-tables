@@ -127,6 +127,17 @@ Item {
         label: stepper.name
         does: "put the keyboard on " + stepper.name
         key: "Tab"
+        // ROUND 4. Said out loud at last: this target takes NO ACTION, it only
+        // moves the keyboard, which is what `focusOnly` has meant since round
+        // two on the race's answer box. It was left unmarked here, and the
+        // crossover in `test_29` is what found it -- pressing the Tab this
+        // column names walks the keyboard PAST this stop, so the column was
+        // naming the key that reaches the control rather than the key that does
+        // what the click does. There is no such key, because a click here does
+        // nothing but arrive. `key` goes on saying Tab, because Tab is how a
+        // child gets here, and `focusOnly` says why that is not a claim about an
+        // action.
+        focusOnly: true
       }
     }
 

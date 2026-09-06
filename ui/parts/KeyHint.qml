@@ -82,7 +82,15 @@ Item {
   property string name: ""
   property string does: ""
   property string key: ""
+  // ROUND 4. The presses that reach this hint's own state, when they are not
+  // one press of the first key `key` names. See `ui/parts/Clickable.qml`.
+  property var keyRoute: null
+  property string keyGap: ""
   property bool destructive: false
+  // ROUND 4. The action this hint performs, so that two controls doing the same
+  // destructive thing share one guard and a key handler doing it is refused by
+  // the same press. See `ui/parts/Actions.qml`.
+  property var guards: []
   property Item stop: null
   property string help: ""
 
@@ -148,7 +156,10 @@ Item {
     label: hint.name.length > 0 ? hint.name : hint.action.toLowerCase()
     does: hint.does
     key: hint.key
+    keyRoute: hint.keyRoute
+    keyGap: hint.keyGap
     destructive: hint.destructive
+    guards: hint.guards
     onActed: hint.tapped()
   }
 }

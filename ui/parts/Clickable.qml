@@ -67,6 +67,55 @@ MouseArea {
   // the screen when it finds one.
   property string key: ""
 
+  // ------------------------------------------------------------- ROUND 4
+  //
+  // THE KEY COLUMN IS CHECKED FOR BEING *TRUE*, AND THIS IS WHAT MAKES THAT
+  // POSSIBLE.
+  //
+  // A critic set `ui/parts/ActionButton.qml`'s `key: "Enter or Space"` to
+  // `key: "Escape"` -- so READY UP, LEAVE, RACE AGAIN, GARAGE, BACK and all
+  // three RESETs declared that Escape was the key that does what a click does
+  // -- and the whole suite stayed green and `--print-controls` went on printing
+  // `parity verdict PASS`. The column was checked for being NON-EMPTY (test_01)
+  // and for naming keys a keyboard has (test_05, `dev/KeyHints.js`). Nothing
+  // anywhere checked that the named key DID THE NAMED THING. That is the
+  // central promise of this piece -- a click does what its key does -- and it
+  // was carried by a string nobody verified.
+  //
+  // `test_29` now crosses the two drive routes over EVERY control: it clicks
+  // the target and photographs the screen, re-enters the same state, presses
+  // the keys from the keyboard, and requires the two states to be identical.
+  // `keyRoute` is what makes that mechanical rather than hand-written.
+  //
+  //   [] (the default)  press the FIRST key `key` names, once. True of almost
+  //                     every control in this game: a button, a settings row, a
+  //                     stepper arrow, a card, a printed key hint.
+  //
+  //   a list of names   the presses that reach this control's own state, in
+  //                     order, in the vocabulary `dev/KeyHints.js` parses and
+  //                     `dev/Pointer.qml` posts: ["right"], ["right", "enter"],
+  //                     eight "right"s for the eighth paint.
+  //
+  // The second form is not an escape hatch, it is the honest shape of a control
+  // that PICKS a member of a set the keys STEP through. A click on the eighth
+  // paint swatch is one press; the keys reach that same swatch in eight, and
+  // the check presses eight and then demands the same screen. `key` goes on
+  // saying what a child reads -- "Left, Right" -- and this says what a machine
+  // presses, so neither has to lie to satisfy the other.
+  //
+  // `null` is "not declared": the default route above. A declared EMPTY list
+  // is a route of no presses at all -- the swatch that is already painted, the
+  // answer that is already armed -- and the two are different claims, so they
+  // are different values.
+  property var keyRoute: null
+
+  // A control whose key route cannot be walked, and WHY, in words that go in
+  // the parity table rather than in a report. Non-empty is a declared gap:
+  // `test_29` counts them and prints them, and the harness's click table shows
+  // the reason in the key column, so a hole is visible on the evidence a reader
+  // is handed rather than absent from it.
+  property string keyGap: ""
+
   // ------------------------------------------------------------- ROUND 2
   //
   // WHAT A SECOND CLICK DOES, AND WHY IT IS A PROPERTY OF THE TARGET.
@@ -95,33 +144,31 @@ MouseArea {
   // second lock on the control that CAN.
   property bool destructive: false
 
-  // 400 ms is Qt's own default `mouseDoubleClickInterval` on every platform
-  // this plugin runs on, and it is what a double-click means. A number rather
-  // than a read of `styleHints` on purpose: the guard has to be the same in a
-  // test, in the harness and on the child's machine, and a platform that set a
-  // 900 ms interval would make a deliberate second press feel broken.
-  readonly property int guardMs: hit.destructive ? 400 : 0
-
-  // The guard is a TIMER rather than two readings of a clock, and the reason is
-  // the repository's own scanner: `npm run check:readme` asserts that no plugin
-  // file may read the wall clock at all, unconditionally, because this game
-  // stores no dates anywhere -- and the scanner reads comments too, so this one
-  // does not spell the call either. A timer needs no clock to subtract from: it
-  // is running or it is
-  // not -- and "is the guard up" is then a property a test can read directly
-  // instead of a difference it has to reconstruct.
-  Timer {
-    id: guard
-    interval: hit.guardMs
-    repeat: false
-  }
+  // ------------------------------------------------------------- ROUND 4
+  //
+  // THE GUARD IS NOT HERE ANY MORE, AND THAT IS THE FIX.
+  //
+  // Round two's guard was a `Timer` on this file, keyed on nothing but this
+  // target: a second press was refused when it arrived at THIS control, from
+  // THE POINTER. A critic measured what that misses, and it was four defects
+  // with one cause -- a control the child cannot press twice is not the same
+  // thing as an ACTION the child cannot do twice, and the second half of a
+  // double-click lands on a pixel rather than on a name. See the whole story in
+  // `ui/parts/Actions.qml`.
+  //
+  // `guards` names the action this target performs. Two controls that perform
+  // the same one share a name and therefore share a guard; a KEY handler that
+  // performs it passes the same names to `Actions.take` and is refused by the
+  // same press. A destructive target with no name is a guard nobody set, and
+  // `test_30` fails the build on one.
+  property var guards: []
 
   // How many presses this target has refused as repeats. Here so a test can
-  // asserting the refusal HAPPENED rather than inferring it from a state that
-  // did not change -- the two are different when the state would not have
-  // changed anyway.
+  // assert the refusal HAPPENED rather than infer it from a state that did not
+  // change -- the two are different when the state would not have changed
+  // anyway. The count is per target; the guard it comes from is shared.
   property int refusedRepeats: 0
-  readonly property bool guarding: guard.running
+  readonly property bool guarding: Actions.guarding(hit.guards)
 
   // How many presses this target has ACCEPTED. The repeat check reads this
   // rather than a screen state, because "did the second press act" and "did the
@@ -169,7 +216,18 @@ MouseArea {
   signal acted()
 
   anchors.fill: parent
-  hoverEnabled: true
+  // ROUND 4 -- A BARRIER EATS PRESSES, AND IT MAY NOT EAT THE POINTER.
+  //
+  // `ui/parts/Confirm.qml`'s extent outlives the question by one double-click
+  // interval, so the second half of a double-click on the question's own footer
+  // cannot land on the row behind it. With `hoverEnabled` on, that extent also
+  // swallowed HOVER over the whole window for those 400 ms: a critic measured a
+  // settings row that hovers at rest reading `hovered = false` under a
+  // stationary pointer, with the scrim and the sheet already invisible and
+  // nothing on the screen to explain it. Four tenths of a second of dead
+  // pointer over 1920 x 1080 is a smaller version of the complaint this whole
+  // piece exists to answer. A barrier takes presses; nothing else.
+  hoverEnabled: !hit.barrier
   // Left only. A right-click is the desktop's, not the game's, and a middle
   // click on a child's trackpad is usually an accident.
   acceptedButtons: Qt.LeftButton
@@ -183,13 +241,14 @@ MouseArea {
     if (hit.barrier)
       return
     // The whole press is refused, focus included: a control that moved the
-    // keyboard on a press it did not act on would be half a press.
-    if (guard.running) {
+    // keyboard on a press it did not act on would be half a press. The guard
+    // that refuses it belongs to the ACTION, so this is the same refusal a key
+    // handler performing the same action gets, and the same one the control
+    // that REPLACES this one under the pointer gets.
+    if (!Actions.take(hit.guards)) {
       hit.refusedRepeats += 1
       return
     }
-    if (hit.guardMs > 0)
-      guard.restart()
     hit.actedCount += 1
     if (hit.stop)
       hit.stop.forceActiveFocus(Qt.MouseFocusReason)

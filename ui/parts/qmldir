@@ -4,3 +4,8 @@ singleton Glyphs 1.0 Glyphs.qml
 # The sound cue table and the one seam a sound is played through (piece F).
 # A singleton for the same reason Glyphs is: one copy, read from three files.
 singleton Sfx 1.0 Sfx.qml
+# PIECE M ROUND 4. The repeat guard, which is a property of the ACTION and not
+# of the control: two controls that perform the same destructive thing share one
+# guard, and a key handler consults the same one a click does. A singleton
+# because there is one child, one pointer and one double-click interval.
+singleton Actions 1.0 Actions.qml

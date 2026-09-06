@@ -115,6 +115,13 @@ FocusScope {
       event.accepted = true
     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                || event.key === Qt.Key_Space) {
+      // ROUND 4. The same guard the two answer chips and the printed
+      // `⏎  ANSWER` line take. Answering is the action; which device sent the
+      // press is not part of it. See `ui/parts/Actions.qml`.
+      if (!Actions.take(["confirmAnswer"])) {
+        event.accepted = true
+        return
+      }
       if (confirm.choice === 1)
         confirm.confirmed()
       else
@@ -265,6 +272,23 @@ FocusScope {
               label: modelData.label
               does: "answer " + modelData.label
               key: "Left, Right, then Enter"
+              // ROUND 4. The column says what a child reads; this says what a
+              // machine presses, and they are the same route. The keyboard
+              // reaches an answer in two beats -- arm it, give it -- so a click
+              // on the answer that is NOT armed is Right then Enter, and a click
+              // on the one that is armed is Enter alone. Written off `choice`
+              // rather than off the index so it stays true whichever answer the
+              // question opened on. See `ui/parts/Clickable.qml`.
+              keyRoute: modelData.index === confirm.choice
+                        ? ["enter"] : ["right", "enter"]
+              // ROUND 4. GIVING THE ANSWER IS ONE ACTION WITH THREE CONTROLS ON
+              // IT: this chip, the other chip, and the printed `⏎  ANSWER` line
+              // below -- and the Enter key, which takes the same guard in the
+              // handler at the top of this file. They share one name, so a
+              // second press inside the double-click interval cannot answer a
+              // second question that has taken this one's place.
+              destructive: true
+              guards: ["confirmAnswer"]
               onActed: {
                 confirm.choice = modelData.index
                 if (modelData.index === 1)
@@ -318,6 +342,7 @@ FocusScope {
                                                   : confirm.cancelLabel)
           key: "Enter"
           destructive: true
+          guards: ["confirmAnswer"]
           help: "Gives the answer marked with the arrow, which is "
                 + (confirm.choice === 1 ? confirm.confirmLabel : confirm.cancelLabel)
                 + ". Enter does it too."

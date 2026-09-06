@@ -1194,25 +1194,26 @@ FocusScope {
       var key = event.key
 
       if (key === Qt.Key_Escape) {
-        // ROUND 3 -- THE GUARD IS NOT ONE-SIDED, ON THE ONE CONTROL WHERE THAT
-        // MATTERS.
+        // ROUND 4 -- THE GUARD IS THE ACTION'S, AND IT DOES NOT CARE WHICH HAND
+        // THE PRESS CAME FROM.
         //
-        // `ui/parts/Clickable.qml` refuses a second PRESS inside a double-click
-        // interval, and a critic pointed out that `guard.running` was consulted
-        // in exactly one place -- the click handler -- so click->click was
-        // guarded and click->key was not. On three of the four screens that is
-        // harmless. Here it is not, and the reason is the note beside
-        // `leaveHint`: this control CHANGES ITS MEANING under the pointer. A
-        // click on `ESC  BACK` while a card is chosen puts the card back and
-        // arms the guard; an Escape 100 ms later found the card already back,
-        // took the other branch, and LEFT THE RACE. That is the identical
-        // walking repeat the guard exists for, one input device over.
+        // Round three read `leaveHint.guarding` here, which patched exactly one
+        // of the three ways this hazard fires and left the other two. A critic
+        // measured all three: a click on the hand panel's own `ESC  BACK` chip
+        // followed by an Escape LEFT THE RACE (`raceLeaves = 1`) -- because the
+        // chip is a different control with a different guard; a double-click on
+        // that chip put the card back and then CHOSE CARD 1 at the same pixel;
+        // and an Escape followed by a click on this screen's ESC line left the
+        // race, because the key armed nothing at all.
         //
-        // Key->key is deliberately still unguarded: a child pressing Escape
-        // twice on purpose means it twice. What is refused is the tail of a
-        // press the POINTER made, which is the only press no hand meant to
-        // send twice.
-        if (leaveHint.guarding) {
+        // `escape` is the name of the gesture. The chip declares it, the ESC
+        // line declares it, and this branch takes it -- so whichever of the
+        // three routes the first press came by, the second one inside the
+        // double-click interval is refused. Key->key is refused too, and that is
+        // the change: "indifferent to the route" cannot have an exception for
+        // the route nobody measured. A deliberate second Escape lands 400 ms
+        // later and still leaves; `test_28` holds both halves of that.
+        if (!Actions.take(["escape"])) {
           event.accepted = true
           return
         }
@@ -1286,6 +1287,14 @@ FocusScope {
       }
 
       if (key === Qt.Key_H) {
+        // ROUND 4. The same guard the printed `H  PIT CREW` line takes, for the
+        // same reason: this spends one of the child's questions and there is no
+        // undo, so a press that is the tail of a press already made -- from
+        // either hand -- does nothing.
+        if (!Actions.take(["pitCrew"])) {
+          event.accepted = true
+          return
+        }
         // The hint moves the fact on. Every claim on the old fact's field dies
         // with it, or it eats the first digit the child types at the new one.
         race.dropPending()
@@ -2621,6 +2630,23 @@ FocusScope {
       does: "show the answer and move on"
       key: "H"
       help: "Shows the answer and moves on. The H key does it too."
+      // ROUND 4 -- THIS SPENDS SOMETHING THE CHILD CANNOT GET BACK.
+      //
+      // A critic clicked it three times, sixteen milliseconds apart, and
+      // watched `pitCrewCount` go 0 -> 1 -> 3 with `refusedRepeats` at zero.
+      // The pit crew consumes the question in front of the child, adds to the
+      // count the results screen prints as ANSWERS SHOWN, and feeds the
+      // standings tiebreak in `engine/engine.mjs`. There is no undo, and it is
+      // the OTHER control in this game that stays exactly where it is after it
+      // acts -- so the second half of a double-click always reaches it.
+      //
+      // It was not marked, and `test_19` walks `Clickable.destructive`, so an
+      // unmarked destructive control was not merely untested: it was outside
+      // the test's subject. The declaration is a hand-set boolean and that is
+      // still true; what is new is that a destructive control with no guard now
+      // fails `test_30` rather than passing quietly.
+      destructive: true
+      guards: ["pitCrew"]
       // The same three calls the `H` branch of `keys` makes, in the same
       // order and for the same reason: the hint moves the fact on, so every
       // claim on the old fact's field has to die with it.
@@ -2668,6 +2694,15 @@ FocusScope {
       // second press -- so it is guarded on every press, and the `does` column
       // goes on telling the truth about what ONE press does.
       destructive: true
+      // ROUND 4. `escape` is the BACK-OUT GESTURE and not this control: the hand
+      // panel's own `ESC  BACK` chip performs the same thing, and so does the
+      // Escape key in the branch above. One name, one guard, three routes --
+      // which is what stops a click here followed by an Escape, an Escape
+      // followed by a click here, or a double-click that walks onto the chip
+      // that took this one's place, from leaving a race the child was in the
+      // middle of. Round three read `leaveHint.guarding` from the key handler to
+      // patch one of those three; this is the fix that note deferred.
+      guards: ["escape"]
       help: leaveHint.putsCardBack
             ? "Puts the chosen card back. All three cards are still yours."
               + " The Escape key does it too."

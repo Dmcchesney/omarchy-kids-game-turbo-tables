@@ -111,6 +111,20 @@ Item {
         label: "paint " + Theme.paintName(index)
         does: "paint the kart " + Theme.paintName(index)
         key: "Left, Right"
+        // ROUND 4. The keys STEP through the eight paints and the click LANDS on
+        // one, so "the key that does the same thing" is Right pressed as many
+        // times as this swatch is round the ring from the one that is on. That
+        // is what `test_29` presses before it demands the same screen, and it is
+        // why this control can be crossed over at all rather than declared a
+        // gap: eight presses of Right from the chosen paint reach this swatch
+        // exactly, and Escape reaches it never.
+        keyRoute: {
+          var steps = ((index - grid.selected) % grid.count + grid.count) % grid.count
+          var route = []
+          for (var i = 0; i < steps; i++)
+            route.push("right")
+          return route
+        }
         onActed: grid.picked(index)
       }
 

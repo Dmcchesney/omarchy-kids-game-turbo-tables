@@ -176,18 +176,21 @@ FocusScope {
       return [{ "keys": "1 2 3", "action": "CHOOSE A CARD", "act": "chooseFirst",
                 "name": "Choose a card", "does": "choose the first card",
                 "key": "1", "warn": false, "destructive": false,
+                "guards": ["handFooter"],
                 "help": "Choose the first card. The 1, 2 and 3 keys choose a card each." }]
     if (picker.deferred)
       return [{ "keys": "⌫", "action": "BACK TO THE CARD", "act": "undoDigit",
                 "name": "Back to the card",
                 "does": "take the digit back out of the answer and keep the card",
                 "key": "Backspace", "warn": false, "destructive": false,
+                "guards": ["handFooter"],
                 "help": "Takes the " + picker.pendingDigit + " back out of the answer"
                         + " box and keeps the card chosen. Backspace does it too." },
               { "keys": "⏎", "action": "ANSWER " + picker.pendingDigit, "act": "submit",
                 "name": "Answer the parked digit",
                 "does": "send " + picker.pendingDigit + " as the answer",
                 "key": "Enter", "warn": false, "destructive": true,
+                "guards": ["handFooter"],
                 "help": "Sends " + picker.pendingDigit + " as the answer instead."
                         + " Enter does it too." },
               picker.backHint()]
@@ -197,12 +200,26 @@ FocusScope {
       return [{ "keys": "⏎", "action": "SEND THE ANSWER", "act": "submit",
                 "name": "Send the answer", "does": "send what is in the answer box",
                 "key": "Enter", "warn": false, "destructive": true,
+                "guards": ["handFooter"],
                 "help": "Sends what is in the answer box. Enter does it too." },
               picker.backHint()]
     if (picker.targeting)
       return [{ "keys": "◀ ▶", "action": "RIVAL", "act": "nextRival",
                 "name": "Next rival", "does": "aim at the next rival",
                 "key": "Left, Right", "warn": false, "destructive": false,
+                // ROUND 4. This chip aims at the NEXT rival, so of the two keys
+                // it prints only Right does what it does; Left goes the other
+                // way and is on the chip because the child has both. The
+                // crossover presses the one that matches. See
+                // `ui/parts/Clickable.qml`.
+                "keyRoute": ["right"],
+                // AND NOT GUARDED, on purpose. This is a CHOOSING control: a
+                // child clicking it three times means "three rivals on", and a
+                // guard here would be the maintainer's other complaint -- a
+                // control that has to be pressed several times -- pointing the
+                // other way. It also does not replace the footer, so nothing
+                // takes its place under the pointer.
+                "guards": [],
                 "help": "Aims at the next rival. Left and right do it too." },
               picker.useHint("USE"),
               picker.backHint()]
@@ -217,6 +234,7 @@ FocusScope {
                                ? String(Engine.CARDS[picker.chosenCard].label)
                                : "the card"),
              "key": "Enter", "warn": false, "destructive": true,
+             "guards": ["handFooter"],
              "help": "Uses the chosen card. Using one spends all three."
                      + " Enter does it too." }
   }
@@ -225,6 +243,23 @@ FocusScope {
     return { "keys": "ESC", "action": "BACK", "act": "back",
              "name": "Put the card back", "does": "put the chosen card back",
              "key": "Escape", "warn": warn === true, "destructive": false,
+             // ROUND 4 -- THE CHIP A CRITIC BROKE THE RACE WITH, TWICE.
+             //
+             // Putting a card back costs nothing, so this is not destructive and
+             // never was. It is guarded all the same, and by two names, because
+             // of what happens AROUND it:
+             //
+             //   `escape` -- it is the same back-out gesture the race's own ESC
+             //   line and the Escape key perform. Click this, press Escape, and
+             //   the race used to END: the card was already back, so the key
+             //   took the other branch. Measured, `raceLeaves = 1`.
+             //
+             //   `handFooter` -- this chip REPLACES ITSELF. The instant the card
+             //   goes back the footer redraws as `1 2 3  CHOOSE A CARD` at the
+             //   same pixel, and the second half of a double-click chose card 1.
+             //   That is round two's walking-repeat defect, verbatim, one
+             //   control to the left of where round two fixed it.
+             "guards": ["escape", "handFooter"],
              "help": "Puts the chosen card back. All three cards are still yours."
                      + " Escape does it too." }
   }
@@ -937,6 +972,20 @@ FocusScope {
                   label: "aim " + String(modelData.name)
                   does: "aim at " + String(modelData.name)
                   key: "Left, Right"
+                  // ROUND 4. The arrows STEP round the rivals and a click LANDS
+                  // on one, so the crossover presses Right as many times as this
+                  // tag is round the ring from the aim that is on. See
+                  // `ui/parts/Clickable.qml`.
+                  keyRoute: {
+                    var count = picker.rivals ? picker.rivals.length : 0
+                    if (count <= 0)
+                      return []
+                    var steps = ((model.index - picker.targetIndex) % count + count) % count
+                    var route = []
+                    for (var i = 0; i < steps; i++)
+                      route.push("right")
+                    return route
+                  }
                   onActed: picker.tapRival(model.index)
                 }
               }
@@ -1030,6 +1079,8 @@ FocusScope {
             name: modelData.name
             does: modelData.does
             key: modelData.key
+            keyRoute: modelData.keyRoute !== undefined ? modelData.keyRoute : null
+            guards: modelData.guards !== undefined ? modelData.guards : []
             destructive: modelData.destructive === true
             help: modelData.help
             onTapped: picker.footerAct(modelData.act)

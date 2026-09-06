@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import qs.Commons
 import "../../ui"
+import "../../ui/parts"
 import "../../engine/engine.mjs" as Engine
 
 // The race screen's keyboard, driven with real key events only.
@@ -128,6 +129,10 @@ Item {
     // ---------------------------------------------------------------- setup
     function fresh(seedValue) {
       race.seed = seedValue
+      // ROUND 4 of piece M. The repeat guard is shared and it outlives a case
+      // (`ui/parts/Actions.qml`), so a case that ended on Escape or H would have
+      // the next one's first press refused as the tail of it.
+      Actions.clear()
       // The AI karts are frozen for the length of a case. A rival's Wrench is a
       // two-second field lock, and a lock landing mid-measurement would make
       // these rows say something about the rivals rather than about the keys.
@@ -160,9 +165,20 @@ Item {
     function hintUntil(wanted) {
       var guard = 0
       while (guard < 200 && !wanted(tc.answerString())) {
+        // WALKING THE DECK IS NOT A CHILD PRESSING A KEY. Piece M round 4 made
+        // the pit crew a guarded action: it spends one of the child's questions
+        // and there is no undo, so a second press inside a double-click interval
+        // is refused whichever hand it came from. This loop presses H as fast as
+        // a test framework can post events, which is nothing a child does; it is
+        // a deck cursor, so it puts the guard down between presses rather than
+        // waiting 400 ms two hundred times. `test_31` in
+        // `tests/qml/tst_mouse_parity.qml` is where the guard itself is held to
+        // its rule.
+        Actions.clear()
         tc.pressKey(Qt.Key_H)
         guard += 1
       }
+      Actions.clear()
       verify(wanted(tc.answerString()), "reached a fact whose answer fits the shape")
     }
 
@@ -521,8 +537,29 @@ Item {
       compare(after.chosen, -1, "E: the card was put back")
       compare(root.leaveRequests, 0, "E: the first Escape did not leave the race")
       tc.costNothing(before, after, "E")
+      // ROUND 4 of piece M -- AND THE SECOND ESCAPE, 16 ms LATER, DOES NOT.
+      //
+      // This used to assert that it did. The back-out gesture is a guarded
+      // action now (`escape`, in `ui/parts/Actions.qml`) and the guard is
+      // indifferent to which hand the press came from, because the hazard is
+      // not the device: this one control CHANGES ITS MEANING between the two
+      // presses -- BACK while a card is chosen, LEAVE the moment it is back --
+      // and a child who taps Escape twice did not mean to abandon a race they
+      // were in the middle of. Round three guarded the pointer's half of that
+      // and left the keyboard's; a critic then found the same defect from three
+      // more directions, all with the one cause.
       tc.press("X")
-      compare(root.leaveRequests, 1, "E: the second Escape left the race")
+      compare(root.leaveRequests, 0,
+              "E: a second Escape 16 ms after the one that put the card back left the"
+              + " race. The line says BACK when the first press lands and LEAVE by the"
+              + " time the second one does, and there is no undo.")
+      // A DELIBERATE second Escape still leaves. A guard that stayed up would be
+      // the maintainer's other complaint -- a control that has to be pressed
+      // several times -- pointing the other way.
+      wait(450)
+      tc.press("X")
+      compare(root.leaveRequests, 1,
+              "E: an Escape after the double-click interval did not leave the race")
     }
 
     // E2 -- Escape on a DEFERRED digit, the one-digit shape.
