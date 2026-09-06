@@ -273,11 +273,48 @@ Item {
       picker.clearChoice()
       picker.slamBorn = -1e9
       settings.pending = ""
-      // And the 400 ms in which the settings page stays switched off after a
-      // question is answered, so the press that answered cannot reach the
-      // screen behind it. A test that drove the answer and then wants the
-      // screen back is not that press.
-      settings.justAnswered = false
+      // ROUND 3, and it is the same class of leak as the two above. The one
+      // question in the game goes on swallowing POINTER presses over its own
+      // extent for one double-click interval after it closes -- that is what
+      // stops the second half of a double-click on `⏎  ANSWER` landing on the
+      // row underneath. A case that answered a question therefore leaves that
+      // window open into the next case, where it eats the first click. Waited
+      // out rather than reached into: the window is real and the next case has
+      // to start after it, exactly as a child's second click does.
+      suite.waitOutTheModalTail()
+
+    }
+
+    /**
+     * Is the question's extent still swallowing presses? Read off the tree
+     * rather than off a property of the screen, and deliberately NOT through
+     * `usable()`: the settings screen itself is usually hidden at this point,
+     * and what is being asked about is the question's own lifetime, not the
+     * screen's.
+     */
+    function modalTailRunning() {
+      var targets = suite.clickTargetsIn(settings)
+      for (var i = 0; i < targets.length; i++) {
+        // The question publishes its own lifetime as `consuming`. Read from
+        // there rather than from the barrier's `visible`, which is QML's
+        // EFFECTIVE visibility and therefore false whenever the settings screen
+        // is not the screen on show -- which, in `init()`, it never is.
+        if (targets[i].barrier === true && targets[i].parent
+            && targets[i].parent.consuming === true)
+          return true
+      }
+      return false
+    }
+
+    function waitOutTheModalTail() {
+      var guard = 0
+      while (guard < 60 && suite.modalTailRunning()) {
+        wait(16)
+        guard += 1
+      }
+      verify(!suite.modalTailRunning(),
+             "the question's extent is still swallowing presses a second after the"
+             + " question closed; the tail is not a double-click interval any more")
     }
 
     // ------------------------------------------------------------------
@@ -401,13 +438,21 @@ Item {
       return false
     }
 
-    /** The first click target at or above this item. */
+    /**
+     * The first click target at or above this item.
+     *
+     * ROUND 3. A barrier is not one: `ui/parts/Confirm.qml`'s extent is an
+     * ancestor of every word on the question's sheet, and if it counted here a
+     * dead key hint inside the one dialog in the game would report a click
+     * target for ever.
+     */
     function clickTargetOver(item, screen) {
       var node = item
       while (node) {
         var kids = node.children
         for (var i = 0; kids && i < kids.length; i++) {
-          if (kids[i].isClickTarget === true && suite.usable(kids[i], screen))
+          if (kids[i].isClickTarget === true && kids[i].barrier !== true
+              && suite.usable(kids[i], screen))
             return kids[i]
         }
         node = node.parent
@@ -464,7 +509,7 @@ Item {
     function hasClickTargetUnder(item, screen) {
       var targets = suite.clickTargetsIn(item)
       for (var i = 0; i < targets.length; i++) {
-        if (suite.usable(targets[i], screen))
+        if (targets[i].barrier !== true && suite.usable(targets[i], screen))
           return true
       }
       return false
@@ -525,6 +570,12 @@ Item {
           var hit = targets[i]
           if (!suite.usable(hit, list[s].item))
             continue
+          // ROUND 3. A BARRIER IS NOT A PATH IN EITHER DIRECTION and is not
+          // asked for a key: it exists to swallow a press, which is what makes
+          // `ui/parts/Confirm.qml` modal. It is enumerated in the harness's
+          // click table with `barrier` in the kind column.
+          if (hit.barrier)
+            continue
           checked += 1
           // ROUND 3. The one declared exception, and it was missing here while
           // the harness's own walk had carried it since round one: a FOCUS-ONLY
@@ -578,7 +629,7 @@ Item {
         var targets = suite.clickTargetsIn(list[s].item)
         for (var i = 0; i < targets.length; i++) {
           var hit = targets[i]
-          if (!suite.usable(hit, list[s].item))
+          if (!suite.usable(hit, list[s].item) || hit.barrier)
             continue
           checked += 1
           if (hit.focusOnly) {
@@ -1158,6 +1209,58 @@ Item {
               "a setting behind the question changed")
       compare(Store.setting("scanlines"), scanlinesBefore,
               "a setting behind the question changed")
+    }
+
+    // ==================================================================
+    // ROUND 3. AND THE KEYBOARD DOES NOT PAY FOR IT.
+    // ==================================================================
+    //
+    // The other half of the case above, and the reason round two's fix had to
+    // go. That fix switched the whole settings page off for 400 ms after every
+    // answer, which took the keyboard with it. Measured by a critic on the
+    // shipped build: a Down 16 ms after answering was not delayed, it was
+    // DROPPED -- the same Down 700 ms later worked -- and for the whole window
+    // `focusedName()` was empty, so the focus ring was off the screen
+    // altogether. Four tenths of a second of nothing, after every confirmation,
+    // with no ring to say where the keyboard was.
+    //
+    // A mouse hazard must not be paid for by the other input device. This case
+    // is the one that fails if anyone ever pays for it that way again: the
+    // question is answered WITH THE MOUSE, and the very next keystroke, on the
+    // same turn of the event loop, has to move the focus the way it always does.
+    function test_26_the_keyboard_is_not_frozen_by_answering_a_question() {
+      root.showing = "settings"
+      settings.forceActiveFocus()
+      settings.focusStop(0)
+      suite.settleFrame()
+
+      suite.clickNamed(settings, "RESET GARAGE RECORDS")
+      suite.settleFrame()
+      verify(settings.confirming, "the reset question did not open")
+
+      suite.clickNamed(settings, "Give the armed answer")
+      verify(!settings.confirming, "the click on `⏎  ANSWER` did not answer the question")
+
+      // THE RING IS SOMEWHERE. `--focus -1` exists to photograph the state in
+      // which nothing on a screen holds focus, and `ui/Settings.qml`'s own
+      // comment calls it a state no child should ever be in. Round two left the
+      // child in it for 400 ms after every answer.
+      verify(settings.stopIndex() >= 0,
+             "nothing on the settings screen holds the keyboard the instant a question"
+             + " is answered, so there is no focus ring anywhere on the screen")
+      var landed = settings.stopIndex()
+      compare(settings.focusedName(), settings.focusName(landed))
+
+      keyClick(Qt.Key_Down)
+      verify(settings.stopIndex() !== landed,
+             "a Down pressed straight after answering a question moved nothing. The"
+             + " keystroke was not delayed, it was dropped: this screen used to switch"
+             + " itself off for 400 ms after every answer to keep the second half of a"
+             + " double-click off the rows behind the question, and a keyboard user paid"
+             + " for a mouse defect.")
+      keyClick(Qt.Key_Up)
+      compare(settings.stopIndex(), landed,
+              "Up did not come back to the stop the question left the keyboard on")
     }
 
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {

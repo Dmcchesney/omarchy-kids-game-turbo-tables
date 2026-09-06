@@ -103,50 +103,42 @@ FocusScope {
     Qt.callLater(function () { asker.ask() })
   }
 
-  // PIECE M ROUND 2 -- THE SCREEN BEHIND A QUESTION DOES NOT TAKE THE SECOND
-  // HALF OF THE DOUBLE-CLICK THAT ANSWERED IT.
+  // PIECE M ROUND 3 -- THE 400 ms LOCKOUT IS GONE, AND THE DEFECT IT WAS
+  // HIDING IS FIXED WHERE IT LIVES.
   //
-  // The repeat sweep drove three clicks 16 ms apart at the question's own
-  // `⏎  ANSWER` line and watched the RIVALS row behind it go from PRO to
-  // ROOKIE. The first press answered and closed the question, the page
-  // re-enabled on the same turn of the event loop, and the second press --
-  // which no hand meant to send anywhere -- landed on a control that had been
-  // switched off a millisecond earlier.
+  // Round two found a real thing: three clicks 16 ms apart at the question's
+  // own `⏎  ANSWER` line answered the question with the first and, with the two
+  // nobody meant to send, changed the RIVALS row underneath -- because the
+  // question's footer stands on top of that row and the row comes back to life
+  // the instant the question closes.
   //
-  // The hazard is this round's own doing: the question's footer became three
-  // click targets, and they sit over the settings rows. It would be a hazard
-  // for any modal whose controls overlap the screen behind it, so it is fixed
-  // here rather than by moving a line: the page stays switched off for the
-  // length of a double-click after the question closes, which is exactly the
-  // window in which a second press cannot have been meant for it.
-  property bool justAnswered: false
-
-  Timer {
-    id: answerGuard
-    // The same 400 ms `ui/parts/Clickable.qml` uses, and for the same reason.
-    interval: 400
-    onTriggered: {
-      settings.justAnswered = false
-      // AND THE KEYBOARD IS PUT BACK. A disabled item cannot hold active focus,
-      // so the stop `answer()` moved the keyboard to lost it the moment the
-      // page went off; without this the child would come out of the guard with
-      // the keyboard nowhere, which is the state `--focus -1` exists to
-      // photograph and no child should ever be in.
-      //
-      // Only while this screen is the one on show. A timer that grabs the
-      // keyboard 400 ms after the fact would otherwise take it off whatever the
-      // child had moved on to -- which is not hypothetical: it took the focus
-      // ring off the garage in the middle of the next test in the file.
-      if (settings.visible)
-        settings.focusStop(settings.resumeStop)
-    }
-  }
+  // Round two's fix was here, and it was the wrong place and the wrong input
+  // device: this page carried `enabled: !settings.confirming &&
+  // !settings.justAnswered`, so for 400 ms after every answer the whole screen
+  // took nothing at all. A critic measured what that cost: a Down 16 ms after
+  // answering was not delayed, it was DROPPED, and for the length of the window
+  // no item on this screen held focus -- `focusedName()` was empty, the focus
+  // ring was off the screen entirely, which is the state the comment three
+  // lines below `--focus -1` calls one no child should ever be in. A keyboard
+  // user was paying for a mouse defect. The 400 ms timer that put the keyboard
+  // back afterwards was repairing damage this page had done to itself.
+  //
+  // The hazard is a MODAL hazard: a modal whose own controls overlap live
+  // controls behind it. `parts/Confirm.qml` now consumes pointer presses over
+  // its whole extent, for as long as it is up and for one double-click interval
+  // after it closes, which is exactly the window in which a press cannot have
+  // been meant for the screen behind. The rule is the modal's, so any screen
+  // that asks a question gets it; this page has nothing left to do about it and
+  // is switched off only while the question is actually up.
+  //
+  // What the child gets back: the keyboard, immediately. `answer()` puts the
+  // focus on the stop they were on before the question opened, on the same turn
+  // as the answer, and it stays there -- there is no window in which this screen
+  // has no focus ring and no window in which it drops a keystroke.
 
   function answer(yes) {
     var which = settings.pending
     settings.pending = ""
-    settings.justAnswered = true
-    answerGuard.restart()
     var done = (yes && which.length > 0) ? settings.applyReset(which) : false
     settings.focusStop(settings.resumeStop)
     // The banner reports what happened to the file, not what was asked for. A
@@ -352,7 +344,7 @@ FocusScope {
     anchors.margins: settings.px(16)
     color: Theme.panelOnGround
     border.color: Theme.lineStrong
-    enabled: !settings.confirming && !settings.justAnswered
+    enabled: !settings.confirming
 
     readonly property int pad: settings.px(30)
     readonly property int contentX: pad
@@ -758,7 +750,11 @@ FocusScope {
   Confirm {
     id: asker
     anchors.fill: parent
-    visible: settings.confirming
+    // `asking` rather than `visible`: the question has to outlive itself by one
+    // double-click interval to swallow the rest of a double-click aimed at its
+    // own footer, and only it knows how long that is. See the note at the top of
+    // `parts/Confirm.qml`.
+    asking: settings.confirming
     scaleUnit: settings.s
     question: settings.askQuestion
     detail: settings.askDetail

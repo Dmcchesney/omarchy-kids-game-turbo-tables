@@ -18,6 +18,68 @@ import "../"
 FocusScope {
   id: confirm
 
+  // ======================================================================
+  // ROUND 3 -- A MODAL CONSUMES INPUT ACROSS ITS WHOLE EXTENT, AND KEEPS
+  // CONSUMING FOR THE LENGTH OF A DOUBLE-CLICK AFTER IT CLOSES.
+  // ======================================================================
+  //
+  // Round two made this sheet's footer three click targets and left them
+  // standing on the settings rows underneath. At 1920 x 1080 the `⏎  ANSWER`
+  // line is a 104 x 26 target inside the 976 x 106 RIVALS row; at 1366 x 768 it
+  // is 78 x 19 inside 695 x 75. The first click answers the question, the
+  // question goes, the row behind comes back to life on the same turn of the
+  // event loop, and the second and third clicks of a double-click nobody meant
+  // to send change a setting there. A critic drove it and watched RIVALS go
+  // from PRO to ROOKIE.
+  //
+  // Round two's answer was to switch the settings PAGE off for 400 ms after
+  // every answer. That fixed the clicks and broke the keyboard: a Down 16 ms
+  // after answering was not delayed, it was DROPPED, and for the whole 400 ms
+  // no item on the screen held focus -- the focus ring was gone, which is the
+  // state `--focus -1` exists to photograph and no child should ever be in. A
+  // keyboard user was paying for a mouse defect, and the rule was written in
+  // the caller, so a second screen using this question would have had to
+  // remember it.
+  //
+  // The rule belongs here, and it is the ordinary definition of modal: while
+  // this question is up nothing behind it is clickable, whatever the screen
+  // behind did or did not do about switching itself off; and because the rest
+  // of a double-click aimed at this question can still be arriving after it
+  // closes, the extent goes on swallowing for exactly the interval a
+  // double-click means. It swallows POINTER presses only. The keyboard is never
+  // taken away, the focus ring never goes out, and `answer()` puts the keyboard
+  // back on the stop the child was on before the question opened.
+  //
+  // The caller sets `asking` and no longer sets `visible`: this item has to
+  // outlive the question by the length of the tail, and only it knows that.
+  property bool asking: false
+
+  // IS THE EXTENT STILL EATING PRESSES? The question's own lifetime, which is
+  // longer than the question: while it is up, and for one double-click interval
+  // after it closes. Named because it is part of the contract -- a caller, a
+  // walk or a case that wants to know whether a click will reach the screen
+  // behind must be able to ask, and `visible` cannot answer it (QML's `visible`
+  // is the EFFECTIVE one, so it reads false whenever the screen this question
+  // lives on is not the screen on show).
+  readonly property bool consuming: confirm.asking || tail.running
+
+  visible: confirm.consuming
+  enabled: confirm.visible
+
+  Timer {
+    id: tail
+    // The same 400 ms `ui/parts/Clickable.qml` guards a destructive control
+    // with, because it is the same fact about the same hand: Qt's own
+    // `mouseDoubleClickInterval` on every platform this plugin runs on.
+    interval: 400
+    repeat: false
+  }
+
+  onAskingChanged: {
+    if (!confirm.asking)
+      tail.restart()
+  }
+
   property string question: ""
   property string detail: ""
   property string confirmLabel: "RESET"
@@ -69,14 +131,30 @@ FocusScope {
   }
 
   // The scrim. Dark enough that the settings behind read as out of reach and
-  // light enough that the child can still see which screen they are on.
+  // light enough that the child can still see which screen they are on. Drawn
+  // only while the question is up: the tail below is input, not paint, and a
+  // scrim that stayed on the screen for 400 ms after the answer would be a
+  // flicker the child can see.
   Rectangle {
     anchors.fill: parent
+    visible: confirm.asking
     color: Qt.rgba(0, 0, 0, 0.72)
+  }
+
+  // THE EXTENT. Declared before the sheet, so every control of the question
+  // itself sits above it and is pressed normally; everything else that lands
+  // inside this item dies here. See the note at the top of the file for why it
+  // outlives the question by one double-click interval.
+  Clickable {
+    objectName: "clickModalExtent"
+    barrier: true
+    label: "The question's own extent"
+    does: "swallow a press that was not meant for the screen behind"
   }
 
   Rectangle {
     id: sheet
+    visible: confirm.asking
     anchors.centerIn: parent
     width: Math.min(parent.width - confirm.px(80), confirm.px(720))
     height: column.height + confirm.px(56)

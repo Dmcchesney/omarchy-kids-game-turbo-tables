@@ -562,14 +562,22 @@ Window {
     return false
   }
 
-  /** The first click target at or above this item in the tree. */
+  /**
+   * The first click target at or above this item in the tree.
+   *
+   * ROUND 3. A BARRIER IS NOT A WAY TO REACH ANYTHING, so it cannot answer for
+   * a hint or a control. `ui/parts/Confirm.qml`'s extent covers the whole modal
+   * and is an ancestor of every word on the sheet: if it counted, a dead key
+   * hint inside the one dialog in the game would report `yes` here for ever.
+   */
   function clickTargetOver(item) {
     var node = item
     while (node && node !== harness.contentItem) {
       var found = null
       var kids = node.children
       for (var i = 0; kids && i < kids.length; i++) {
-        if (harness.isClickTarget(kids[i]) && harness.effectiveEnabled(kids[i])
+        if (harness.isClickTarget(kids[i]) && kids[i].barrier !== true
+            && harness.effectiveEnabled(kids[i])
             && harness.effectiveOpacity(kids[i]) > 0)
           found = kids[i]
       }
@@ -598,7 +606,7 @@ Window {
   function clickTargetUnder(item) {
     var found = null
     harness.walk(item, function (node) {
-      if (found === null && harness.isClickTarget(node)
+      if (found === null && harness.isClickTarget(node) && node.barrier !== true
           && harness.effectiveEnabled(node)
           && harness.effectiveOpacity(node) > 0)
         found = node
@@ -631,11 +639,27 @@ Window {
     var mouseOnly = 0
     var unpressableKey = 0
     var destructive = 0
+    var barriers = 0
     console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey\tkind")
     for (var i = 0; i < clicks.length; i++) {
       var hit = clicks[i]
       var box = hit.mapToItem(harness.contentItem, 0, 0, hit.width, hit.height)
       var live = harness.effectiveEnabled(hit) && harness.effectiveOpacity(hit) > 0
+      // ROUND 3. A BARRIER IS NOT A PATH IN EITHER DIRECTION. It exists to eat
+      // a press -- `ui/parts/Confirm.qml`'s extent, which is what makes the one
+      // modal in the game modal -- so asking it for the key that does the same
+      // thing is asking the wrong question. It is printed anyway, with `barrier`
+      // in the kind column and its box beside it, because a thing that swallows
+      // presses has to be somewhere a reader can find it.
+      if (hit.barrier === true) {
+        if (live)
+          barriers += 1
+        console.log("click\t" + hit.label + "\t" + Math.round(box.x) + "\t"
+                    + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
+                    + Math.round(box.height) + "\t" + (live ? "yes" : "no")
+                    + "\t" + hit.does + "\t-\tbarrier")
+        continue
+      }
       // A target that is not drawn at all is not a path either way; a DRAWN,
       // ENABLED target with no key behind it is a mouse-only path -- UNLESS it
       // only moves the keyboard. A focus-only target takes no action at all, so
@@ -766,6 +790,7 @@ Window {
     console.log("parity\tprintedKeyHints\t" + hints)
     console.log("parity\tlegendKeyHints\t" + legendHints)
     console.log("parity\tdestructiveTargets\t" + destructive)
+    console.log("parity\tbarriers\t" + barriers)
     console.log("parity\tmouseOnly\t" + mouseOnly)
     console.log("parity\tunpressableKey\t" + unpressableKey)
     console.log("parity\tcontrolsWithoutClick\t" + keyOnly)

@@ -134,13 +134,37 @@ MouseArea {
   // checks for that rather than accepting an empty key column.
   property bool focusOnly: false
 
+  // ------------------------------------------------------------- ROUND 3
+  //
+  // A BARRIER: A TARGET THAT EXISTS TO SWALLOW A PRESS.
+  //
+  // The third kind, and it is not a control at all. `ui/parts/Confirm.qml` is
+  // the one modal in the game, and what makes a modal modal is that it consumes
+  // the pointer over its WHOLE extent -- not only over the sheet, and not only
+  // by whatever the screen behind happens to have done about switching itself
+  // off. Round two left that to the caller: `ui/Settings.qml` disabled its own
+  // page, which worked, and then disabled it for 400 ms LONGER than the
+  // question was up, which took the keyboard with it. A modal's own rule
+  // belongs to the modal.
+  //
+  // A barrier takes the press and stops. It does not act, it does not move the
+  // keyboard, it never lights under the pointer, and it does not offer the hand
+  // a pointing finger. It is not a path to anything, so the parity walk does not
+  // ask it for a key or a stop -- but it IS printed in the click table, with
+  // `barrier` in the kind column, because a thing that eats presses must be
+  // enumerated somewhere a reader can find it.
+  property bool barrier: false
+
   // The duck-type the harness's walk finds. QML has no `instanceof` for a
   // component here, and the walk must not have to know this file's name.
   readonly property bool isClickTarget: true
 
   // Is the pointer over this control? Callers paint their hover state off this
-  // rather than off `containsMouse`, so a disabled target never lights.
-  readonly property bool hovered: hit.containsMouse && hit.enabled
+  // rather than off `containsMouse`, so a disabled target never lights. A
+  // barrier is not a control and never lights: the child is being told that the
+  // question in front of it is the only thing on the screen, and a scrim that
+  // lit up under the pointer would be saying the opposite.
+  readonly property bool hovered: hit.containsMouse && hit.enabled && !hit.barrier
 
   signal acted()
 
@@ -149,9 +173,15 @@ MouseArea {
   // Left only. A right-click is the desktop's, not the game's, and a middle
   // click on a child's trackpad is usually an accident.
   acceptedButtons: Qt.LeftButton
-  cursorShape: Qt.PointingHandCursor
+  cursorShape: hit.barrier ? Qt.ArrowCursor : Qt.PointingHandCursor
 
   onClicked: {
+    // The press dies here. A barrier is the modal saying that nothing behind it
+    // is reachable, so it neither acts nor moves the keyboard, and it does not
+    // count the press as a refused repeat either -- the press was not a repeat
+    // of anything this target did.
+    if (hit.barrier)
+      return
     // The whole press is refused, focus included: a control that moved the
     // keyboard on a press it did not act on would be half a press.
     if (guard.running) {
