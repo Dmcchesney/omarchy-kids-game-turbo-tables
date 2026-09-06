@@ -674,7 +674,7 @@ FocusScope {
     padWidth: countdown.px(20)
     padHeight: countdown.px(11)
 
-    name: "back to the garage"
+    name: "Back to the garage"
     does: "stop the countdown and go back to the garage"
     key: "Escape"
     help: "Stops the countdown. The Escape key does it too."

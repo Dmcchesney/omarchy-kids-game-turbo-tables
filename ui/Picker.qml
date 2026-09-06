@@ -174,18 +174,18 @@ FocusScope {
   readonly property var footerHints: {
     if (picker.chosen < 0)
       return [{ "keys": "1 2 3", "action": "CHOOSE A CARD", "act": "chooseFirst",
-                "name": "choose a card", "does": "choose the first card",
+                "name": "Choose a card", "does": "choose the first card",
                 "key": "1", "warn": false, "destructive": false,
                 "help": "Choose the first card. The 1, 2 and 3 keys choose a card each." }]
     if (picker.deferred)
       return [{ "keys": "⌫", "action": "BACK TO THE CARD", "act": "undoDigit",
-                "name": "back to the card",
+                "name": "Back to the card",
                 "does": "take the digit back out of the answer and keep the card",
                 "key": "Backspace", "warn": false, "destructive": false,
                 "help": "Takes the " + picker.pendingDigit + " back out of the answer"
                         + " box and keeps the card chosen. Backspace does it too." },
               { "keys": "⏎", "action": "ANSWER " + picker.pendingDigit, "act": "submit",
-                "name": "answer " + picker.pendingDigit,
+                "name": "Answer the parked digit",
                 "does": "send " + picker.pendingDigit + " as the answer",
                 "key": "Enter", "warn": false, "destructive": true,
                 "help": "Sends " + picker.pendingDigit + " as the answer instead."
@@ -195,13 +195,13 @@ FocusScope {
       return [picker.backHint(true)]
     if (!picker.enterSpends)
       return [{ "keys": "⏎", "action": "SEND THE ANSWER", "act": "submit",
-                "name": "send the answer", "does": "send what is in the answer box",
+                "name": "Send the answer", "does": "send what is in the answer box",
                 "key": "Enter", "warn": false, "destructive": true,
                 "help": "Sends what is in the answer box. Enter does it too." },
               picker.backHint()]
     if (picker.targeting)
       return [{ "keys": "◀ ▶", "action": "RIVAL", "act": "nextRival",
-                "name": "next rival", "does": "aim at the next rival",
+                "name": "Next rival", "does": "aim at the next rival",
                 "key": "Left, Right", "warn": false, "destructive": false,
                 "help": "Aims at the next rival. Left and right do it too." },
               picker.useHint("USE"),
@@ -212,7 +212,7 @@ FocusScope {
   // `USE` after the rival picker, `USE IT` without one: the two strings this
   // panel has always printed, and the one control that spends a hand.
   function useHint(word) {
-    return { "keys": "⏎", "action": word, "act": "use", "name": "use the card",
+    return { "keys": "⏎", "action": word, "act": "use", "name": "Use the card",
              "does": "use " + (picker.chosenCard.length > 0 && Engine.isCard(picker.chosenCard)
                                ? String(Engine.CARDS[picker.chosenCard].label)
                                : "the card"),
@@ -223,7 +223,7 @@ FocusScope {
 
   function backHint(warn) {
     return { "keys": "ESC", "action": "BACK", "act": "back",
-             "name": "put the card back", "does": "put the chosen card back",
+             "name": "Put the card back", "does": "put the chosen card back",
              "key": "Escape", "warn": warn === true, "destructive": false,
              "help": "Puts the chosen card back. All three cards are still yours."
                      + " Escape does it too." }

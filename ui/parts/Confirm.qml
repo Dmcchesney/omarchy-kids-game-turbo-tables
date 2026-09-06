@@ -221,7 +221,7 @@ FocusScope {
           bold: false
           padWidth: confirm.px(14)
           padHeight: confirm.px(8)
-          name: "choose the other answer"
+          name: "Choose the other answer"
           does: "arm the other answer"
           key: "Left, Right"
           help: "Moves to the other answer. Left and right do it too."
@@ -235,7 +235,7 @@ FocusScope {
           bold: false
           padWidth: confirm.px(14)
           padHeight: confirm.px(8)
-          name: "give the armed answer"
+          name: "Give the armed answer"
           does: "answer " + (confirm.choice === 1 ? confirm.confirmLabel
                                                   : confirm.cancelLabel)
           key: "Enter"
@@ -258,7 +258,7 @@ FocusScope {
           bold: false
           padWidth: confirm.px(14)
           padHeight: confirm.px(8)
-          name: "keep it"
+          name: "Keep it"
           does: "answer " + confirm.cancelLabel
           key: "Escape"
           help: "Keeps everything and closes the question. Escape does it too."

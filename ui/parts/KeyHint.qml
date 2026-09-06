@@ -68,8 +68,21 @@ Item {
   width: implicitWidth
   height: implicitHeight
 
+  // WHAT A SCREEN READER SAYS, AND IT IS NOT THE PRINTED WORD.
+  //
+  // The printed line is upper case because every hint in this game is, and a
+  // reader handed `BACK TO THE GARAGE` may spell it out. `name` is the control's
+  // own name in ordinary words, written by the caller in ordinary case -- and it
+  // is the SAME string the parity table prints and the drive scripts match on,
+  // which they do case-insensitively, so there is one name per control and no
+  // second copy of it. Round one's countdown said "Back to the garage" and it
+  // still does.
+  //
+  // Assembled from nothing: `check:readme` forbids building a name a character
+  // at a time in a plugin file, and it is right to -- a name that is spelled at
+  // runtime is a name nobody read.
   Accessible.role: Accessible.Button
-  Accessible.name: hint.action
+  Accessible.name: hint.name.length > 0 ? hint.name : hint.action
   Accessible.description: hint.help.length > 0
                           ? hint.help
                           : (hint.does + ". The " + hint.keys + " key does it too.")

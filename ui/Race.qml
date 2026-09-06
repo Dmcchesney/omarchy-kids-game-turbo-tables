@@ -2595,7 +2595,7 @@ FocusScope {
       letterSpacing: 2
       padWidth: race.px(16)
       padHeight: race.px(9)
-      name: "pit crew"
+      name: "Pit crew"
       does: "show the answer and move on"
       key: "H"
       help: "Shows the answer and moves on. The H key does it too."
@@ -2631,7 +2631,7 @@ FocusScope {
       letterSpacing: 2
       padWidth: race.px(16)
       padHeight: race.px(9)
-      name: leaveHint.putsCardBack ? "put the card back" : "leave the race"
+      name: leaveHint.putsCardBack ? "Put the card back" : "Leave the race"
       does: leaveHint.putsCardBack ? "put the chosen card back"
                                    : "go back to the garage"
       key: "Escape"
