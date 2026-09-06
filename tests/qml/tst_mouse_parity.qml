@@ -137,6 +137,44 @@ Item {
     visible: root.showing === "countdown"
   }
 
+  // ROUND 3 -- THE SCREEN THE CHILD ACTUALLY PLAYS ON.
+  //
+  // A critic counted it: this file was the only one in the repository that
+  // posted a mouse event at all, and it never instantiated `Race`. The busiest
+  // screen in the game -- the pit crew, the answer box, the in-race hand, the
+  // aim tags, and the one control in the whole game whose MEANING changes under
+  // the pointer -- was covered by the static walk and by nothing that clicks.
+  //
+  // It is also the only screen that closes the hole in the repeat sweep, and
+  // that is not a coincidence. Every other destructive control in this game
+  // STOPS EXISTING when it acts -- the picker's `⏎  USE IT` goes with the hand
+  // it spent, the question's `⏎  ANSWER` goes with the question -- so the
+  // second press of a double-click never reaches the control that refused it
+  // and the guard's refusal branch was never once entered by this file.
+  // `ui/Race.qml`'s `ESC` hint stays exactly where it is and changes what it
+  // MEANS: `BACK` while a card is chosen, `LEAVE` otherwise. It is the one
+  // destructive control a double-click can land on twice, and so it is the one
+  // that can be asked what the second press did.
+  //
+  // The rivals are frozen (`rivals: null`, the same set-up
+  // `tests/qml/tst_race_keys.qml` uses and for the same reason): an AI kart's
+  // Wrench is a two-second field lock, and a lock arriving mid-sweep would make
+  // these cases say something about the rivals rather than about the pointer.
+  Race {
+    id: race
+    anchors.fill: parent
+    visible: root.showing === "race"
+    mode: "grandPrix"
+    preset: "1-12"
+    seed: 42
+  }
+
+  property int raceLeaves: 0
+  Connections {
+    target: race
+    function onLeaveRequested() { root.raceLeaves += 1 }
+  }
+
   property int countdownAborts: 0
   Connections {
     target: countdown
@@ -456,7 +494,8 @@ Item {
                 "prepare": "card 1" },
               { "name": "Picker, aiming", "item": picker, "showing": "picker",
                 "prepare": "card 3" },
-              { "name": "Countdown", "item": countdown, "showing": "countdown" }]
+              { "name": "Countdown", "item": countdown, "showing": "countdown" },
+              { "name": "Race", "item": race, "showing": "race" }]
     }
 
     /** Show the state's screen and drive it into the state. */
@@ -487,6 +526,22 @@ Item {
           if (!suite.usable(hit, list[s].item))
             continue
           checked += 1
+          // ROUND 3. The one declared exception, and it was missing here while
+          // the harness's own walk had carried it since round one: a FOCUS-ONLY
+          // target takes no action at all -- the stepper's inert centre face,
+          // the race's answer box -- so there is no key for it to be the
+          // equivalent of. What it must have instead is a stop to put the
+          // keyboard on. The race screen is the first state in this list that
+          // has one, and adding the race is what found the gap.
+          if (hit.focusOnly) {
+            verify(hit.stop !== null,
+                   list[s].name + ": \"" + hit.label + "\" takes no action and puts"
+                   + " the keyboard nowhere, so a click on it does nothing at all")
+            verify(String(hit.label).length > 0,
+                   list[s].name + ": a click target with no label cannot be named in a"
+                   + " parity table")
+            continue
+          }
           verify(String(hit.key).length > 0,
                  list[s].name + ": the click target \"" + hit.label
                  + "\" names no key, so it is reachable by mouse and not by keyboard")
@@ -911,9 +966,47 @@ Item {
     // events, and must do exactly what one press did. The list is generated from
     // the tree -- `Clickable.destructive` -- so a destructive control added
     // tomorrow is tested tomorrow without a line being added here.
+    //
+    // ==================================================================
+    // ROUND 3. THIS TEST PASSED WITH THE GUARD IT IS NAMED FOR DELETED.
+    // ==================================================================
+    //
+    // A critic set `Clickable.guardMs` to a constant 0 -- the double-click guard
+    // removed outright -- and this file reported 23 passed, 0 failed. They
+    // instrumented the refusal branch and it never fired once. Measured again
+    // here, at five presses instead of three, with the guard deleted: every
+    // destructive target in the round-2 state list still did exactly one
+    // destructive thing.
+    //
+    // The reason is not the number of presses, and the fourth press does not
+    // help. It is that EVERY destructive control in the round-2 list stops
+    // taking presses the moment it acts:
+    //
+    //   the picker's `⏎  USE IT`   spends the hand, and `footerAct` then refuses
+    //                              everything while the hand is flying off
+    //   the question's `⏎  ANSWER` answers, and the question is not on the screen
+    //                              for the second press to land on
+    //
+    // So the second press never reached the control that was supposed to refuse
+    // it, `refusedRepeats` stayed 0 on every target in every state, and the
+    // guard was pinned by nothing at all. A rule tested only where it cannot
+    // fire is a rule the next builder deletes on a green suite.
+    //
+    // Two things fix it, and the second is the one that bites:
+    //
+    //   the RACE is in the state list now (see the `Race` above), and its `ESC`
+    //   hint is the one destructive control in this game that STAYS under the
+    //   pointer after it acts -- so the second press actually arrives at it;
+    //
+    //   the refusal is now ASSERTED where it can be seen, off the target's own
+    //   `refusedRepeats`, and the test fails if no destructive control anywhere
+    //   in the game kept its place long enough for the refusal to be observed
+    //   even once. That last clause is what stops this test quietly going back
+    //   to testing nothing.
     function test_19_no_destructive_control_acts_twice_on_a_double_click() {
       var list = suite.states()
       var checked = 0
+      var refusalsSeen = 0
       for (var s = 0; s < list.length; s++) {
         suite.enter(list[s])
         var targets = suite.clickTargetsIn(list[s].item)
@@ -946,6 +1039,20 @@ Item {
           mouseClick(root, at.x, at.y)
           var before = 0
           var after = acts
+          // THE REFUSAL ITSELF, WHERE IT CAN BE SEEN. `acts` is one either way
+          // when the second press landed on nothing -- which is every
+          // destructive control in this game except the race's `ESC` hint. Where
+          // the target IS still under the pointer and still taking presses, the
+          // guard has to have refused the two that followed, and saying so is
+          // the difference between "the screen did not change" and "the press
+          // was refused".
+          if (hit !== null && suite.usable(hit, list[s].item) && hit.destructive) {
+            verify(hit.refusedRepeats >= 1,
+                   list[s].name + ": \"" + label + "\" was still under the pointer for"
+                   + " the second and third press and refused none of them. It accepted "
+                   + hit.actedCount + " presses.")
+            refusalsSeen += 1
+          }
           // ONE. Not "at most one": the first press has to work, because the
           // maintainer's standing complaint is a power-up that had to be
           // triggered several times and a guard that swallowed the first press
@@ -962,6 +1069,17 @@ Item {
       }
       verify(checked >= 3, "only " + checked + " destructive controls were found across"
              + " every state; the walk is not seeing them")
+      // AND THE GUARD WAS ACTUALLY EXERCISED. Round two's version of this test
+      // passed with the guard deleted because no press ever reached a control
+      // that could refuse it: every destructive target vanished, or froze its
+      // own panel, on the press that acted. A sweep that never enters the
+      // refusal branch is a sweep that is not testing the guard, and it must
+      // say so rather than report a pass.
+      verify(refusalsSeen >= 1,
+             "not one destructive control in any state stayed under the pointer long"
+             + " enough to refuse a second press, so the double-click guard was never"
+             + " entered and nothing here tested it. This is exactly the state this"
+             + " test was in when a critic deleted the guard and it still passed.")
     }
 
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {
