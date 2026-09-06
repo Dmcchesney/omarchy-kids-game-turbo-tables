@@ -394,12 +394,14 @@ FocusScope {
         }
       }
 
-      // PIECE M ROUND 2. A key LEGEND, not a row of controls: see the note on
-      // the garage's own rail. The oracle prints these as `legend`, and nothing
-      // in a legend ever lights under the pointer.
+      // A key LEGEND, not a row of controls: see the note on the garage's own
+      // rail. It states the whole screen's keyboard rather than offering an
+      // action where the action happens, nothing in it ever lights under the
+      // pointer, and it is drawn as a keycap beside a word in two items -- so it
+      // is not a `KeyHint` and the parity walk does not list it. Round two
+      // needed a `keyLegend: true` flag here to excuse it from a rule that read
+      // rendered strings; that rule is gone and so is the flag.
       Row {
-        property bool keyLegend: true
-
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         spacing: settings.px(18)

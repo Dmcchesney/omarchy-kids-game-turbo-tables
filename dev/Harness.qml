@@ -478,88 +478,56 @@ Window {
   }
 
   // ======================================================================
-  // PIECE M ROUND 2 -- THE THIRD ORACLE: A PRINTED KEY IS AN AFFORDANCE.
+  // PIECE M ROUND 3 -- THE THIRD ORACLE ASKS THE COMPONENT, NOT THE WORDS.
   // ======================================================================
   //
-  // The hole round one's gate could not see, and the critic found by reading
-  // the screens rather than the tables: this game prints key hints -- `ESC
+  // The hole round one's gate could not see: this game prints key hints -- `ESC
   // BACK`, `H  PIT CREW`, a keycap beside a word -- and piece M made SOME of
-  // them clickable. The picker's `ESC  BACK` and the confirm sheet's
-  // `ESC  KEEP` stayed dead. Both are plain `Text` with no `Accessible.role`,
-  // so the control oracle above is structurally blind to them: it can only see
-  // items that DECLARE themselves controls, and a label never does.
+  // them clickable. Both of the other oracles are structurally blind to one,
+  // because they can only find items that DECLARE themselves: an
+  // `Accessible.role`, or a place in a screen's `stops` array. A label declares
+  // neither.
   //
-  // A child who learns that the little ESC line is pressable on one screen will
-  // press it on the next. So the walk now reads the STRINGS, in the grammar the
-  // game prints them in, and asks the same question of every one: is there a
-  // click target over it? Two forms, both taken off the screens as they are:
+  // Round two's answer was to read the STRINGS and decide from their shape. A
+  // critic demonstrated it wrong in BOTH directions, live, on this build:
   //
-  //   a hint line   a key name, two or more spaces, then what it does --
-  //                 "ESC  LEAVE", "H  PIT CREW", "1 2 3  CHOOSE A CARD",
-  //                 "◀ ▶  RIVAL      ⏎  USE      ESC  BACK"
-  //   a keycap      a Text that is NOTHING but a key name -- "ESC", "S",
-  //                 "◀ ▶", "TAB  ↑ ↓" -- sitting beside a Text that says what
-  //                 it does, which is how the settings rail and the garage
-  //                 door are drawn
+  //   `3  CORRECT`, `7  LAPS`, `5  IN A ROW`, `2  TO GO` and `9  BEST TIME` --
+  //   scoreboard copy for a maths racing game -- were every one of them
+  //   classified as dead key hints, because a bare digit was accepted as a key
+  //   inside a multi-group line. The next builder to write `2  TO GO` on the HUD
+  //   would have had to make a scoreboard clickable or reword it to appease a
+  //   heuristic;
   //
-  // Bare digits are deliberately not keycaps here: a lap number, a place and a
-  // typed answer are all single digits, and a table full of those would bury
-  // the rows that matter. The digit keys reach the game through hint lines
-  // ("1 2 3  CHOOSE A CARD"), which this does see.
-  function isKeycap(text, allowDigits) {
-    return KeyHints.isKeycap(text, allowDigits)
-  }
-
-  function isHintLine(text) {
-    return KeyHints.isHintLine(text)
-  }
-
-  /** The nearest ancestor that has another visible Text under it. */
-  function keycapIsLabelled(item) {
-    var node = item.parent
-    for (var depth = 0; depth < 3 && node; depth++) {
-      var found = false
-      harness.walk(node, function (other) {
-        if (other === item || found)
-          return
-        if (harness.isText(other) && String(other.text).trim().length >= 3
-            && !harness.isKeycap(other.text, true)
-            && harness.effectiveOpacity(other) > 0.02)
-          found = true
-      })
-      if (found)
-        return true
-      node = node.parent
-    }
-    return false
-  }
-
-  /** Is this Text a printed key hint -- a promise that a key does something? */
+  //   `PAUSE  P` (the rule only looked for keycap-then-action), `H\nPIT CREW`
+  //   (two-line hints returned early, so the `|\n` branch of its own split was
+  //   unreachable), `ESC BACK` with one space, `⎋  BACK`, `↵  USE IT`,
+  //   `⇧TAB  BACK`, `F1  HELP`, `CTRL  QUIT` and `ALT  MENU` were all invisible.
+  //
+  // A rule that guesses intent from appearance cannot be made right by widening
+  // its table; each widening buys a false negative back at the price of a false
+  // positive somewhere else. So the oracle is structural: `ui/parts/KeyHint.qml`
+  // declares `isKeyHint`, and the walk asks for that exactly as it asks
+  // `isClickTarget` for a click target. Nothing here parses a label any more.
+  //
+  // What stops a printed key being written as a plain `Text` again is
+  // `npm run check:keyhints` -- a rule about what may be WRITTEN, checked on the
+  // source, which runs inside `npm run check` where this walk and the whole QML
+  // suite do not. `dev/KeyHints.js` keeps only `pressable`, which parses the
+  // parity table's key column against the keys this harness can post and was
+  // never a guess about a label.
+  //
+  // THE KEY LEGEND NEEDS NO EXEMPTION UNDER THIS RULE. The garage's and the
+  // settings screen's title rails draw a keycap beside a word in two separate
+  // items: they are not `KeyHint`s, so this walk never lists them, and they hold
+  // no literal pairing a key with an action, so the source check never sees them
+  // either. Round two needed a `keyLegend: true` flag to excuse them from a rule
+  // that should not have applied; the flag is gone, and with it the contradiction
+  // a critic found -- `ESC` dead in the title bar and `Esc` clickable in the
+  // footer of the same screen, both printed as `hint` rows in the same table.
+  /** Is this item a printed key hint -- a promise that a key does something? */
   function isPrintedKeyHint(item) {
-    if (!harness.isText(item) || String(item.text).trim().length === 0)
-      return false
-    if (harness.effectiveOpacity(item) <= 0.02 || !harness.effectiveEnabled(item))
-      return false
-    if (harness.isHintLine(item.text))
-      return true
-    return harness.isKeycap(item.text, false) && harness.keycapIsLabelled(item)
-  }
-
-  /**
-   * Is this item inside a KEY LEGEND -- the rail in a title band that states
-   * the whole screen's keyboard, rather than a hint offered where the action
-   * is? The garage's and the settings screen's rails are the only two, they are
-   * marked `keyLegend` on the Row that holds them, and the walk prints them as
-   * `legend` rather than failing them. See `ui/parts/KeyHint.qml`.
-   */
-  function inKeyLegend(item) {
-    var node = item
-    while (node && node !== harness.contentItem) {
-      if (node.keyLegend === true)
-        return true
-      node = node.parent
-    }
-    return false
+    return item.isKeyHint === true && harness.effectiveOpacity(item) > 0.02
+           && harness.effectiveEnabled(item)
   }
 
   /**
@@ -764,7 +732,6 @@ Window {
     // block above `isPrintedKeyHint`.
     var hints = 0
     var hintsWithoutClick = 0
-    var legendHints = 0
     console.log("hint\ttext\tx\ty\tw\th\thasClick")
     harness.walk(screen, function (item) {
       if (!harness.isPrintedKeyHint(item))
@@ -772,15 +739,12 @@ Window {
       hints += 1
       var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
       var over = harness.clickTargetOver(item)
-      var legend = harness.inKeyLegend(item)
-      if (legend)
-        legendHints += 1
-      else if (!over)
+      if (!over)
         hintsWithoutClick += 1
       console.log("hint\t" + String(item.text).replace(/\n/g, " | ") + "\t"
                   + Math.round(box.x) + "\t" + Math.round(box.y) + "\t"
                   + Math.round(box.width) + "\t" + Math.round(box.height) + "\t"
-                  + (legend ? "legend" : (over ? "yes" : "NO")))
+                  + (over ? "yes" : "NO"))
     })
 
     console.log("parity\tscreen\t" + harness.screenName)
@@ -788,7 +752,6 @@ Window {
     console.log("parity\tdeclaredControls\t" + controls)
     console.log("parity\tfocusStops\t" + stopCount)
     console.log("parity\tprintedKeyHints\t" + hints)
-    console.log("parity\tlegendKeyHints\t" + legendHints)
     console.log("parity\tdestructiveTargets\t" + destructive)
     console.log("parity\tbarriers\t" + barriers)
     console.log("parity\tmouseOnly\t" + mouseOnly)

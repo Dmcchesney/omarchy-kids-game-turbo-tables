@@ -22,15 +22,43 @@ import "../"
 // to a label: a hint never declares `Accessible.role` on its own and never
 // appears in a `stops` array, so nothing in round one's gate could see it.
 //
-// THE ONE EXCEPTION, AND IT IS ENUMERATED. The garage and the settings screen
-// carry a key LEGEND in the title band -- `TAB  ↑ ↓  MOVE`, `ESC  BACK` -- which
-// states the whole screen's keyboard rather than offering an action at the
-// place the action happens. Those are marked `keyLegend` on the rail that holds
-// them, the walk prints them as `legend`, and they never light under the
-// pointer. The child-visible rule is the one a child can actually learn: if it
-// lights up when you point at it, you can press it.
+// ROUND 3 -- THE WALK ASKS THE COMPONENT, AND NEVER READS THE WORDS.
+//
+// Round two's oracle read the rendered STRINGS and decided from their shape
+// whether each one was a hint. A critic demonstrated in the running game that
+// it was wrong in both directions and always would be: `3  CORRECT`, `7  LAPS`
+// and `2  TO GO` -- scoreboard copy for a maths racing game -- were flagged as
+// dead key hints, while `PAUSE  P`, a two-line `H\nPIT CREW`, a one-space
+// `ESC BACK` and every glyph and word outside a hard-coded table were invisible
+// to it. A rule that guesses intent from appearance cannot be made right by
+// widening the table; each widening buys a false negative back at the price of
+// a false positive somewhere else.
+//
+// So a hint is a hint because it SAYS SO. `isKeyHint` is the duck-type the walk
+// finds, exactly as `isClickTarget` is on `Clickable`, and nothing anywhere
+// parses a label any more. The other half of that -- what stops the next
+// builder printing a key with a plain `Text` again -- is `npm run
+// check:keyhints`, which is a rule about what may be WRITTEN rather than a
+// guess about what a string means, runs on the source, and is inside `npm run
+// check` where the QML suite is not.
+//
+// THE KEY LEGEND, and it needs no exemption any more. The garage and the
+// settings screen carry a rail in the title band -- `TAB  ↑ ↓  MOVE`,
+// `ESC  BACK` -- which states the whole screen's keyboard rather than offering
+// an action at the place the action happens. It is drawn as a keycap beside a
+// word, in two items, with no literal that pairs them: it is not a `KeyHint`,
+// so the walk never lists it, and it is not a written hint string, so the source
+// check never sees it. Round two needed a `keyLegend: true` flag on the rail to
+// excuse it from a rule that should never have applied; the flag is gone.
+//
+// The child-visible rule is unchanged and is the one a child can actually
+// learn: if it lights up when you point at it, you can press it.
 Item {
   id: hint
+
+  // The duck-type the walk finds. QML has no `instanceof` for a component here,
+  // and neither the harness nor the suite may have to know this file's name.
+  readonly property bool isKeyHint: true
 
   // The keys, as they are printed: "ESC", "⏎", "◀ ▶", "1 2 3".
   property string keys: ""

@@ -360,7 +360,7 @@ FocusScope {
       // The right half of the rail was empty. This is a keyboard-only game,
       // so what belongs in it is the keyboard.
       //
-      // PIECE M ROUND 2 -- THIS IS A LEGEND, AND IT SAYS SO.
+      // PIECE M -- THIS IS A LEGEND, NOT A ROW OF CONTROLS.
       //
       // Every printed key hint in this game is a control except the ones in a
       // rail like this: it states the whole screen's keyboard from the title
@@ -370,15 +370,17 @@ FocusScope {
       // An on-screen Tab key would be a second way to do everything and a
       // control a child could press that changes nothing they were looking at.
       //
-      // So it is marked, the harness's hint oracle prints these rows as
-      // `legend` instead of failing them, and the rule the child can actually
-      // learn holds on every screen: IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU
-      // CAN PRESS IT. Nothing in a legend ever lights.
+      // ROUND 3. Round two had to MARK this rail (`keyLegend: true`) so that an
+      // oracle reading rendered strings would excuse it, and a critic found what
+      // a self-granted exemption buys: on the settings screen `ESC` in the title
+      // bar was printed in the same table as `Esc` in the footer, one of them
+      // dead and one of them clickable, which is a contradiction a child meets.
+      // A hint now declares itself and this rail is not one -- it is a keycap
+      // beside a word, in two items -- so nothing lists it and nothing has to
+      // excuse it. The rule the child can actually learn holds on every screen:
+      // IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU CAN PRESS IT. Nothing in a
+      // legend ever lights.
       Row {
-        // Read by `dev/Harness.qml --print-controls`, which walks up from every
-        // hint-shaped Text looking for it.
-        property bool keyLegend: true
-
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: garage.px(22)

@@ -403,41 +403,6 @@ Item {
       return box
     }
 
-    /** Is this keycap sitting beside something that says what it does? */
-    function keycapIsLabelled(item, screen) {
-      var node = item.parent
-      for (var depth = 0; depth < 3 && node; depth++) {
-        var near = suite.itemsUnder(node)
-        for (var i = 0; i < near.length; i++) {
-          var other = near[i]
-          if (other === item || typeof other.text !== "string"
-              || other.font === undefined)
-            continue
-          if (String(other.text).trim().length >= 3
-              && !KeyHints.isKeycap(other.text, true)
-              && suite.usable(other, screen))
-            return true
-        }
-        node = node.parent
-      }
-      return false
-    }
-
-    /**
-     * Is this item inside a key LEGEND -- the rail in a title band that states
-     * the whole screen's keyboard rather than offering an action where the
-     * action is? Marked `keyLegend` on the Row that holds it.
-     */
-    function inKeyLegend(item) {
-      var node = item
-      while (node) {
-        if (node.keyLegend === true)
-          return true
-        node = node.parent
-      }
-      return false
-    }
-
     /**
      * The first click target at or above this item.
      *
@@ -656,50 +621,42 @@ Item {
     // `ESC  BACK` and the confirm sheet's `ESC  KEEP` were invisible to every
     // check in the piece while the race's identical `ESC  LEAVE` was a control.
     //
-    // A child who learns that the little ESC line is pressable on one screen
-    // will press it on the next. So this reads the strings, in the grammar the
-    // game prints them in (`dev/KeyHints.js`, shared with the harness so there
-    // is one copy of it), and asks whether a click over each one does what it
-    // says. The only exception is a key LEGEND -- the rail in a title band that
-    // states a whole screen's keyboard -- which is marked on the rail that holds
-    // it and never lights under the pointer.
+    // ROUND 3. This used to read the STRINGS on the screen and decide from
+    // their shape which ones were promises about a key. A critic demonstrated
+    // that wrong in both directions on this build -- `3  CORRECT`, `7  LAPS`
+    // and `2  TO GO` flagged as dead hints, `PAUSE  P`, `H\nPIT CREW` and
+    // `ESC BACK` invisible -- so a hint now says what it is (`isKeyHint` on
+    // `ui/parts/KeyHint.qml`) and this asks the component. The rule that a
+    // printed key may not be written as a plain string at all is checked on the
+    // SOURCE, by `npm run check:keyhints`, which is inside `npm run check`.
+    //
+    // The key-legend exemption is gone with the grammar that needed it: the
+    // title rails draw a keycap beside a word in two items and are not hints,
+    // so there is no longer a screen on which `ESC` in the title bar and `Esc`
+    // in the footer are both listed here and only one of them works.
     function test_06_every_printed_key_hint_is_a_control() {
       var list = suite.states()
       var hints = 0
-      var legends = 0
       for (var s = 0; s < list.length; s++) {
         suite.enter(list[s])
         var all = suite.itemsUnder(list[s].item)
         for (var i = 0; i < all.length; i++) {
           var item = all[i]
-          if (typeof item.text !== "string" || item.font === undefined
-              || item.textFormat === undefined)
+          if (item.isKeyHint !== true || !suite.usable(item, list[s].item))
             continue
-          if (!suite.usable(item, list[s].item) || String(item.text).trim().length === 0)
-            continue
-          if (!KeyHints.isHintLine(item.text)
-              && !(KeyHints.isKeycap(item.text, false)
-                   && suite.keycapIsLabelled(item, list[s].item)))
-            continue
-          if (suite.inKeyLegend(item)) {
-            legends += 1
-            verify(suite.clickTargetOver(item, list[s].item) === null,
-                   list[s].name + ": the key legend line \"" + item.text + "\" is"
-                   + " clickable. A legend states the keyboard and never lights;"
-                   + " a hint that is a control does both.")
-            continue
-          }
           hints += 1
           verify(suite.clickTargetOver(item, list[s].item) !== null,
                  list[s].name + ": \"" + String(item.text).replace(/\n/g, " | ")
                  + "\" is printed as a key hint and a click on it does nothing."
                  + " The same idiom is a control on the other screens, and a child"
                  + " who learns it there will press it here.")
+          verify(KeyHints.pressable(item.key),
+                 list[s].name + ": the key hint \"" + String(item.text) + "\" names \""
+                 + item.key + "\" as its key, and that is not a key this game can press")
         }
       }
       verify(hints >= 4, "only " + hints + " printed key hints were found across every"
-             + " state; the walk is not reading the screen")
-      verify(legends >= 3, "only " + legends + " legend keys were found")
+             + " state; the walk is not seeing the tree")
     }
 
     // DIRECTION TWO, ORACLE ONE: nothing is reachable by key and not by click.
