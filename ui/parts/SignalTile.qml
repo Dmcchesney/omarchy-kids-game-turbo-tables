@@ -18,6 +18,30 @@ import "../"
 Item {
   id: tile
 
+  // ROUND 3 -- A SIGN SAYS THAT IT IS ONE.
+  //
+  // A critic counted these four tiles among the things "still unclickable" and
+  // was right that nothing could tell: they are laid out exactly like a row of
+  // buttons, in a bordered panel, with their own surface and tone, and the
+  // parity walk printed no row for them at all. A reader of that table could
+  // not distinguish a display that was DECIDED from a control that was
+  // FORGOTTEN, and this piece's whole argument is enumeration rather than
+  // assertion.
+  //
+  // They stay displays, and the decision above is why: the design's words for
+  // this panel are "the four-signal catalog SHOWN so the child learns them",
+  // there is no key that sends one from the garage, and a click target with no
+  // key behind it is a mouse-only path -- which the design forbids exactly as
+  // squarely as the keyboard-only ones this piece exists to remove. Round three
+  // made them controls and a critic had it taken out again.
+  //
+  // So instead of being absent from the tables they are IN them, as signs.
+  // `dev/Harness.qml --print-controls` prints a `sign` row for each and a
+  // `parity signs` count, and `tst_mouse_parity.qml` holds every declared sign
+  // to the rule a sign has to keep: it takes no click and it never lights.
+  readonly property bool isSign: true
+  readonly property string signLabel: tile.caption
+
   property var art: []
   property string caption: ""
   property color tone: Theme.lime

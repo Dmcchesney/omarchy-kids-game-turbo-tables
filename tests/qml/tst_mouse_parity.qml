@@ -1220,6 +1220,69 @@ Item {
               "Up did not come back to the stop the question left the keyboard on")
     }
 
+    // ==================================================================
+    // ROUND 3. A SCREEN THAT PRINTS A KEY HAS TO HONOUR IT.
+    // ==================================================================
+    //
+    // A keyboard defect, in a file about the mouse, and that is the honest
+    // place for it: the instrument that found it is this piece's own. Round two
+    // gave this repository the ability to post a real `Key_Tab` through the
+    // harness (`--do key:tab`, `dev/Pointer.qml`) and then did not point it at
+    // the screens whose parity it was certifying. A critic did:
+    //
+    //   --screen Settings --do key:tab   x9 -> Sound, ON, change   every time
+    //   --screen Results  --do key:tab   x2 -> Race again          every time
+    //
+    // Neither screen had a `Key_Tab` branch, and every stop on both carries
+    // `activeFocusOnTab: false` (see the long note in `ui/Garage.qml`, which
+    // got this fix in its round 8), so Qt's implicit chain had nothing to walk
+    // either. Meanwhile the settings title band prints `TAB  ↑ ↓   MOVE` and
+    // its screen-reader description promises that Tab moves. A screen that
+    // prints a key it does not honour is worse than one that prints nothing.
+    //
+    // The check is generated from the tree, like everything else in this file:
+    // every state whose screen keeps a `stops` array -- the array its own
+    // handler walks, which IS this game's definition of "what the keyboard can
+    // reach by Tab" -- must move on Tab and back on Shift+Tab. A screen added
+    // tomorrow is checked tomorrow with no line added here.
+    function test_27_every_screen_with_focus_stops_honours_tab() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        if (screen.stops === undefined || screen.stops === null
+            || screen.stops.length < 2)
+          continue
+        if (typeof screen.focusStop !== "function"
+            || typeof screen.stopIndex !== "function")
+          continue
+        // A screen whose stops are switched off right now -- every one of them
+        // while the reset question is open -- is not a screen the keyboard is
+        // failing to walk. Skipped, and the count below says how many states
+        // were really asked.
+        if (!suite.usable(screen.stops[0], screen))
+          continue
+        screen.forceActiveFocus()
+        screen.focusStop(0)
+        suite.settleFrame()
+        compare(screen.stopIndex(), 0, list[s].name + ": the keyboard did not start"
+                + " on the first stop")
+        checked += 1
+
+        keyClick(Qt.Key_Tab)
+        compare(screen.stopIndex(), 1,
+                list[s].name + ": Tab moved nothing. This screen keeps a list of"
+                + " focus stops and its own title band tells the child that Tab"
+                + " walks them; a key printed on a screen is a promise.")
+        keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+        compare(screen.stopIndex(), 0,
+                list[s].name + ": Shift+Tab did not walk back")
+      }
+      verify(checked >= 3, "only " + checked + " screens with focus stops were asked"
+             + " whether they honour Tab; the walk is not seeing them")
+    }
+
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {
       root.showing = "picker"
       picker.forceActiveFocus()
@@ -1527,22 +1590,52 @@ Item {
     // it can never act, and it must not become pressable just because it looks
     // like the two buttons under it -- a child pressing something that does
     // nothing is the same defect this piece is fixing, pointing the other way.
+    //
+    // ROUND 3. This named ONE sign, and a critic counted four more the garage
+    // has -- the preset-signal tiles -- among the things "still unclickable",
+    // with no way to tell a display that was decided from a control that was
+    // forgotten. Every sign in the game declares `isSign` now, so this walks
+    // them instead of naming one, and the four tiles and the four roster seats
+    // are held to the rule with the card that was already here.
+    //
+    // WHY THEY ARE NOT MADE CONTROLS, since that is the other way to answer the
+    // complaint. There is no key that sends a preset signal from the garage and
+    // none that acts on a seat, so a click on either would be a MOUSE-ONLY path
+    // -- which the design forbids exactly as squarely as the keyboard-only ones
+    // this piece removes, and `test_01` would fail on it. Round three made the
+    // tiles into controls and a critic had it taken out again, for the reason in
+    // `ui/parts/SignalTile.qml`: four dead presses in the keyboard chain between
+    // the settings and READY UP.
     function test_22_a_sign_takes_no_click_and_no_hover() {
-      root.showing = "garage"
-      garage.forceActiveFocus()
-
-      var targets = suite.clickTargetsIn(garage)
-      var sign = null
-      for (var i = 0; i < targets.length; i++) {
-        if (String(targets[i].label).toLowerCase().indexOf("race a friend") >= 0)
-          sign = targets[i]
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        var all = suite.itemsUnder(screen)
+        for (var i = 0; i < all.length; i++) {
+          var sign = all[i]
+          if (sign.isSign !== true || !suite.drawn(sign, screen))
+            continue
+          checked += 1
+          var targets = suite.clickTargetsIn(sign)
+          for (var t = 0; t < targets.length; t++) {
+            verify(!suite.usable(targets[t], screen),
+                   list[s].name + ": the sign \"" + sign.signLabel + "\" accepts a"
+                   + " click. It is laid out like a control and cannot act, and there"
+                   + " is no key that does what pressing it would do, so a click on it"
+                   + " would be a mouse-only path.")
+            var at = suite.centreOf(targets[t])
+            mouseMove(root, at.x, at.y)
+            verify(!targets[t].hovered,
+                   list[s].name + ": the sign \"" + sign.signLabel + "\" lights under"
+                   + " the pointer as though it were a control")
+            mouseMove(root, 0, 0)
+          }
+        }
       }
-      verify(sign !== null, "the sign's click target is not in the tree at all")
-      verify(!sign.enabled, "the RACE A FRIEND sign accepts a click")
-
-      var at = suite.centreOf(sign)
-      mouseMove(root, at.x, at.y)
-      verify(!sign.hovered, "the sign lights under the pointer as though it were a control")
+      verify(checked >= 9, "only " + checked + " signs were found across every state;"
+             + " the walk is not seeing them")
     }
   }
 }

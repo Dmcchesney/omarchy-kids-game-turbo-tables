@@ -70,6 +70,11 @@ Item {
                                                                      : button.offTone
   readonly property bool primary: variant === "primary"
   readonly property bool sign: variant === "sign"
+  // ROUND 3. The duck-type the parity walk enumerates signs by, so a display
+  // laid out like a control is IN the table saying it is a sign rather than
+  // absent from it. See the note in `ui/parts/SignalTile.qml`.
+  readonly property bool isSign: button.sign
+  readonly property string signLabel: button.label
   // What the filled block is painted in, and what is legible on it. For every
   // tone but "go" these are the tone and the theme's ink rule, exactly as
   // before; "go" may separate them.

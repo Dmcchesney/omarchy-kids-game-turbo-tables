@@ -12,6 +12,13 @@ import "../"
 Item {
   id: slot
 
+  // ROUND 3. A sign, declared: laid out like a control and deliberately not one.
+  // See the note in `ui/parts/SignalTile.qml`. A seat on the grid is a readout
+  // -- who, what colour, what number, what the lamp says -- and there is no key
+  // that acts on one, so a click on it would be a mouse-only path.
+  readonly property bool isSign: true
+  readonly property string signLabel: slot.name + " " + slot.number
+
   property int number: 7
   property string name: "YOU"
   property int paintIndex: 0

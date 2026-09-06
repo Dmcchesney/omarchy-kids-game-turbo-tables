@@ -307,6 +307,26 @@ FocusScope {
     if (event.key === Qt.Key_Escape) {
       settings.leaveRequested()
       event.accepted = true
+    } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+      // ROUND 3 -- THIS SCREEN PRINTED A KEY IT DID NOT HONOUR.
+      //
+      // The garage got this in its round 8 and this screen never did. Its own
+      // title band prints `TAB  ↑ ↓   MOVE` and its screen-reader description
+      // says "Tab and the up and down arrows move", and Tab moved nothing:
+      // there was no branch for it here, and every stop carries
+      // `activeFocusOnTab: false` (see the note in `ui/Garage.qml`) so Qt's
+      // implicit chain had nothing to walk either. A screen that prints a key
+      // it does not honour is worse than one that prints nothing, because the
+      // child who reads it presses it and learns that reading the screen does
+      // not help.
+      //
+      // Shift+Tab arrives as Key_Backtab on some platforms and as Key_Tab with
+      // the Shift modifier on others, so both are read rather than trusting
+      // whichever one this machine happens to send.
+      var back = event.key === Qt.Key_Backtab
+                 || (event.modifiers & Qt.ShiftModifier) !== 0
+      settings.moveFocus(back ? -1 : 1)
+      event.accepted = true
     } else if (event.key === Qt.Key_Down) {
       settings.moveFocus(1)
       event.accepted = true

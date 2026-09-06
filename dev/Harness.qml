@@ -747,6 +747,27 @@ Window {
                   + (over ? "yes" : "NO"))
     })
 
+    // ------------------------------------------------- and what is NOT a path
+    // THE SIGNS. Every item that is laid out like a control and is deliberately
+    // not one -- the garage's four preset-signal tiles, its four roster seats,
+    // the RACE A FRIEND card. A critic counted these among the things "still
+    // unclickable" and was right that nothing in these tables could tell: a
+    // display that was DECIDED and a control that was FORGOTTEN both showed up
+    // as nothing at all. They declare `isSign` now and are printed here, so the
+    // reader sees the decision instead of an absence.
+    var signs = 0
+    console.log("sign\tname\tx\ty\tw\th\ttakesAClick")
+    harness.walk(screen, function (item) {
+      if (item.isSign !== true || harness.effectiveOpacity(item) <= 0)
+        return
+      signs += 1
+      var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
+      var hit = harness.clickTargetUnder(item)
+      console.log("sign\t" + String(item.signLabel) + "\t" + Math.round(box.x) + "\t"
+                  + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
+                  + Math.round(box.height) + "\t" + (hit ? "YES" : "no"))
+    })
+
     console.log("parity\tscreen\t" + harness.screenName)
     console.log("parity\tclickTargets\t" + clicks.length)
     console.log("parity\tdeclaredControls\t" + controls)
@@ -754,6 +775,7 @@ Window {
     console.log("parity\tprintedKeyHints\t" + hints)
     console.log("parity\tdestructiveTargets\t" + destructive)
     console.log("parity\tbarriers\t" + barriers)
+    console.log("parity\tsigns\t" + signs)
     console.log("parity\tmouseOnly\t" + mouseOnly)
     console.log("parity\tunpressableKey\t" + unpressableKey)
     console.log("parity\tcontrolsWithoutClick\t" + keyOnly)
