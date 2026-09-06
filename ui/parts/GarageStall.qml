@@ -140,7 +140,17 @@ Item {
 
   // The sun: off-centre right, straddling the horizon, and clear of the
   // roster column at every size the evidence renders.
-  readonly property real sunX: 712
+  //
+  // ROUND 12: 712 BECOMES 740. A critic measured the sun at x 1030-1245 and the
+  // car at x 700-1115 -- two bright, busy, high-interest objects elbow to elbow
+  // with no separation, and at 1366 x 768 overlapping outright. The disc moves
+  // as far right as it can go while still clearing the roster board at the
+  // narrowest window the evidence renders (its limb lands 13 view units short of
+  // that board at 1024 x 600), and the turntable moves the other way, so the two
+  // have air between them at every size. The overlap that is left at 1366 is the
+  // car's rim against the disc, which is the golden-hour idiom rather than a
+  // collision -- and the rim exists now.
+  readonly property real sunX: 740
   readonly property real sunR: 70
 
   // Where a kart stands: the centre of the turntable, in view-box units.
@@ -155,7 +165,7 @@ Item {
   // the work light overhead and the warm pool under it -- is derived from this
   // one number, so they move with it and the lighting stays consistent by
   // construction rather than by three numbers being edited together.
-  readonly property real daisX: 558
+  readonly property real daisX: 545
   // The contact point, placed against the item and then clamped so the
   // plinth's far arc stays below the yard's ground line.
   readonly property real daisY: Math.max(groundLineY + daisRise + 8,
@@ -227,15 +237,24 @@ Item {
   // both signs are placed from it, so they cannot drift apart.
   // The terminal is 132 wide, the poster 116, and the poster starts 148 past
   // the terminal, so the pair spans 264 units however wide the wall gets.
-  readonly property real signW: 264
+  //
+  // ROUND 12: THE TERMINAL IS 16 UNITS WIDER, BECAUSE ITS OWN COPY DID NOT FIT
+  // IN IT. `WELCOME TO` is ten characters at 17 units with a unit of letter
+  // spacing -- 113 units -- inside a case whose inner width was 132 minus nine
+  // each side, or 114. A critic measured the shipped frame and found the string
+  // ONE PIXEL from its own frame at 1920 and at 1024: twenty pixels of left
+  // margin against three of right. Any font-metric drift on any machine clips
+  // it. 148 gives the line eleven units of clearance instead of one, and the
+  // poster moves with it so the pair keeps its spacing.
+  readonly property real signW: 288
   readonly property real signX: Math.max(12, (wallX - signW) / 2)
   readonly property real termX: signX
   readonly property real termY: 40
-  readonly property real termW: 132
+  readonly property real termW: 148
   readonly property real termH: 84
-  readonly property real posterX: signX + 148
+  readonly property real posterX: signX + 164
   readonly property real posterY: 40
-  readonly property real posterW: 116
+  readonly property real posterW: 124
   readonly property real posterH: 126
 
   function vx(x) { return originX + x * unit }
