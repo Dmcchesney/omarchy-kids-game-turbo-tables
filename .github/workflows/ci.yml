@@ -93,3 +93,91 @@ jobs:
           set -euo pipefail
           test ! -e node_modules
           test ! -e package-lock.json
+
+  # =========================================================================
+  # PIECE M ROUND 4 -- THE ENUMERATION IS RUN BY SOMETHING NOW.
+  # =========================================================================
+  #
+  # A critic put this more sharply than the comment it replaces did. The whole
+  # architectural argument of piece M is "enumeration rather than assertion, so a
+  # control nobody thought about cannot pass unnoticed" -- and until this job,
+  # every one of those enumerations existed only as something a person ran by
+  # hand on one Mac. An enumeration that no automated gate ever runs is an
+  # assertion again: it is a thing somebody remembered to do. The one piece-M
+  # gate that WAS in CI, `check:keyhints`, is the one the critic escaped three
+  # times out of four in five minutes.
+  #
+  # WHAT IS RUN HERE, AND WHAT IS NOT. The mouse suite and the parity walk on
+  # every screen: 34 cases and seven walks, which is every assertion the piece
+  # rests on. The other nine QML files -- the track-view effects, the countdown
+  # board, the car sprites -- are NOT run here on purpose: forty-four of their
+  # cases compare rendered pixels against numbers tuned on the maintainer's Mac,
+  # and a Linux runner rasterises with llvmpipe. Turning those red on a renderer
+  # difference would teach the next builder to ignore this job, which is the
+  # failure mode that matters more than the coverage. They stay a hand run until
+  # somebody has compared the two renderers deliberately.
+  #
+  # THE ONE THING THIS MAC COULD NOT VERIFY is the package list: there is no
+  # GitHub runner here to try it on, and no Linux at all outside the plugin VM.
+  # The modules are the six the tree imports (QtQml, QtQuick, QtQuick.Window,
+  # QtQuick.Shapes, QtQuick.Controls.impl, QtTest) plus the binary. If the first
+  # run fails in `Install Qt 6 QML`, the fix is a package name and nothing else.
+  qml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # actions/checkout v5.0.0
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Install Qt 6 QML
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-declarative-dev-tools \
+            qml6-module-qtqml \
+            qml6-module-qtqml-workerscript \
+            qml6-module-qtquick \
+            qml6-module-qtquick-window \
+            qml6-module-qtquick-shapes \
+            qml6-module-qtquick-templates \
+            qml6-module-qtquick-controls \
+            qml6-module-qttest \
+            libgl1 libegl1
+
+      # Headless, and stated rather than assumed: there is no display on a
+      # runner, and the maintainer's own rule on his Mac is that a Qt process
+      # never opens a window. One command, two ways of saying it, so a missing
+      # `-platform` argument cannot fall back to a real surface.
+      - name: The mouse suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          qmltestrunner -platform offscreen -import dev/imports \
+            -input tests/qml/tst_mouse_parity.qml
+
+      # The parity walk itself, on every screen the game has. It exits non-zero
+      # when a click target names no key, when a declared control or a Tab stop
+      # has no click target under it, when a printed key on the screen cannot be
+      # pressed, when a destructive control names no guard, or when a mouse
+      # handler that is not a Clickable exists anywhere in the tree.
+      - name: The parity walk, on every screen
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          for screen in Game Garage Settings Picker Countdown Race Results; do
+            echo "--- $screen"
+            qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+              --screen "$screen" --print-controls
+          done
+
+      - name: Nothing was installed into the checkout
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e node_modules
+          test ! -e package-lock.json

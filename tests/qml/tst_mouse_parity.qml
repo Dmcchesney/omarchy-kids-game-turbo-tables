@@ -2147,6 +2147,58 @@ Item {
       return null
     }
 
+    // ==================================================================
+    // ROUND 4. THE MODAL EATS PRESSES. IT MAY NOT EAT THE POINTER.
+    // ==================================================================
+    //
+    // The question's extent outlives the question by one double-click interval,
+    // so the second half of a double-click on its own footer cannot land on the
+    // row behind it. `ui/parts/Confirm.qml`'s comment said it "swallows POINTER
+    // presses only", and a critic measured what it actually swallowed: with
+    // `hoverEnabled: true` on the extent, HOVER died as well, over the whole
+    // window, for the whole 400 ms -- a settings row that hovers at rest read
+    // `hovered = false` under a stationary pointer with the scrim and the sheet
+    // already invisible. Four tenths of a second of dead pointer over 1920 x
+    // 1080, with nothing on the screen to explain it, is a smaller version of
+    // the complaint this entire piece exists to answer.
+    //
+    // Both halves are asserted here, because the cheap way to pass the first
+    // half is to delete the barrier and the cheap way to pass the second is to
+    // put the hover back.
+    function test_34_the_question_tail_swallows_presses_and_not_the_pointer() {
+      root.showing = "settings"
+      settings.forceActiveFocus()
+      suite.settleFrame()
+
+      suite.clickNamed(settings, "RESET GARAGE RECORDS")
+      suite.settleFrame()
+      verify(settings.confirming, "the reset question did not open")
+      suite.clickNamed(settings, "Keep it")
+      verify(!settings.confirming, "the click on `ESC  KEEP` did not close the question")
+      verify(suite.modalTailRunning(),
+             "the question's extent stopped consuming the moment the question closed,"
+             + " so the second half of a double-click aimed at its footer would land on"
+             + " the row underneath. There is nothing left for this case to be about.")
+
+      var row = suite.targetNamed(settings, "Sound row")
+      verify(row !== null, "the settings screen has no Sound row to point at")
+      var at = suite.centreOf(row)
+      mouseMove(root, at.x, at.y)
+      verify(row.hovered,
+             "with the question closed and its extent still swallowing presses, the"
+             + " pointer resting on a settings row does not light it. The barrier is"
+             + " taking hover as well as presses, so for 400 ms after every answer the"
+             + " pointer is dead over the whole window and nothing on the screen says"
+             + " why.")
+
+      var before = settings.sound
+      mouseClick(root, at.x, at.y)
+      compare(settings.sound, before,
+              "a press landed on the row behind the question while the question's own"
+              + " extent was still consuming. That is the half of a double-click nobody"
+              + " meant to send, changing a setting.")
+    }
+
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {
       root.showing = "picker"
       picker.forceActiveFocus()
