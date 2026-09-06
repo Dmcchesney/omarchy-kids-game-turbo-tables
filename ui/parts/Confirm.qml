@@ -171,6 +171,13 @@ FocusScope {
   Clickable {
     objectName: "clickModalExtent"
     barrier: true
+    // ROUND 5. While the question is UP, nothing behind it may light under the
+    // pointer: a lit row under a modal question is the screen telling the child
+    // that the thing they cannot reach is pressable. The tail is different and
+    // stays as round four left it -- it swallows presses and lets hover through,
+    // because four tenths of a second of dead pointer with nothing on the screen
+    // to explain it is the complaint this piece exists to answer.
+    eatsHover: confirm.asking
     label: "The question's own extent"
     does: "swallow a press that was not meant for the screen behind"
   }

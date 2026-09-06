@@ -202,6 +202,24 @@ MouseArea {
   // enumerated somewhere a reader can find it.
   property bool barrier: false
 
+  // ROUND 5 -- A BARRIER EATS HOVER WHILE THE THING BEHIND IT IS GENUINELY OUT
+  // OF REACH, AND ONLY THEN.
+  //
+  // Round four found that a barrier with `hoverEnabled` on killed hover across
+  // the whole window for the 400 ms tail after the question closed, and turned
+  // it off. That fixed the tail and opened the other half: while the question is
+  // UP, the settings rows behind it still light under the pointer, because hover
+  // flows straight past the scrim to a row whose own `enabled` is true and whose
+  // ancestor's is not. Measured by `test_41`: `Settings, reset asked` -- the
+  // `Sound` row reports `hovered` with a modal question over it. A row that
+  // lights while it cannot be pressed is this piece's own defect, from the
+  // inside of the one dialog in the game.
+  //
+  // The two halves are one property. A barrier takes hover exactly while it is
+  // the reason a press would not land -- the caller says when that is -- and
+  // gives it back the instant the question is gone, tail and all.
+  property bool eatsHover: false
+
   // The duck-type the harness's walk finds. QML has no `instanceof` for a
   // component here, and the walk must not have to know this file's name.
   readonly property bool isClickTarget: true
@@ -227,7 +245,10 @@ MouseArea {
   // nothing on the screen to explain it. Four tenths of a second of dead
   // pointer over 1920 x 1080 is a smaller version of the complaint this whole
   // piece exists to answer. A barrier takes presses; nothing else.
-  hoverEnabled: !hit.barrier
+  // ROUND 5. And `eatsHover` is the half round four could not have: while the
+  // question is up nothing behind it may light, and the moment it closes the
+  // pointer is alive again even though the extent goes on swallowing presses.
+  hoverEnabled: !hit.barrier || hit.eatsHover
   // Left only. A right-click is the desktop's, not the game's, and a middle
   // click on a child's trackpad is usually an accident.
   acceptedButtons: Qt.LeftButton

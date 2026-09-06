@@ -2680,6 +2680,169 @@ Item {
       root.showing = "garage"
     }
 
+    // ==================================================================
+    // ROUND 5. THE HOVER PROMISE HAS TWO HALVES AND ONLY ONE WAS TESTED.
+    // ==================================================================
+    //
+    // `test_20`, `test_23` and `test_32` all ask the same question -- does a
+    // LIVE control light under the pointer -- and a critic reduced
+    // `Clickable.hovered` to bare `containsMouse`, dropping the `enabled` and
+    // `barrier` terms, and watched five hover cases stay green. The claim the
+    // component makes is "if it lights up when you point at it, you can press
+    // it", and the half nobody walked is the one that makes the sentence mean
+    // anything: a control a child CANNOT press must stay dark.
+    //
+    // It is not a hypothetical set. `Garage::TRACK`, `Garage::GOAL` and
+    // `Settings::TIMER` are `changeable: false` in every race mode,
+    // `Garage::RACE A FRIEND` is never enabled, and the race's aim chips are
+    // disabled with no hand. They sit in the same list, in the same type, as
+    // three live rows. A pointing finger and a lit border on one of them is the
+    // game telling a child to press something that cannot be pressed, which is
+    // the maintainer's complaint pointing the other way.
+    //
+    // AND THE BARRIER IS THE SHARPEST CASE. `ui/parts/Confirm.qml`'s extent
+    // covers the whole window while the question is up. A scrim that lit under
+    // the pointer would be saying the opposite of what the question says.
+    function test_41_a_control_a_child_cannot_press_stays_dark() {
+      var list = suite.states()
+      var dead = 0
+      var barriers = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        focusPark.forceActiveFocus(Qt.OtherFocusReason)
+        var targets = suite.clickTargetsIn(screen)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (!suite.drawn(hit, screen))
+            continue
+          var live = suite.switchedOn(hit, screen)
+          if (live && hit.barrier !== true)
+            continue
+          var at = suite.centreOf(hit)
+          if (at.x < 0 || at.y < 0 || at.x >= root.width || at.y >= root.height)
+            continue
+          mouseMove(root, at.x, at.y)
+          if (hit.barrier === true) {
+            barriers += 1
+            verify(!hit.hovered,
+                   list[s].name + ": the modal's barrier lights under the pointer. It"
+                   + " is the scrim that makes the one question in the game modal, and"
+                   + " a scrim that lights is telling the child that the screen behind"
+                   + " the question is still reachable.")
+            compare(hit.cursorShape, Qt.ArrowCursor,
+                    list[s].name + ": the barrier offers the pointing hand, which is the"
+                    + " cursor this game uses for `you may press this`.")
+            // ROUND 5, AND IT IS A SEPARATE CLAIM. A press on the barrier dies
+            // there: it takes no action, it counts as no action, and it moves no
+            // focus. A critic deleted the early return and nothing failed.
+            var takenBefore = Actions.takenCount
+            mouseClick(root, at.x, at.y)
+            compare(Actions.takenCount, takenBefore,
+                    list[s].name + ": a click on the modal's barrier was TAKEN as an"
+                    + " action. The press is supposed to die there -- that is what"
+                    + " makes the question modal -- and an action taken arms the"
+                    + " shared guard, so the barrier would start refusing the"
+                    + " question's own footer.")
+          } else {
+            dead += 1
+            verify(!hit.hovered,
+                   list[s].name + ": \"" + hit.label + "\" cannot be pressed right now"
+                   + " and lights under the pointer as though it could. The component's"
+                   + " own promise is `if it lights up when you point at it, you can"
+                   + " press it`; a dead row that lights is that sentence with the"
+                   + " subject removed.")
+          }
+          mouseMove(root, 0, 0)
+        }
+      }
+      verify(dead >= 5, "only " + dead + " drawn-but-unpressable targets were found"
+             + " across every state; the walk is not seeing them, so this case is"
+             + " passing on an empty set")
+      verify(barriers >= 1, "the one modal in the game was never walked with the"
+             + " pointer on its barrier")
+    }
+
+    // ==================================================================
+    // ROUND 5. A CHILD ON A TRACKPAD, AND THE TWO-FINGER TAP.
+    // ==================================================================
+    //
+    // `ui/parts/Clickable.qml` says "Left only. A right-click is the desktop's,
+    // not the game's, and a middle click on a child's trackpad is usually an
+    // accident." A critic replaced `acceptedButtons` with `Qt.AllButtons` and
+    // every test passed -- with a two-finger tap firing `LEAVE`, `RESET FACT
+    // HISTORY` and the confirm sheet's `RESET`.
+    //
+    // The three most irreversible controls in the game are the subject, because
+    // an accidental right-click on a paint swatch is a different colour and an
+    // accidental right-click on a reset is a term of racing gone.
+    function test_42_only_the_left_button_presses_anything() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        var targets = suite.clickTargetsIn(screen)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (hit.barrier === true || !suite.usable(hit, screen) || !hit.destructive)
+            continue
+          checked += 1
+          var at = suite.centreOf(hit)
+          var actedBefore = hit.actedCount
+          var takenBefore = Actions.takenCount
+          mouseMove(root, at.x, at.y)
+          mouseClick(root, at.x, at.y, Qt.RightButton)
+          mouseClick(root, at.x, at.y, Qt.MiddleButton)
+          compare(hit.actedCount, actedBefore,
+                  list[s].name + ": a right-click or a middle-click on \"" + hit.label
+                  + "\" pressed it. It says it does something a child cannot take back,"
+                  + " and a two-finger tap on a trackpad is not a press a child meant"
+                  + " to make.")
+          compare(Actions.takenCount, takenBefore,
+                  list[s].name + ": a right-click on \"" + hit.label + "\" armed the"
+                  + " shared guard, so the child's next real press would be refused")
+          mouseMove(root, 0, 0)
+        }
+      }
+      verify(checked >= 5, "only " + checked + " destructive controls were offered a"
+             + " right-click; the walk is not seeing them")
+    }
+
+    // ==================================================================
+    // ROUND 5. THE AFFORDANCE THAT COMES BEFORE THE CLICK.
+    // ==================================================================
+    //
+    // A critic set `cursorShape` to `Qt.ArrowCursor` everywhere and nothing
+    // failed: it appears in no test and in no column of any parity table. For a
+    // mouse user the cursor is what says "this is pressable" BEFORE they press
+    // it -- it is the only part of the hover promise that is delivered while the
+    // pointer is still travelling -- and the design's "clickable with a hover
+    // state" was half unmeasured.
+    function test_43_every_pressable_thing_offers_the_pointing_hand() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        var targets = suite.clickTargetsIn(screen)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (hit.barrier === true || !suite.usable(hit, screen))
+            continue
+          checked += 1
+          compare(hit.cursorShape, Qt.PointingHandCursor,
+                  list[s].name + ": \"" + hit.label + "\" can be pressed and the pointer"
+                  + " over it stays an arrow. The cursor is the affordance a mouse user"
+                  + " gets before they commit to the press, and it is the one the"
+                  + " maintainer had when he reported that clicking things did not do"
+                  + " much.")
+        }
+      }
+      verify(checked >= 40, "only " + checked + " live targets were asked for their"
+             + " cursor; the walk is not seeing the tree")
+    }
+
     /** The race's own ESC line, as a guarded control that can leave the race. */
     function guardedEscapeLine() {
       var inRace = suite.clickTargetsIn(race)
