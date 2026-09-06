@@ -153,6 +153,26 @@ FocusScope {
   property string pendingDigit: ""
   readonly property bool deferred: picker.pendingDigit.length > 0
 
+  // ======================================================== PIECE M ROUND 5
+  //
+  // THE NAMES THE BACK-OUT GESTURE BELONGS TO, IN ONE PLACE.
+  //
+  // Four routes perform one gesture: this panel's `ESC  BACK` chip, this
+  // panel's own Escape key, the race's `ESC` line, and the race's Escape
+  // branch. Round four gave the two clicks one pair of names and the two keys
+  // another, and a critic drove the gap -- Escape in a race, then a click on
+  // the hand footer 16 ms later, choosing card 1, because the key had armed
+  // `escape` and not `handFooter`.
+  //
+  // The names describe WHAT THE PRESS DOES, so they cannot differ by hand:
+  //
+  //   with a card chosen, backing out puts it back and the footer REDRAWS
+  //   under the pointer as `1 2 3  CHOOSE A CARD`, so the gesture belongs to
+  //   `handFooter` as well as to `escape`;
+  //   with no card chosen it leaves the race and the footer is not involved.
+  readonly property var backOutGuards: picker.chosen >= 0 ? ["escape", "handFooter"]
+                                                          : ["escape"]
+
   // ======================================================== PIECE M ROUND 2
   //
   // THE FOOTER, AS THE LIST OF CONTROLS IT IS.
@@ -259,7 +279,12 @@ FocusScope {
              //   same pixel, and the second half of a double-click chose card 1.
              //   That is round two's walking-repeat defect, verbatim, one
              //   control to the left of where round two fixed it.
-             "guards": ["escape", "handFooter"],
+             //
+             // ROUND 5. The pair is `picker.backOutGuards` now, and it is read
+             // from there by this chip, by the panel's own Escape key handler
+             // and by the race's `ESC` line and Escape branch -- four routes to
+             // one gesture, and the names they belong to written once.
+             "guards": picker.backOutGuards,
              "help": "Puts the chosen card back. All three cards are still yours."
                      + " Escape does it too." }
   }
@@ -284,7 +309,22 @@ FocusScope {
     else if (act === "use")
       picker.useChosen()
     else if (act === "back") {
+      // ROUND 5 -- THE CHIP IS THE THIRD ROUTE TO THE BACK-OUT GESTURE, and it
+      // was doing a third thing. The race's Escape key and its printed `ESC`
+      // line both clear the child's queued keystrokes as part of backing out
+      // (`ui/Race.qml`, `backOutRequested()`); this chip cleared `handTouched`'s
+      // two claims and not the queue, so backing out of a card WITH THIS CHIP
+      // during a reveal window left digits behind to be replayed into the next
+      // fact. It is the pit crew's defect on a second control, and the cause is
+      // the same one: a gesture written out again instead of called.
+      //
+      // The host owns the gesture. `backRequested` is how this chip asks for it,
+      // exactly as `submitRequested` and `undoDigitRequested` above hand Enter
+      // and Backspace to the screen that owns the answer field. Standing alone
+      // in the harness nothing is listening and `back()` below is the whole
+      // behaviour, which is what the panel has always done on its own.
       picker.handTouched()
+      picker.backRequested()
       picker.back()
     } else if (act === "nextRival")
       picker.stepTarget(1)
@@ -490,6 +530,15 @@ FocusScope {
   // needs a race.
   signal submitRequested()
   signal undoDigitRequested()
+
+  // PIECE M ROUND 5. The `ESC  BACK` chip, asked of the host for the same
+  // reason: backing out of a card is a gesture the RACE owns, and the race does
+  // three things this panel cannot see -- it drops a parked digit, retires a
+  // provisional claim, and clears the keystrokes a reveal window is holding.
+  // The chip did two of the three. See `footerAct` above and `ui/Race.qml`'s
+  // `backOutRequested()`. Standing alone there is no host and `back()` is the
+  // whole of it, which is the panel's own unchanged behaviour.
+  signal backRequested()
 
   visible: picker.hand.length > 0 || picker.slamming
 
@@ -715,7 +764,15 @@ FocusScope {
       // Escape branch takes the same name; this is the standalone path, and it
       // has to obey the same rule or the panel means something different in the
       // harness from what it means in the game.
-      if (!Actions.take(["escape"])) {
+      //
+      // ROUND 5 -- AND IT TAKES BOTH NAMES THE CHIP TAKES, not one of the two.
+      // `backHint()` above declares `["escape", "handFooter"]` and says why: the
+      // instant the card goes back the footer redraws as `1 2 3  CHOOSE A CARD`
+      // at the same pixel. A key that armed only `escape` left that redraw
+      // unguarded, and a critic drove exactly that on the race -- Escape, then a
+      // click on the footer 16 ms later, choosing card 1. Which hand performed
+      // the gesture cannot change WHICH NAMES the gesture belongs to.
+      if (!Actions.take(picker.backOutGuards, "key")) {
         event.accepted = true
         return
       }

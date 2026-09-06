@@ -118,7 +118,23 @@ FocusScope {
       // ROUND 4. The same guard the two answer chips and the printed
       // `⏎  ANSWER` line take. Answering is the action; which device sent the
       // press is not part of it. See `ui/parts/Actions.qml`.
-      if (!Actions.take(["confirmAnswer"])) {
+      //
+      // ROUND 5 -- WHAT THIS LINE DOES AND WHAT IT DOES NOT DO, MEASURED.
+      //
+      // It cannot refuse anything, and pretending otherwise is how round four's
+      // comment got away with being wrong for a round. Driven on the shipped
+      // build: answering CLOSES the question, so a key 16 ms after a click never
+      // reaches this handler (it reaches the settings row that focus returned
+      // to), and a click 16 ms after a key is eaten by the extent's tail. Both
+      // orders were driven; neither entered the refusal branch.
+      //
+      // What it does do is ARM, and that is not decoration: it is what makes the
+      // key route and the click route leave the game in the SAME guard state.
+      // `test_29`'s fingerprint compares `Actions.armed` now, so a key that
+      // performed an action without naming it is a failing row rather than a
+      // difference nothing looks at -- which is exactly the blind spot a critic
+      // found in round four's crossover.
+      if (!Actions.take(["confirmAnswer"], "key")) {
         event.accepted = true
         return
       }

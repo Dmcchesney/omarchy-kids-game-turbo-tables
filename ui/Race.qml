@@ -1182,6 +1182,75 @@ FocusScope {
   // tables has become untypable while a hand is held; and no keystroke of the
   // child's is thrown away -- under a stall it waits for the field, and under a
   // reveal it waits for the fact.
+
+  // ======================================================== PIECE M ROUND 5
+  //
+  // THE TWO GESTURES OF THIS SCREEN, EACH WRITTEN ONCE.
+  //
+  // Round four gave the pit crew a click target and wrote above it: "the same
+  // three calls the `H` branch of `keys` makes, in the same order and for the
+  // same reason". It made three of four. The fourth was `clearRevealQueue()`,
+  // and a critic drove what that costs, in a live race, on the busiest screen in
+  // the game:
+  //
+  //     a second wrong answer puts the answer on the screen for 1500 ms
+  //     the child types 7, 5 at it -- the field is gone, so the digits queue
+  //     H            -> revealQueue = []      the digits are dropped
+  //     a click on `H  PIT CREW` -> revealQueue = [7, 5]
+  //
+  // and those two digits are then REPLAYED INTO THE NEXT FACT. A child who
+  // clicks for help gets a wrong answer on the following question through no
+  // fault of their own, and with the keyboard they do not. That is this piece's
+  // central claim failing on a destructive control, and no gate could see it,
+  // because the comment was where the sharing should have been.
+  //
+  // A comment cannot be a contract. These two functions are, and every route to
+  // either gesture -- the key branch below, the printed line's `onTapped`, the
+  // hand panel's chip -- calls one of them and adds nothing of its own. There is
+  // no longer a place for the two to drift apart, so there is no longer a claim
+  // to check by reading.
+  //
+  // `clearRevealQueue()` is unconditional on purpose. Outside a reveal window it
+  // empties an empty array and lowers a flag that is already down; inside one it
+  // is the whole defect. A branch here would be a fifth thing to keep in step.
+
+  /** Show this fact's answer and move on. `H`, and the printed `H` line. */
+  function pitCrewRequested() {
+    if (!race.state)
+      return
+    // The child's held keystrokes belong to the fact they were typed at, and
+    // this moves the fact on.
+    race.clearRevealQueue()
+    // Every claim on the old fact's field dies with it, or it eats the first
+    // digit the child types at the new one.
+    race.dropPending()
+    race.clearProvisional()
+    race.send({ "kind": "hint" })
+  }
+
+  /**
+   * Back out one step: put a chosen card back if there is one, otherwise leave.
+   *
+   * `Escape`, the printed `ESC` line, and the hand panel's `ESC  BACK` chip.
+   * (`docs/design.md:89`, v4.1, deletes the overload -- "Escape only ever leaves
+   * the race" -- and when that lands this becomes one branch. It is piece F's
+   * line to redraw; what this piece owes it is that every route to it is the
+   * same route.)
+   */
+  function backOutRequested() {
+    if (!race.state)
+      return
+    race.clearRevealQueue()
+    if (picker.chosen >= 0) {
+      race.dropPending()
+      race.takeBackProvisional()
+      picker.reset()
+      return
+    }
+    race.dropPending()
+    race.leaveRequested()
+  }
+
   Item {
     id: keys
     anchors.fill: parent
@@ -1209,26 +1278,31 @@ FocusScope {
         // `escape` is the name of the gesture. The chip declares it, the ESC
         // line declares it, and this branch takes it -- so whichever of the
         // three routes the first press came by, the second one inside the
-        // double-click interval is refused. Key->key is refused too, and that is
-        // the change: "indifferent to the route" cannot have an exception for
-        // the route nobody measured. A deliberate second Escape lands 400 ms
-        // later and still leaves; `test_28` holds both halves of that.
-        if (!Actions.take(["escape"])) {
+        // double-click interval is refused.
+        //
+        // ROUND 5 -- AND KEY -> KEY IS NOT, WHICH IS ROUND FOUR REVERTED.
+        //
+        // Round four also refused Escape after Escape, arguing that this line
+        // changes meaning between the two presses. `docs/design.md:89` (v4.1)
+        // has already deleted that overload -- "Escape only ever leaves the
+        // race" -- so the lockout defended a state the game is not supposed to
+        // have, and charged for it in the one currency this piece exists to stop
+        // spending: a press that silently did nothing, with no cursor change, no
+        // flash and no sound. A second Escape leaves the race, as
+        // `tests/qml/tst_race_keys.qml` has always said it does.
+        //
+        // ROUND 5 -- AND IT ARMS BOTH NAMES, not one. `picker.backOutGuards` is
+        // the pair the panel's own chip declares: with a card chosen this press
+        // redraws the hand footer under the pointer, so the gesture belongs to
+        // `handFooter` too. A critic drove the gap -- Escape, then a click on
+        // the footer 16 ms later, choosing card 1.
+        if (!Actions.take(picker.backOutGuards, "key")) {
           event.accepted = true
           return
         }
-        // One meaning: back out of a card choice if there is one, and otherwise
-        // leave the race. Round one had three, and the middle one neither left
-        // nor cleared the digit it had caused.
-        race.clearRevealQueue()
-        if (picker.chosen >= 0) {
-          race.dropPending()
-          race.takeBackProvisional()
-          picker.reset()
-        } else {
-          race.dropPending()
-          race.leaveRequested()
-        }
+        // One meaning, and one function: `backOutRequested()` above, which the
+        // printed `ESC` line and the panel's chip also call.
+        race.backOutRequested()
         event.accepted = true
         return
       }
@@ -1260,8 +1334,12 @@ FocusScope {
           event.accepted = true
           return
         }
-        if (key === Qt.Key_H)
-          race.clearRevealQueue()
+        // `H` is not handled here. ROUND 5: it used to clear the queue here,
+        // BEFORE the guard below had decided whether this press acts at all, so
+        // a refused press still threw the child's digits away -- half a press,
+        // which is the one thing `Actions.take` returning false forbids. The
+        // clearing moved into `pitCrewRequested()`, where the click reaches it
+        // too; falling through is what takes it there.
       }
 
       if (key === Qt.Key_Return || key === Qt.Key_Enter) {
@@ -1291,15 +1369,11 @@ FocusScope {
         // same reason: this spends one of the child's questions and there is no
         // undo, so a press that is the tail of a press already made -- from
         // either hand -- does nothing.
-        if (!Actions.take(["pitCrew"])) {
+        if (!Actions.take(["pitCrew"], "key")) {
           event.accepted = true
           return
         }
-        // The hint moves the fact on. Every claim on the old fact's field dies
-        // with it, or it eats the first digit the child types at the new one.
-        race.dropPending()
-        race.clearProvisional()
-        race.send({ "kind": "hint" })
+        race.pitCrewRequested()
         event.accepted = true
         return
       }
@@ -2546,6 +2620,13 @@ FocusScope {
       race.takeBackProvisional()
     }
 
+    // PIECE M ROUND 5. The panel's `ESC  BACK` chip is a route to THIS screen's
+    // back-out gesture, so it takes the same function the Escape key and the
+    // printed `ESC` line take, rather than a shorter version of it written on
+    // the panel. The chip is drawn only while a card is chosen, so this can only
+    // ever take the put-the-card-back branch.
+    onBackRequested: race.backOutRequested()
+
     // PIECE M ROUND 2. The two footer keys that are the ANSWER's, not the
     // hand's. `⏎  SEND THE ANSWER` and `⏎  ANSWER n` go through `submitKey()`,
     // which is the one place Enter means something on this screen, and
@@ -2647,16 +2728,13 @@ FocusScope {
       // fails `test_30` rather than passing quietly.
       destructive: true
       guards: ["pitCrew"]
-      // The same three calls the `H` branch of `keys` makes, in the same
-      // order and for the same reason: the hint moves the fact on, so every
-      // claim on the old fact's field has to die with it.
-      onTapped: {
-        if (!race.state)
-          return
-        race.dropPending()
-        race.clearProvisional()
-        race.send({ "kind": "hint" })
-      }
+      // ROUND 5. Not "the same calls the `H` branch makes" -- THE SAME
+      // FUNCTION. The prose version of this claim was false for a whole round:
+      // it made three calls of four and dropped `clearRevealQueue()`, so a
+      // child who typed at a revealed answer and then CLICKED for help had those
+      // digits replayed into the next fact, where the `H` key dropped them. See
+      // the block above `pitCrewRequested()`.
+      onTapped: race.pitCrewRequested()
     }
 
     // PIECE M ROUND 2 -- THE LABEL FOLLOWS THE BEHAVIOUR.
@@ -2702,24 +2780,18 @@ FocusScope {
       // that took this one's place, from leaving a race the child was in the
       // middle of. Round three read `leaveHint.guarding` from the key handler to
       // patch one of those three; this is the fix that note deferred.
-      guards: ["escape"]
+      //
+      // ROUND 5. The pair comes from `picker.backOutGuards`, which is where the
+      // hand panel's own chip and both Escape key handlers read it from: with a
+      // card chosen this press REDRAWS THE HAND FOOTER, so the gesture belongs
+      // to `handFooter` as well, whichever hand performs it.
+      guards: picker.backOutGuards
       help: leaveHint.putsCardBack
             ? "Puts the chosen card back. All three cards are still yours."
               + " The Escape key does it too."
             : "Back to the garage. The Escape key does it too."
-      // Escape's own branch, with its one meaning: back out of a card choice
-      // if there is one, and otherwise leave.
-      onTapped: {
-        race.clearRevealQueue()
-        if (picker.chosen >= 0) {
-          race.dropPending()
-          race.takeBackProvisional()
-          picker.reset()
-          return
-        }
-        race.dropPending()
-        race.leaveRequested()
-      }
+      // ROUND 5. Escape's own branch, and the same function it calls.
+      onTapped: race.backOutRequested()
     }
   }
 }

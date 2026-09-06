@@ -168,7 +168,7 @@ MouseArea {
   // change -- the two are different when the state would not have changed
   // anyway. The count is per target; the guard it comes from is shared.
   property int refusedRepeats: 0
-  readonly property bool guarding: Actions.guarding(hit.guards)
+  readonly property bool guarding: Actions.guarding(hit.guards, "click")
 
   // How many presses this target has ACCEPTED. The repeat check reads this
   // rather than a screen state, because "did the second press act" and "did the
@@ -245,7 +245,7 @@ MouseArea {
     // that refuses it belongs to the ACTION, so this is the same refusal a key
     // handler performing the same action gets, and the same one the control
     // that REPLACES this one under the pointer gets.
-    if (!Actions.take(hit.guards)) {
+    if (!Actions.take(hit.guards, "click")) {
       hit.refusedRepeats += 1
       return
     }

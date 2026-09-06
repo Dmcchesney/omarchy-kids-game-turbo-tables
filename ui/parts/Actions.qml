@@ -57,6 +57,48 @@ import QtQuick
 // timer. 400 ms is Qt's own default `mouseDoubleClickInterval` and it is what a
 // double-click means; a number rather than a read of `styleHints` on purpose,
 // so the guard is the same in a test, in the harness and on the child's machine.
+//
+// =========================================================================
+// ROUND 5 -- THE GUARD IS CROSS-ROUTE ONLY. KEY -> KEY IS NOT GUARDED, AND
+// ROUND 4 SHOULD NEVER HAVE MADE IT SO.
+// =========================================================================
+//
+// Round four made `take()` blind to the route, so a second Escape 16 ms after
+// the first was refused. Its argument was that the race's `ESC` line means BACK
+// with a card chosen and LEAVE without, so a child tapping Escape twice cannot
+// have meant the second meaning.
+//
+// `docs/design.md:89` (v4.1) has already deleted that overload: "Enter is only
+// ever the answer key, **Escape only ever leaves the race**." The ambiguity the
+// lockout defends against is not a state this game is supposed to have. So the
+// lockout was protecting a phantom, and it was charging a real price for it: a
+// critic measured Escape refused for ~300 ms with NOTHING drawn, said or played
+// to explain it -- and `grep` over `ui/` finds no renderer for `refusedRepeats`
+// or `guarding` anywhere, so a refused press is indistinguishable from a broken
+// one. The maintainer's standing complaint is a control he had to press several
+// times; a build that deliberately ignores the second press earns that sentence
+// a third time. It was also applied on two screens of six, so the rule it stated
+// was not even the rule the game had.
+//
+// WHAT A ROUTE IS, AND WHY THE OTHER THREE PAIRS STAY GUARDED. The hazard is a
+// SINGLE GESTURE that produces two presses. There are three of those and this
+// keeps all three:
+//
+//   click -> click   the second half of a double-click, landing on the control
+//                    that took the place of the one that was pressed. Round
+//                    two's defect and round four's D1 and D3.
+//   click -> key     a pixel and a key arriving on the same action inside one
+//                    interval. Round four's D2.
+//   key -> click     the same, the other way round. Round four's D4, and the
+//                    mirror a critic drove in round five (an Escape, then a
+//                    click on the hand footer 16 ms later, choosing card 1).
+//
+// The fourth pair is not a gesture. A child pressing the SAME KEY twice pressed
+// it twice, on purpose, with two deliberate movements of one finger; there is no
+// pixel under them that changed and no second control to walk onto. Round three
+// wrote that rule down where it was made and round four reversed it without a
+// measurement behind the reversal. `tests/qml/tst_race_keys.qml` -- the keyboard
+// piece's own spec -- says a second Escape leaves the race, and it says so again.
 QtObject {
   id: actions
 
@@ -64,6 +106,12 @@ QtObject {
 
   // The names armed by the last press that took an action, or empty.
   property var armed: []
+
+  // WHICH HAND ARMED THEM: "click", "key", or "" when nothing is armed. This is
+  // the only thing the guard needs to know about a route, and it is the whole of
+  // the round-five change: a press is refused when its names are armed AND the
+  // pair is not key-after-key.
+  property string armedRoute: ""
 
   // How many presses have been refused as repeats, and how many taken. Here so
   // a test can assert the refusal HAPPENED rather than infer it from a state
@@ -79,12 +127,27 @@ QtObject {
   property Timer expiry: Timer {
     interval: actions.guardMs
     repeat: false
-    onTriggered: actions.armed = []
+    onTriggered: {
+      actions.armed = []
+      actions.armedRoute = ""
+    }
   }
 
-  /** Is any of these action names inside the double-click interval of a press? */
-  function guarding(names) {
+  /**
+   * Is any of these action names inside the double-click interval of a press
+   * that came by a DIFFERENT route -- or by the pointer, twice?
+   *
+   * `route` is "click" or "key". Anything else is read as "click", which is the
+   * guarded reading: a caller that forgets to say gets the stricter answer
+   * rather than the quieter one.
+   */
+  function guarding(names, route) {
     if (!names || names.length === 0 || !actions.expiry.running)
+      return false
+    // KEY AFTER KEY IS NOT A REPEAT. See the block at the top of this file: two
+    // presses of one key are two presses, and the design's Escape has one
+    // meaning to press twice.
+    if (String(route) === "key" && actions.armedRoute === "key")
       return false
     for (var i = 0; i < names.length; i++)
       if (actions.armed.indexOf(String(names[i])) >= 0)
@@ -93,16 +156,20 @@ QtObject {
   }
 
   /**
-   * Take the action these names belong to.
+   * Take the action these names belong to, from this route.
    *
    * False means this press is the tail of a press already taken and the caller
    * must do nothing at all -- focus included, because a control that moved the
    * keyboard on a press it did not act on would be half a press. An action with
    * no names is never guarded and always taken, which is every choosing control
    * in the game.
+   *
+   * A press that is TAKEN always arms, whichever route it came by, because the
+   * next press may come from the other hand: it is the arming that makes
+   * key -> click refusable at all.
    */
-  function take(names) {
-    if (actions.guarding(names)) {
+  function take(names, route) {
+    if (actions.guarding(names, route)) {
       actions.refusedRepeats += 1
       return false
     }
@@ -111,6 +178,7 @@ QtObject {
       for (var i = 0; i < names.length; i++)
         copy.push(String(names[i]))
       actions.armed = copy
+      actions.armedRoute = (String(route) === "key") ? "key" : "click"
       actions.expiry.restart()
     }
     actions.takenCount += 1
@@ -126,5 +194,6 @@ QtObject {
   function clear() {
     actions.expiry.stop()
     actions.armed = []
+    actions.armedRoute = ""
   }
 }
