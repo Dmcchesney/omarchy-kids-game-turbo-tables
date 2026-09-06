@@ -201,7 +201,7 @@ Item {
     function test_10_ready_up_and_leave_fire_on_enter() {
       var races = root.raceRequests
       garage.focusStop(6)
-      compare(garage.focusedName(), "Ready up")
+      compare(garage.focusedName(), "Start the race")
       keyClick(Qt.Key_Return)
       compare(root.raceRequests, races + 1)
 
@@ -245,7 +245,7 @@ Item {
                       "Race mode, GRAND PRIX, change",
                       "Math set, TIMES TABLES 1-12, change",
                       "Rivals, PRO, change",
-                      "Ready up", "Leave"]
+                      "Start the race", "Leave"]
       compare(garage.stops.length, expected.length)
       for (var i = 0; i < expected.length; i++)
         compare(garage.focusName(i), expected[i], "stop " + i)

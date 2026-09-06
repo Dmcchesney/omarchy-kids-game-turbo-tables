@@ -48,8 +48,8 @@ Item {
   // Somewhere for the keyboard to stand that is not a control, so a pixel sweep
   // can ask what HOVER alone draws. `ui/parts/ActionButton.qml` suppresses hover
   // on a control that already has focus -- the focus picture wins, which is the
-  // rule -- so a sweep run with the keyboard parked on READY UP would report
-  // that READY UP does not light. `dev/Harness.qml --focus -1` does the same
+  // rule -- so a sweep run with the keyboard parked on START THE RACE would report
+  // that START THE RACE does not light. `dev/Harness.qml --focus -1` does the same
   // thing for the same reason.
   Item {
     id: focusPark
@@ -703,7 +703,7 @@ Item {
     // ==================================================================
     //
     // A critic set `ui/parts/ActionButton.qml`'s `key: "Enter or Space"` to
-    // `key: "Escape"` -- READY UP, LEAVE, RACE AGAIN, GARAGE, BACK and all
+    // `key: "Escape"` -- START THE RACE, LEAVE, RACE AGAIN, GARAGE, BACK and all
     // three RESETs now declaring that Escape is the key that does what a click
     // does -- and this file reported 27 passed, 0 failed while
     // `--print-controls` went on printing `parity verdict PASS`.
@@ -909,8 +909,8 @@ Item {
       // column names -- the exact mutation that survived round three -- and it
       // has to see the difference.
       suite.freshState(list[0])
-      var ready = suite.targetNamed(garage, "READY UP")
-      verify(ready !== null, "the garage has no READY UP to prove this case with")
+      var ready = suite.targetNamed(garage, "START THE RACE")
+      verify(ready !== null, "the garage has no START THE RACE to prove this case with")
       suite.armKeyboard(garage, ready)
       var readyAt = suite.centreOf(ready)
       mouseMove(root, readyAt.x, readyAt.y)
@@ -920,12 +920,12 @@ Item {
       suite.settleFrame()
       var pressed = suite.settledFingerprint(garage)
       suite.freshState(list[0])
-      suite.armKeyboard(garage, suite.targetNamed(garage, "READY UP"))
+      suite.armKeyboard(garage, suite.targetNamed(garage, "START THE RACE"))
       keyClick(Qt.Key_Escape)
       mouseMove(root, 0, 0)
       suite.settleFrame()
       verify(suite.settledFingerprint(garage) !== pressed,
-             "Escape and a click on READY UP leave this screen in states this case"
+             "Escape and a click on START THE RACE leave this screen in states this case"
              + " cannot tell apart, so the comparison above is blind and every control"
              + " it passed was passed for nothing. This is the mutation that survived"
              + " round three: every button's key set to Escape, 27 tests green.")
@@ -3087,7 +3087,7 @@ Item {
     // `ui/parts/FocusRing.qml` so hover drew the focus ring, the focus fill,
     // the full border and the outer halo -- hover and focus one state -- and
     // all seventeen tests passed. They then set `ActionButton`'s `hovered` to
-    // constant false, so READY UP, LEAVE, RACE AGAIN, GARAGE and all three
+    // constant false, so START THE RACE, LEAVE, RACE AGAIN, GARAGE and all three
     // RESET buttons painted no hover at all, and all seventeen passed again.
     //
     // Both tests read `Clickable.hovered`, which is the raw `MouseArea` state,
@@ -3157,7 +3157,7 @@ Item {
       garage.focusStop(0)
       suite.settleFrame()
 
-      var ready = suite.targetNamed(garage, "READY UP")
+      var ready = suite.targetNamed(garage, "START THE RACE")
       var leave = suite.targetNamed(garage, "LEAVE")
       verify(ready !== null && leave !== null)
       verify(!ready.hovered && !leave.hovered, "something is hovered before the pointer moved")
@@ -3168,34 +3168,34 @@ Item {
 
       var at = suite.centreOf(ready)
       mouseMove(root, at.x, at.y)
-      verify(ready.hovered, "READY UP does not light under the pointer")
-      verify(!leave.hovered, "LEAVE lights when the pointer is on READY UP")
+      verify(ready.hovered, "START THE RACE does not light under the pointer")
+      verify(!leave.hovered, "LEAVE lights when the pointer is on START THE RACE")
       suite.settleFrame()
       var lit = grabImage(garage)
 
       var changed = suite.diff(idle, lit)
       verify(changed.count > 200,
-             "the pointer on READY UP changed " + changed.count + " pixels. A control"
+             "the pointer on START THE RACE changed " + changed.count + " pixels. A control"
              + " that does not light under the pointer is a control a child cannot"
              + " find with a mouse -- and this is the assertion a critic broke by"
              + " setting ActionButton's `hovered` to constant false, with every"
              + " test still passing.")
       var allowed = suite.boxAround(ready, 12)
       verify(suite.inside(changed, allowed),
-             "the pointer on READY UP changed pixels at " + suite.boxText(changed)
+             "the pointer on START THE RACE changed pixels at " + suite.boxText(changed)
              + ", outside its own box " + suite.boxText(allowed)
              + ": hover is leaking onto something the pointer is not on")
 
       var elsewhere = suite.centreOf(leave)
       mouseMove(root, elsewhere.x, elsewhere.y)
-      verify(!ready.hovered, "READY UP stays lit after the pointer left it")
+      verify(!ready.hovered, "START THE RACE stays lit after the pointer left it")
       verify(leave.hovered)
       suite.settleFrame()
       var moved = suite.diff(idle, grabImage(garage))
       verify(moved.count > 200, "LEAVE does not light under the pointer")
       verify(suite.inside(moved, suite.boxAround(leave, 12)),
              "with the pointer on LEAVE, pixels changed at " + suite.boxText(moved)
-             + " -- READY UP did not go back to how it was drawn before")
+             + " -- START THE RACE did not go back to how it was drawn before")
 
       mouseMove(root, 0, 0)
       verify(!ready.hovered && !leave.hovered,
@@ -3220,9 +3220,9 @@ Item {
       garage.focusStop(6)
       suite.settleFrame()
 
-      var ready = suite.targetNamed(garage, "READY UP")
+      var ready = suite.targetNamed(garage, "START THE RACE")
       var leave = suite.targetNamed(garage, "LEAVE")
-      verify(ready.stop.activeFocus, "READY UP is not stop 6")
+      verify(ready.stop.activeFocus, "START THE RACE is not stop 6")
 
       mouseMove(root, 0, 0)
       suite.settleFrame()
@@ -3232,7 +3232,7 @@ Item {
       mouseMove(root, at.x, at.y)
       verify(leave.hovered, "LEAVE is not hovered")
       verify(!leave.stop.activeFocus, "hovering moved the keyboard")
-      verify(ready.stop.activeFocus, "hovering took focus off READY UP")
+      verify(ready.stop.activeFocus, "hovering took focus off START THE RACE")
       suite.settleFrame()
       var hovered = grabImage(garage)
 
@@ -3258,7 +3258,7 @@ Item {
              + ", outside its own box " + suite.boxText(box))
 
       // Focusing it changes it too. Read inside LEAVE's box only: moving the
-      // keyboard from READY UP to LEAVE takes a ring OFF READY UP as well, and
+      // keyboard from START THE RACE to LEAVE takes a ring OFF START THE RACE as well, and
       // that difference is the feature working.
       verify(suite.diff(plain, focused, box).count > 100, "focusing LEAVE draws nothing")
 
@@ -3504,7 +3504,7 @@ Item {
     // this piece removes, and `test_01` would fail on it. Round three made the
     // tiles into controls and a critic had it taken out again, for the reason in
     // `ui/parts/SignalTile.qml`: four dead presses in the keyboard chain between
-    // the settings and READY UP.
+    // the settings and START THE RACE.
     function test_22_a_sign_takes_no_click_and_no_hover() {
       var list = suite.states()
       var checked = 0

@@ -95,7 +95,16 @@ FocusScope {
   // --------------------------------------------------------------- scaling
   readonly property real s: Math.max(0.42, Math.min(width / 1920, height / 1080))
   function px(v) { return Math.round(v * s) }
-  function fs(v) { return Math.max(8, Math.round(v * s)) }
+  // ROUND 12: the floor is 9, not 8. At 1024 x 600 the scale factor is 0.533,
+  // so a 14 px label lands on 7.5 and a 13 px caption on 6.9 -- both of which
+  // the old floor rounded up to 8, and a critic reading the shipped frame called
+  // the whole left column "an unreadable grey texture" for 7 to 11 year olds.
+  // Nine is what the narrowest strip on this screen (the four signal captions,
+  // which have to fit `GOOD GAME` into a quarter of the board) will take without
+  // overflowing, and it is checked by rendering, not by arithmetic. The rest of
+  // the answer is fewer strings: `1 OF 1`, `FIXED`, `CHANGE` twice and the
+  // privacy notice are gone this round.
+  function fs(v) { return Math.max(9, Math.round(v * s)) }
 
   // ------------------------------------------------------------ race setup
   readonly property var modeNames: ["PRACTICE", "TIME TRIAL", "GHOST", "GRAND PRIX"]
@@ -178,6 +187,17 @@ FocusScope {
       }
     }
   }
+
+  // THE CONTROL THIS SCREEN EXISTS FOR, PUBLISHED BY NAME.
+  //
+  // ROUND 12. `ui/Game.qml` used to find it by scanning `stops` for a spoken
+  // name beginning with "READY", falling back to the first stop. That is a
+  // string match on a label a designer is free to change, and this round changed
+  // it: the button now says START THE RACE, and under the old matcher every
+  // arrival on the garage -- including the one straight after a race -- would
+  // silently have landed on the kart-body stepper instead. The screen names its
+  // own primary control; nothing outside has to guess.
+  readonly property Item startStop: readyButton
 
   // ---------------------------------------------------------- focus chain
   // The same items, in the same order, that Tab walks. Kept as a list so the
@@ -361,7 +381,29 @@ FocusScope {
       // right edge and the board's right edge are now the same line by
       // construction. Nothing here can loop: `unit` is a function of the page's
       // size only, and the board's x and width are functions of `garage.s`.
-      wallX: stall.unit > 0 ? (board.x + board.width) / stall.unit : 368
+      // ROUND 12: AND THE BOARD IS INSET FROM IT, BY THE SAME GUTTER IT HAS ON
+      // THE OTHER SIDE.
+      //
+      // Round eleven made the jamb and the board's right edge ONE LINE, which
+      // fixed the board standing out in the open bay -- and created the defect a
+      // critic then measured: the wall's lit rim highlight runs down the masonry
+      // from y = 118 and STOPS DEAD at y = 466, where the board's top-left
+      // corner reaches it, and never comes out below. Under that line the
+      // board's own flat unlit edge became the wall's edge, so the wall visibly
+      // changed material two thirds of the way down its own height. The gutters
+      // said the same thing: 22 px of wall showing on the board's left, 1 px on
+      // its right. Nothing was inset; the board was simply shoved until it was
+      // flush with the lit edge.
+      //
+      // The wall now ends one gutter PAST the board, and that gutter is the
+      // board's own left margin, so the board is a board leaning on a wall with
+      // the same air on both sides and the room's brightest warm line runs
+      // uninterrupted from the door head to the floor. It also moves the tyre
+      // stack, which is placed at `wallX + 6`, off the board's edge: a critic
+      // measured it crowding the panel at all three sizes, never touching and
+      // never clearing.
+      wallX: stall.unit > 0
+             ? (board.x + board.width + page.contentX) / stall.unit : 368
 
       // AND THE DOOR HEAD IS THE TITLE BAND'S FLOOR.
       //
@@ -799,7 +841,14 @@ FocusScope {
               id: paintGrid
               width: parent.width
               height: garage.px(96)
-              gap: garage.px(8)
+              gap: garage.px(5)
+              inset: garage.px(5)
+              plate: Theme.duskSurfaceSunken
+              plateBorder: Theme.line
+              // Measured: at rest the eight chips were the highest-chroma
+              // object on the screen and the first thing a squint found. 0.72
+              // of value, hue untouched.
+              rest: 0.72
               selected: garage.paintIndex
               onPicked: function (index) {
                 Store.setSetting("kartPaint", index)
@@ -809,16 +858,12 @@ FocusScope {
           }
         }
 
-        Text {
-          width: parent.width
-          textFormat: Text.PlainText
-          wrapMode: Text.WordWrap
-          text: "Colors and numbers are visible to all racers."
-          color: Theme.text
-          font.family: Theme.mono
-          font.pixelSize: garage.fs(14)
-          lineHeight: 1.2
-        }
+        // ROUND 12: `Colors and numbers are visible to all racers.` is gone. It
+        // was written for a parent, it is a privacy notice on a screen whose
+        // only other racers are three bots on this computer, and at 1024 x 600
+        // it rendered at eight pixels -- a grey texture under the one control a
+        // child came here to play with. THIS COMPUTER ONLY, in the title band,
+        // is the same fact in words a parent and a child both parse.
 
         // ----------------------------------------------- section two: the race
         Rectangle {
@@ -873,35 +918,17 @@ FocusScope {
           // played at, the two they cannot are smaller as well as quieter, and
           // the column is shorter than it would be with five rows at 50.
           readonly property int rowH: garage.px(50)
-          readonly property int fixedRowH: garage.px(38)
           readonly property int labelPx: garage.fs(14)
           readonly property int valuePx: garage.fs(20)
-          readonly property int labelWidthPx: garage.px(118)
+          readonly property int labelWidthPx: garage.px(126)
 
-          SettingRow {
-            width: parent.width
-            height: parent.fixedRowH
-            art: Glyphs.flag
-            label: "TRACK"
-            spokenName: "Track"
-            value: garage.circuit
-            changeable: false
-            fixedLabel: "1 OF 1"
-            labelSize: parent.labelPx
-            valueSize: parent.valuePx
-            labelWidth: parent.labelWidthPx
-            labelColor: Theme.duskTextQuiet
-            valueColor: Theme.duskTextQuiet
-            fixedColor: Theme.duskTextQuiet
-          }
           SettingRow {
             id: modeRow
             width: parent.width
             height: parent.rowH
-            separator: true
             labelColor: Theme.text
             art: Glyphs.clock
-            label: "RACE MODE"
+            label: "MODE"
             spokenName: "Race mode"
             value: garage.modeNames[garage.raceMode]
             labelSize: parent.labelPx
@@ -945,22 +972,36 @@ FocusScope {
             chipBorder: Theme.duskPressEdge
             onStepped: function (delta) { garage.cycle("rivalLevel", delta, 3) }
           }
-          SettingRow {
-            width: parent.width
-            height: parent.fixedRowH
-            separator: true
-            art: Glyphs.trophy
-            label: "GOAL"
-            spokenName: "Goal"
-            value: "FINISH ALL " + garage.setLaps[garage.mathSet] + " LAPS"
-            changeable: false
-            labelColor: Theme.duskTextQuiet
-            valueColor: Theme.duskTextQuiet
-            fixedColor: Theme.duskTextQuiet
-            labelSize: parent.labelPx
-            valueSize: parent.valuePx
-            labelWidth: parent.labelWidthPx
-          }
+        }
+
+        // ROUND 12 -- THE TWO ROWS THAT COULD NEVER BE PRESSED ARE A SENTENCE
+        // NOW, AND THAT IS THE POINT.
+        //
+        // TRACK and GOAL were laid out as settings rows: same icon, same label
+        // column, same value column, same chip column, same height give or take
+        // twelve pixels as the three rows that DO something. Round ten's answer
+        // was to dim them, and a critic measured what that came to -- alpha
+        // 0.922 against 1.000, a 7.8 % dimming, invisible -- on a screen whose
+        // title band promises `CLICK ANYTHING THAT LIGHTS UP`. A child clicks
+        // GOLDEN HOUR, nothing happens, twice, in the first minute.
+        //
+        // A fact is not a disabled control, and the fix is not a better disabled
+        // state: it is to stop drawing a fact as a control. Both facts survive
+        // -- a child who wonders what track this is and how long a race lasts
+        // gets both answers -- as one line of prose in the caption voice, with
+        // no icon, no columns, no row height and nothing to press. It also
+        // spends two fewer of the five cool-blue glyphs this warm room was
+        // importing for decoration.
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          text: "ONE TRACK, " + garage.circuit + ". FINISH ALL "
+                + garage.setLaps[garage.mathSet] + " LAPS TO WIN."
+          color: Theme.text
+          font.family: Theme.mono
+          font.pixelSize: garage.fs(15)
+          lineHeight: 1.25
         }
 
         // -------------------------------------------- section three: signals
@@ -1019,10 +1060,21 @@ FocusScope {
               height: parent.height
               art: Glyphs.thumbUp
               caption: "NICE RUN"
-              // ROUND-8: the four tones are now four hues of the room -- cream,
-              // amber, the deep amber and the sky's own neon pink. Lime and the
-              // theme accent were the two off-bar colours in the set.
-              tone: Theme.cream
+              // ROUND 12 -- FOUR TONES BECOME ONE, BECAUSE FOUR TONES WAS THE
+              // TILES CLAIMING TO BE CONTROLS.
+              //
+              // Round eight gave each tile a hue of the room: cream, amber,
+              // deep amber, neon pink. It is a legend -- there is no key that
+              // sends a signal from the garage, so a click here would be the
+              // mouse-only path the design forbids, and that decision stands.
+              // But a critic put it exactly: they were "bright, click-shaped,
+              // and take no click", four labelled colour tiles immediately left
+              // of the loudest button on a screen that prints CLICK ANYTHING
+              // THAT LIGHTS UP. Four different colours is how a row of buttons
+              // is drawn; one quiet tone, the same tone as every other caption
+              // on this board, is how a list is. The vocabulary and the icons
+              // are untouched -- the child still learns the four signals.
+              tone: Theme.text
               captionSize: garage.fs(13)
             }
             SignalTile {
@@ -1031,7 +1083,7 @@ FocusScope {
               height: parent.height
               art: Glyphs.flag
               caption: "READY"
-              tone: Theme.amber
+              tone: Theme.text
               captionSize: garage.fs(13)
             }
             SignalTile {
@@ -1040,7 +1092,7 @@ FocusScope {
               height: parent.height
               art: Glyphs.rematch
               caption: "REMATCH?"
-              tone: "#ee8b3a"
+              tone: Theme.text
               captionSize: garage.fs(13)
             }
             SignalTile {
@@ -1049,10 +1101,7 @@ FocusScope {
               height: parent.height
               art: Glyphs.hand
               caption: "GOOD GAME"
-              // The sky's own neon pink, one step paler. `duskNeon` itself
-              // (#ff4fa3) measured 4.11:1 on this board at 13 px; #ff8cc4 is
-              // the same hue at 5.83:1. The design names the hue, not the step.
-              tone: "#ff8cc4"
+              tone: Theme.text
               captionSize: garage.fs(13)
             }
           }
@@ -1062,10 +1111,26 @@ FocusScope {
 
     // =====================================================  the right column
     //
-    // The grid, then the way on to it. Round nine split this into a roster
-    // block that ended where the bottom band began and an actions block that
-    // started there, so READY UP was as tall as the settings board happened to
-    // be. It is one column now and the button is sized on its own merit.
+    // The grid, then the way on to it -- as ONE BOARD, which is the same kind of
+    // object as the board on the left of the room, so the screen has two panels
+    // standing in a bay rather than a panel on the left and a scatter of loose
+    // cards on the right.
+    //
+    // ROUND 12, AND IT IS THE OTHER HALF OF THE "TWO DESIGNS SHARING A SCREEN"
+    // FINDING. Round nine's cards floated free on the room. A critic measured
+    // what was between them: the four seats ended at y = 600 and READY UP began
+    // at y = 731, and in that 131 px gap the raw landscape ran straight through
+    // the middle of the menu column -- mountains, a horizon, a dozen light lines
+    // and the floor's yellow hazard chevron, dead level, reading as a strip of
+    // tape stuck across the UI. At 1024 x 600 it was five stacked stripes of
+    // unrelated background art inside a menu.
+    //
+    // A column is a surface with things on it. The gap between the roster and
+    // the action is now BOARD -- deliberate air inside one object, which is what
+    // the space between a list and its confirm button is in any interface -- and
+    // the gaps are computed from what is left over rather than fixed, so the
+    // column is evenly spread at every window size instead of butted to the top
+    // with the remainder falling out of the bottom.
     Item {
       id: rightColumn
       x: page.rightX
@@ -1073,142 +1138,9 @@ FocusScope {
       width: page.rightW
       height: page.bottomEdge - page.mainY
 
-      readonly property int youH: garage.px(104)
-      readonly property int rivalH: garage.px(92)
-      readonly property int gap: garage.px(9)
-
-      RosterSlot {
-        id: youSlot
-        objectName: "rosterYou"
-        width: parent.width
-        height: rightColumn.youH
-        y: 0
-        scaleUnit: garage.s
-        surface: Theme.duskSurfaceRaised
-        sunkenSurface: Theme.duskSurfaceSunken
-        name: "YOU"
-        number: garage.kartNumber
-        paintIndex: garage.paintIndex
-        bodyIndex: garage.bodyIndex
-        level: -1
-        ready: false
-        statusText: "YOUR KART"
-      }
-
-      // ROUND 10 -- THE THREE RIVALS ARE A SMALLER VERSION OF THE SAME ROW.
-      //
-      // Four identical 100 px seats meant the child's own row -- the one row on
-      // this screen that changes as they build their car -- carried a quarter
-      // of the roster's weight. Nothing is taken out of a rival seat: the
-      // design lists kart, colour, number, ready lamp and level badge, and
-      // `tst_garage_keyboard.qml` test_18 checks all four karts are drawn at
-      // full strength in every race mode. The whole seat is drawn at 0.86 of
-      // the child's, through the scale unit the component already takes, so
-      // the hierarchy is size and nothing is dimmed or dropped.
-      Repeater {
-        model: 3
-
-        RosterSlot {
-          width: rightColumn.width
-          height: rightColumn.rivalH
-          y: rightColumn.youH + rightColumn.gap
-             + index * (rightColumn.rivalH + rightColumn.gap)
-          scaleUnit: garage.s * 0.86
-          surface: Theme.duskSurfaceRaised
-          sunkenSurface: Theme.duskSurfaceSunken
-          name: Theme.rivalNames[index]
-          number: Theme.rivalNumbers[index]
-          paintIndex: Theme.rivalPaints[index]
-          bodyIndex: index + 1
-          level: garage.rivalLevel
-          ready: true
-          // ROUND-7: the row's chrome dims, the kart keeps its paint.
-          inRace: garage.rivalsRace
-        }
-      }
-
-      // Where the mock's approved-friend and device-verified legend sits.
-      // A sign, not a control: no fill, no border, and out of the Tab chain.
-      //
-      // ROUND 10: one line, not a block. It was 602 x 112 with a 27 px heading
-      // and a lock glyph the size of the settings icons -- the third loudest
-      // object in a frame whose subject is a car, about a thing that cannot be
-      // done and will not exist until a platform does. It says exactly what it
-      // said, quietly, where a footnote goes.
-      ActionButton {
-        id: friendTile
-        width: parent.width
-        height: garage.px(56)
-        y: rightColumn.youH + rightColumn.gap
-           + 3 * (rightColumn.rivalH + rightColumn.gap)
-        art: Glyphs.lock
-        tone: "off"
-        variant: "sign"
-        surface: Theme.duskSurfaceSunken
-        offTone: Theme.text
-        mutedColor: Theme.text
-        focusable: false
-        label: "RACE A FRIEND"
-        sublabel: "Ask a parent to install Kids Play"
-        labelSize: garage.fs(19)
-        sublabelSize: garage.fs(14)
-        iconSize: garage.px(20)
-        Accessible.name: "Race a friend, not available"
-        Accessible.description: "Ask a parent to install Kids Play. This game races the three rivals on this computer only."
-      }
-
-      // The primary action is filled, is more than three times the height of
-      // the way out, and carries the only 54 px word on the screen after the
-      // title. Round one gave the two the same outline, the same layout and
-      // nearly the same footprint, so a child scanning this column saw two
-      // equal buttons one of which quits.
-      //
-      // ROUND-9: STILL THE LOUDEST CONTROL, NO LONGER THE BRIGHTEST OBJECT IN
-      // THE PICTURE.
-      //
-      // Round seven's charge was a lime slab bigger than the sky. Round eight
-      // recoloured it to the design's amber, which moved the green metric 23x
-      // and the composition not at all: at `#f5a524` it carried 23.8 % of the
-      // frame's luminous mass on 4.8 % of its area -- twice the whole sky and
-      // 6.8x the sun disc -- so a control out-shone the light source this
-      // whole direction is built on, in the sun's own hue family.
-      //
-      // The fix is value, not hue, and not making it hard to find. The FILL
-      // drops to the amber's own deep ember; the amber itself stays, on the
-      // border, on the flag and in the focus state, where it costs a few
-      // thousand pixels instead of a hundred thousand; and the label goes to
-      // cream, which on the ember measures HIGHER than the dark ink measured
-      // on the amber. Focus still brightens the fill and thickens the border,
-      // never pales it. `goFill` and `goInk` default to the old behaviour, so
-      // Results and Settings are byte-identical.
-      //
-      // ROUND 10: 148 px becomes 236, because the room to do it came out of
-      // the friend notice and the rival seats and there is nothing else in
-      // this column competing for it. This is the screen's one exciting thing
-      // and it should read as the exciting thing, not as one more row.
-      ActionButton {
-        id: readyButton
-        width: parent.width
-        height: garage.px(236)
-        y: leaveButton.y - garage.px(11) - height
-        art: Glyphs.flag
-        tone: "go"
-        goTone: Theme.amber
-        goFill: Theme.emberDeep
-        goInk: Theme.cream
-        variant: "primary"
-        label: "READY UP"
-        sublabel: garage.rivalsRace ? "STARTS THE COUNTDOWN AGAINST THREE RIVALS"
-                                    : "STARTS THE COUNTDOWN"
-        labelSize: garage.fs(54)
-        sublabelSize: garage.fs(17)
-        iconSize: garage.px(52)
-        Accessible.name: "Ready up"
-        Accessible.description: "Starts the countdown. " + garage.modeNames[garage.raceMode]
-                                + ", " + garage.setNames[garage.mathSet] + "."
-        onActivated: garage.raceRequested()
-      }
-
+      // The way out stands under the board, on the room's own floor, at a
+      // sixth of the primary action's height. It is not on the board because it
+      // is not part of setting up a race.
       ActionButton {
         id: leaveButton
         width: parent.width
@@ -1226,6 +1158,190 @@ FocusScope {
         Accessible.name: "Leave"
         Accessible.description: "Back to the garage home. Escape does it too."
         onActivated: garage.leaveRequested()
+      }
+
+      Panel {
+        id: rightBoard
+        width: parent.width
+        height: leaveButton.y - garage.px(11)
+        color: Theme.duskSurface
+        // The opening is above and LEFT of this board, so the sun lands on its
+        // top edge, the same way it lands on the left board's.
+        litSide: "top"
+
+        readonly property int pad: garage.px(14)
+        readonly property int innerW: width - pad * 2
+        readonly property int youH: garage.px(104)
+        readonly property int rivalH: garage.px(92)
+        readonly property int friendH: garage.px(52)
+        readonly property int readyH: garage.px(196)
+        readonly property int stackH: youH + 3 * rivalH + friendH
+        // Five gaps: three between the four seats, one to the friend notice, one
+        // to the action. `px(9)` is the floor, so a short window packs rather than
+        // overlapping.
+        readonly property int gap: Math.max(garage.px(9),
+                                            Math.floor((height - pad * 2 - stackH
+                                                        - readyH) / 5))
+
+        RosterSlot {
+          id: youSlot
+          objectName: "rosterYou"
+          width: rightBoard.innerW
+          x: rightBoard.pad
+          height: rightBoard.youH
+          y: rightBoard.pad
+          scaleUnit: garage.s
+          surface: Theme.duskSurfaceRaised
+          sunkenSurface: Theme.duskSurfaceSunken
+          name: "YOU"
+          number: garage.kartNumber
+          paintIndex: garage.paintIndex
+          bodyIndex: garage.bodyIndex
+          level: -1
+          ready: false
+          statusText: "YOUR KART"
+        }
+
+        // ROUND 10 -- THE THREE RIVALS ARE A SMALLER VERSION OF THE SAME ROW.
+        //
+        // Four identical 100 px seats meant the child's own row -- the one row on
+        // this screen that changes as they build their car -- carried a quarter
+        // of the roster's weight. Nothing is taken out of a rival seat: the
+        // design lists kart, colour, number, ready lamp and level badge, and
+        // `tst_garage_keyboard.qml` test_18 checks all four karts are drawn at
+        // full strength in every race mode. The whole seat is drawn at 0.86 of
+        // the child's, through the scale unit the component already takes, so
+        // the hierarchy is size and nothing is dimmed or dropped.
+        Repeater {
+          model: 3
+
+          RosterSlot {
+            width: rightBoard.innerW
+            x: rightBoard.pad
+            height: rightBoard.rivalH
+            y: rightBoard.pad + rightBoard.youH + rightBoard.gap
+               + index * (rightBoard.rivalH + rightBoard.gap)
+            scaleUnit: garage.s * 0.86
+            surface: Theme.duskSurfaceRaised
+            sunkenSurface: Theme.duskSurfaceSunken
+            name: Theme.rivalNames[index]
+            number: Theme.rivalNumbers[index]
+            paintIndex: Theme.rivalPaints[index]
+            bodyIndex: index + 1
+            level: garage.rivalLevel
+            ready: true
+            // ROUND-7: the row's chrome dims, the kart keeps its paint.
+            inRace: garage.rivalsRace
+          }
+        }
+
+        // Where the mock's approved-friend and device-verified legend sits.
+        // A sign, not a control: no fill, no border, and out of the Tab chain.
+        //
+        // ROUND 10: one line, not a block. It was 602 x 112 with a 27 px heading
+        // and a lock glyph the size of the settings icons -- the third loudest
+        // object in a frame whose subject is a car, about a thing that cannot be
+        // done and will not exist until a platform does. It says exactly what it
+        // said, quietly, where a footnote goes.
+        ActionButton {
+          id: friendTile
+          width: rightBoard.innerW
+          x: rightBoard.pad
+          height: rightBoard.friendH
+          y: rightBoard.pad + rightBoard.youH
+             + 3 * (rightBoard.rivalH + rightBoard.gap) + rightBoard.gap
+          art: Glyphs.lock
+          tone: "off"
+          variant: "sign"
+          surface: Theme.duskSurfaceSunken
+          offTone: Theme.text
+          mutedColor: Theme.text
+          focusable: false
+          label: "RACE A FRIEND"
+          sublabel: "Ask a parent to install Kids Play"
+          labelSize: garage.fs(19)
+          sublabelSize: garage.fs(14)
+          iconSize: garage.px(20)
+          Accessible.name: "Race a friend, not available"
+          Accessible.description: "Ask a parent to install Kids Play. This game races the three rivals on this computer only."
+        }
+
+        // The primary action is filled, is more than three times the height of
+        // the way out, and carries the only 54 px word on the screen after the
+        // title. Round one gave the two the same outline, the same layout and
+        // nearly the same footprint, so a child scanning this column saw two
+        // equal buttons one of which quits.
+        //
+        // ROUND-9: STILL THE LOUDEST CONTROL, NO LONGER THE BRIGHTEST OBJECT IN
+        // THE PICTURE.
+        //
+        // Round seven's charge was a lime slab bigger than the sky. Round eight
+        // recoloured it to the design's amber, which moved the green metric 23x
+        // and the composition not at all: at `#f5a524` it carried 23.8 % of the
+        // frame's luminous mass on 4.8 % of its area -- twice the whole sky and
+        // 6.8x the sun disc -- so a control out-shone the light source this
+        // whole direction is built on, in the sun's own hue family.
+        //
+        // The fix is value, not hue, and not making it hard to find. The FILL
+        // drops to the amber's own deep ember; the amber itself stays, on the
+        // border, on the flag and in the focus state, where it costs a few
+        // thousand pixels instead of a hundred thousand; and the label goes to
+        // cream, which on the ember measures HIGHER than the dark ink measured
+        // on the amber. Focus still brightens the fill and thickens the border,
+        // never pales it. `goFill` and `goInk` default to the old behaviour, so
+        // Results and Settings are byte-identical.
+        //
+        // ROUND 10: 148 px becomes 236, because the room to do it came out of
+        // the friend notice and the rival seats and there is nothing else in
+        // this column competing for it. This is the screen's one exciting thing
+        // and it should read as the exciting thing, not as one more row.
+        //
+        // ROUND 12: 236 BECOMES 216, AND IT SAYS WHAT IT DOES.
+        //
+        // At 556 x 236 this was 131,000 px of flat brown -- about 2.7 times the
+        // car's painted silhouette, the single biggest object on a screen whose
+        // subject is a car -- and a critic squint-testing the frame at 16:1 found
+        // it FOURTH in the eye order, ahead of the hero. Taking a fifth of its
+        // area off while the hero gains a rim, a key and a shadow is most of that
+        // gap closed; sitting on a board instead of on open landscape is the rest,
+        // because a filled slab on a surface reads as a button and the same slab
+        // on a sunset reads as a hole.
+        //
+        // AND THE WORDS. "READY UP" is lobby-shooter jargon; a seven-year-old does
+        // not use it, and "rivals" is not a Year 3 word either. Worse, the word
+        // RACE appeared three times on this screen -- THE RACE, RACE MODE, RACE A
+        // FRIEND -- every one of them a label on something that is NOT the go
+        // button, so the verb the child came for was spent three times on
+        // furniture and never once on the control that does it. The button takes
+        // the verb back, and the line under it is what happens next in the four
+        // words a child already knows.
+        ActionButton {
+          id: readyButton
+          width: rightBoard.innerW
+          x: rightBoard.pad
+          height: rightBoard.readyH
+          y: rightBoard.height - rightBoard.pad - height
+          art: Glyphs.flag
+          tone: "go"
+          goTone: Theme.amber
+          // ROUND 12: one step under `Theme.emberDeep`. At the ember itself
+          // this slab was the warmest large field in the frame after the sky,
+          // and the hierarchy this screen needs is car first, button second.
+          // The amber border, the flag and the cream label are untouched, so
+          // the control is no harder to find -- it is the FILL that shouted.
+          goFill: "#7a3313"
+          goInk: Theme.cream
+          variant: "primary"
+          label: "START THE RACE"
+          sublabel: "3 . 2 . 1 . GO!"
+          labelSize: garage.fs(44)
+          sublabelSize: garage.fs(20)
+          iconSize: garage.px(46)
+          Accessible.name: "Start the race"
+          Accessible.description: "Starts the countdown. " + garage.modeNames[garage.raceMode]
+                                  + ", " + garage.setNames[garage.mathSet] + "."
+          onActivated: garage.raceRequested()
+        }
       }
     }
   }

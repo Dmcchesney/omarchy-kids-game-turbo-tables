@@ -77,7 +77,7 @@ Item {
   Accessible.name: slot.name + ", number " + slot.number + ", "
                    + Theme.paintName(slot.paintIndex).toLowerCase() + " "
                    + Theme.bodyName(slot.bodyIndex).toLowerCase() + ", "
-                   + (slot.isChild ? "in the stall"
+                   + (slot.isChild ? "your kart"
                                    : (slot.inRace ? "ready" : "sitting this race out"))
 
   implicitHeight: u(100)
@@ -199,7 +199,11 @@ Item {
     color: slot.isChild ? Theme.text : Theme.amber
     font.family: Theme.mono
     font.bold: !slot.isChild
-    font.pixelSize: slot.u(15)
+    // ROUND 12 OF PIECE 3: a floor, because this row's own scale unit is a
+    // FRACTION of the screen's -- a rival seat is drawn at 0.86 -- so at
+    // 1024 x 600 these words landed on seven pixels while the screen's own type
+    // floor was nine. A component that scales itself needs its own floor.
+    font.pixelSize: Math.max(9, slot.u(15))
     font.letterSpacing: slot.u(1)
   }
 
@@ -272,12 +276,28 @@ Item {
     color: "transparent"
     border.width: 0
 
+    // ROUND 12 OF PIECE 3 -- `IN STALL` IS GONE, AND SO IS THE ONE DEAD LAMP.
+    //
+    // This is the maintainer's own session-1 complaint reappearing in a new
+    // place. `OFFLINE` was retired from the title bar because a seven-year-old
+    // reads it as broken; the child's own seat then read `IN STALL` beside the
+    // only unlit lamp on the screen, while the three bots under it read `READY`
+    // with lit gold ones. A car that has stalled is a car that has broken down,
+    // so the sentence the roster made was "three racers are ready and you are
+    // broken" -- on the first screen of the game, about the child.
+    //
+    // A ready lamp is a readout of a state, and the child has no ready state to
+    // read out: they become ready by pressing the button, and until they do
+    // there is nothing true to say. So the child's seat has no lamp and no word
+    // at all. It says who they are, what they are driving and in what colour,
+    // which is everything this row is for.
     Text {
       id: lampLabel
+      visible: !slot.isChild
       textFormat: Text.PlainText
       anchors.horizontalCenter: parent.horizontalCenter
       y: slot.u(11)
-      text: slot.isChild ? "IN STALL" : (slot.inRace ? "READY" : "SITTING OUT")
+      text: slot.inRace ? "READY" : "SITTING OUT"
       // Full strength, not `textLabel`. This word IS the row's state, and at
       // 0.80 alpha over the lamp's lit-side bevel it measured 4.23:1 on the
       // shipped Practice frame -- under the design's floor.
@@ -286,11 +306,12 @@ Item {
       color: slot.lit ? Theme.amberGlow : Theme.text
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: slot.u(15)
+      font.pixelSize: Math.max(9, slot.u(15))
       font.letterSpacing: slot.u(1)
     }
 
     Rectangle {
+      visible: !slot.isChild
       anchors.horizontalCenter: parent.horizontalCenter
       y: lampLabel.y + lampLabel.height + slot.u(8)
       // Smaller with the pill gone: a lamp beside a word rather than the face of

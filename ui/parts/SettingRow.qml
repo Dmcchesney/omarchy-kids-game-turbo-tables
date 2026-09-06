@@ -215,7 +215,9 @@ Item {
       color: row.changeable ? Theme.text : row.fixedColor
       font.family: Theme.mono
       font.bold: true
-      font.pixelSize: Math.round(row.labelSize * 0.92)
+      // ROUND 12 OF PIECE 3: floored at 9. At 1024 x 600 the garage's own
+      // label size is already at ITS floor, and 0.92 of a floor is under it.
+      font.pixelSize: Math.max(9, Math.round(row.labelSize * 0.92))
       font.letterSpacing: 1
     }
 

@@ -14,13 +14,41 @@ Item {
   property int selected: 0
   property int columns: 4
   property real gap: 8
+  // ROUND 12 OF PIECE 3 -- THE EIGHT ARE ONE OBJECT, AND SEVEN OF THEM ARE
+  // QUIET UNTIL THEY ARE POINTED AT.
+  //
+  // Squint-tested at 16:1, this grid was the FIRST thing the eye reached on the
+  // garage -- ahead of the sun, the work light, the go button and, fifth, the
+  // car the screen exists to show. The measurement is unarguable: the swatches
+  // carry saturation 0.58 to 0.76 at value 0.79 to 0.95 across the WHOLE hue
+  // circle -- green at h=0.29, blue at h=0.60, purple at h=0.76 -- while every
+  // other pixel in that room lives between h=0.88 and h=0.13. A rainbow is the
+  // only foreign-hue object in a strictly warm scene, so it wins, and it is a
+  // control in the opposite corner from the subject.
+  //
+  // Two changes, and neither takes a colour away from the child. `plate` puts
+  // the eight on one sunken face with a border, so they read as one palette
+  // rather than eight competing colour fields. `rest` darkens the ones that are
+  // not chosen, keeping their hue exactly -- a dark green is still green, and a
+  // child picking green can see it is green -- while the chosen paint keeps full
+  // chroma and its white ring. The pointer restores a swatch to its true colour
+  // on hover, so the grid answers the pointer with the one thing it is about.
+  property color plate: "transparent"
+  property color plateBorder: "transparent"
+  property real inset: 0
+  property real rest: 1.0
 
   signal picked(int index)
 
   readonly property int count: Theme.paints.length
   readonly property int rows: Math.ceil(count / columns)
-  readonly property real cellW: (width - gap * (columns - 1)) / columns
-  readonly property real cellH: (height - gap * (rows - 1)) / rows
+  readonly property real cellW: (width - inset * 2 - gap * (columns - 1)) / columns
+  readonly property real cellH: (height - inset * 2 - gap * (rows - 1)) / rows
+
+  function faceOf(index) {
+    var c = Theme.paint(index)
+    return (index === grid.selected || grid.rest >= 0.999) ? c : Qt.darker(c, 1 / grid.rest)
+  }
 
   // ROUND-8: NOT in Qt's implicit tab chain, and that is what makes the
   // screen's own Tab handler reachable. Qt Quick delivers a key to the focused
@@ -53,13 +81,24 @@ Item {
     }
   }
 
+  // The palette's own face. Drawn only when a caller asks for one, so every
+  // other screen that uses this grid is unchanged to the pixel.
+  Rectangle {
+    visible: grid.plate.a > 0 || grid.plateBorder.a > 0
+    anchors.fill: parent
+    radius: Theme.cornerRadiusSmall + 2
+    color: grid.plate
+    border.width: grid.plateBorder.a > 0 ? 1 : 0
+    border.color: grid.plateBorder
+  }
+
   Repeater {
     model: grid.count
 
     Item {
       id: cell
-      x: (index % grid.columns) * (grid.cellW + grid.gap)
-      y: Math.floor(index / grid.columns) * (grid.cellH + grid.gap)
+      x: grid.inset + (index % grid.columns) * (grid.cellW + grid.gap)
+      y: grid.inset + Math.floor(index / grid.columns) * (grid.cellH + grid.gap)
       width: grid.cellW
       height: grid.cellH
 
@@ -74,7 +113,7 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: Theme.cornerRadiusSmall
-        color: Theme.paint(index)
+        color: cell.hovered ? Theme.paint(index) : grid.faceOf(index)
         border.width: index === grid.selected ? 3 : (cell.hovered ? 2 : 1)
         border.color: index === grid.selected
                       ? "#ffffff"

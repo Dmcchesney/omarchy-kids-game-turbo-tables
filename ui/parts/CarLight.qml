@@ -52,7 +52,7 @@ Item {
   // above and to the sun side. One warm tone, strongest at the roof and stepped
   // down the body over `keyReach` of the cell's height.
   property color keyColor: "#ffb05a"
-  property real keyStrength: 0.26
+  property real keyStrength: 0.32
   property real keyReach: 0.52
   property int keySteps: 4
 
@@ -74,7 +74,7 @@ Item {
   // THE RIM: `#f0b07a` is the room's own rim tone, and the offset is where the
   // sun is -- above and to the sun side of the turntable.
   property color rimColor: "#ffc189"
-  property real rimStrength: 0.72
+  property real rimStrength: 0.80
   property int rimDx: 2
   property int rimDy: -2
 

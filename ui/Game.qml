@@ -198,17 +198,18 @@ FocusScope {
 
   // -------------------------------------------------------------- focus
   //
-  // READY UP, found by the name the garage gives it rather than by an index, so
-  // a reordered chain moves this with it and a renamed one falls back to the
-  // garage's own first stop rather than to a wrong control.
-  readonly property Item garageStart: {
-    var stops = garage.stops
-    for (var i = 0; i < stops.length; i++) {
-      if (String(garage.focusName(i)).toUpperCase().indexOf("READY") === 0)
-        return stops[i]
-    }
-    return garage.focusTarget
-  }
+  // The garage's primary control, asked for by the garage rather than searched
+  // for by name.
+  //
+  // ROUND 12 OF PIECE 3, AND THE OLD FORM WAS A LATENT BUG. This scanned
+  // `garage.stops` for a spoken name STARTING WITH "READY" and fell back to the
+  // garage's first stop. The button is called START THE RACE now -- "READY UP"
+  // is lobby-shooter jargon a seven-year-old does not use -- so the scan would
+  // have matched nothing and every arrival on the garage would have landed on
+  // the kart-body stepper, quietly, with no test able to see it. A screen that
+  // has a primary control should say which one it is.
+  readonly property Item garageStart: garage.startStop !== null
+                                      ? garage.startStop : garage.focusTarget
 
   function pushFocus() {
     // Coming back from the settings screen puts the child on the stop they left
