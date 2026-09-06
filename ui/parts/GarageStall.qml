@@ -86,13 +86,49 @@ Item {
   // The left wall is all that is left of the room's masonry: it carries the
   // terminal and the practice poster, it is where the kart card leans, and its
   // jamb is the left edge of the opening. Everything right of it is sky.
-  readonly property real wallX: 300
+  //
+  // ROUND 11, PIECE 3. THIS IS THE ONE NUMBER THAT MADE THE SCREEN INCOHERENT,
+  // AND IT IS NOT A NUMBER ANY MORE.
+  //
+  // It was 300, a constant chosen when three small cards stood on the left of
+  // the garage. Round ten made them one 560 px board, whose right edge landed
+  // 107 px PAST this jamb at 1920 x 1080. So the room's own architectural edge
+  // -- the brightest warm line in the picture outside the sky -- ran down the
+  // wall, vanished behind the board, and did not come out the other side; the
+  // board's right edge stood in the open bay with the floor grid running into
+  // it; and the tyre stack, placed at `wallX + 6` to sit between the jamb and
+  // the turntable, was drawn every repaint 98 % hidden behind the board.
+  //
+  // The wall is now WHEREVER THE THING THAT LEANS ON IT ENDS. `Garage.qml`
+  // owns both the room and the board and binds this to the board's right edge,
+  // so the jamb and the board's edge are ONE LINE at every window size instead
+  // of two numbers that happened to agree at none. The default below is what
+  // that binding evaluates to at 16:9 and is what an isolated stall draws.
+  property real wallX: 368
   readonly property real doorX0: wallX
   readonly property real doorX1: vbRight
-  // The door head is above the picture: the slats are a strip along the very
-  // top and the opening runs off the top of the frame, which is what lets the
-  // sky reach the title.
-  readonly property real doorTop: -84
+  // The door head: the rolled-up slats and the beam they hang in. Everything
+  // above this line is the head; everything below it, out in the bay, is sky.
+  //
+  // ROUND 11. THE HEAD IS NOW A LINTEL THAT SPANS THE ROOM, AND THE WALL HANGS
+  // UNDER IT (see `wallTop`). It used to be a 62-unit strip along the very top
+  // of the frame with the masonry running up past it to the frame's edge, so
+  // the screen's title band -- which the sky's own top stop was chosen for,
+  // "5.8:1 against this" a few lines down -- sat on sky for two thirds of its
+  // width and on WALL for the other third. The word `GARAGE` is drawn in the
+  // theme accent, the one colour on this screen the game may not restate, and
+  // at 1920 x 1080 it began at x = 489 with the jamb at x = 488: it cleared the
+  // room's brightest warm line by ONE PIXEL. Round ten's contrast table read
+  // 69 of 69 off that pixel. The moment the wall moved right to meet the board,
+  // the same string measured 1.58:1.
+  //
+  // So the head is bound by `Garage.qml` to the title band's own hairline. The
+  // band sits on the lintel across its whole width, the lintel's trim IS the
+  // rule under the title, and no string on this screen crosses a wall edge.
+  property real doorTop: -84
+  // Where the masonry starts: just under the head's trim, which is drawn from
+  // `doorTop - 4` to `doorTop + 4`.
+  readonly property real wallTop: doorTop + 4
   readonly property real doorSill: 336
 
   // The horizon is the sun's own centre and the room's vanishing point; the
@@ -168,11 +204,23 @@ Item {
   // properties because the Canvas draws their cases and the items below draw
   // their copy: two files' worth of numbers agreeing by accident is how a
   // caption ends up half off its own poster.
-  readonly property real termX: 24
+  //
+  // ROUND 11: the two of them are CENTRED ON THE WALL rather than pinned to
+  // its left edge. They were laid out against a 300-unit wall and left 12
+  // units of margin on the right; the wall is now as wide as the board that
+  // leans on it, so the same constants would push a pair of signs into the
+  // dark corner and leave a fifth of the masonry -- its brightest fifth, the
+  // strip beside the opening -- bare. `signX` is the group's left edge, and
+  // both signs are placed from it, so they cannot drift apart.
+  // The terminal is 132 wide, the poster 116, and the poster starts 148 past
+  // the terminal, so the pair spans 264 units however wide the wall gets.
+  readonly property real signW: 264
+  readonly property real signX: Math.max(12, (wallX - signW) / 2)
+  readonly property real termX: signX
   readonly property real termY: 40
   readonly property real termW: 132
   readonly property real termH: 84
-  readonly property real posterX: 172
+  readonly property real posterX: signX + 148
   readonly property real posterY: 40
   readonly property real posterW: 116
   readonly property real posterH: 126
@@ -405,35 +453,66 @@ Item {
       // The slats, rolled up above the picture: a strip along the top of the
       // frame with the sky running out from under it. Their undersides catch
       // the sky, so the highlight on each slat is pink rather than grey.
+      //
+      // ROUND 11 TOOK THIS BAND DOWN IN VALUE, AND IT IS A CONTRAST BUDGET, NOT
+      // A TASTE. The head is now deep enough to hold the title band (see
+      // `doorTop`), so it is the ground under `GARAGE`, which is drawn in the
+      // THEME accent -- a colour this game may not restate, because it belongs
+      // to the child's Omarchy. `#7aa2f7` needs its ground at or under 0.0426
+      // relative luminance to clear 4.5:1, and the old slats did not know that:
+      // the strip was at the top of the frame with nothing but sky beside it.
+      // Its 1 px pink highlight was `#7c3a6e` at 0.086 (3.3:1) and its lower
+      // gradient stop `#5c2450` at 0.0426 (4.50:1, the floor to the pixel).
+      // Every value here is now measured against that budget, worst pixel of
+      // the string's own rect, and the whole band comes out darker than the
+      // sky's own top stop -- which is right anyway: the header is the quietest
+      // thing on a screen whose subject is a sunset.
       var slat = ctx.createLinearGradient(0, stall.vy(T), 0, stall.vy(stall.doorTop))
-      slat.addColorStop(0, "#3a1a34")
-      slat.addColorStop(1, "#5c2450")
+      slat.addColorStop(0, "#2b1226")     // 0.0111 -> 6.8:1 on the accent
+      slat.addColorStop(1, "#421738")     // 0.0197 -> 5.97:1
       ctx.fillStyle = slat
       ctx.fillRect(stall.vx(L), stall.vy(T), stall.vs(R - L), stall.vs(stall.doorTop - T))
       for (var sy = stall.doorTop - 8; sy > T; sy -= 11) {
-        line(L, sy, R, sy, 1.6, "#2a1226")
-        line(L, sy + 3, R, sy + 3, 1, "#7c3a6e")
+        line(L, sy, R, sy, 1.6, "#1e0c1b")
+        line(L, sy + 3, R, sy + 3, 1, "#4c1f43")  // 0.0289 -> 5.4:1 alone
       }
-      rect(L, stall.doorTop - 4, R - L, 8, "#653361")
+      // The beam and its lit lip sit BELOW the title's own hairline, so they
+      // are under no string's rect and keep the warmth the head needs to read
+      // as a lintel rather than a bar of paint.
+      rect(L, stall.doorTop - 4, R - L, 8, "#55284f")
       rect(L, stall.doorTop + 3, R - L, 2, rgbaOf(Theme.duskHorizon, 0.62))
 
       // ==================================================== THE LEFT WALL
       // All that is left of the room's masonry, and the plane every card on
       // the left of the screen leans against. Lit down its length by the
       // opening beside it and falling off toward the camera.
+      //
+      // ROUND 11: it hangs from the door head (`wallTop`) instead of running to
+      // the top of the frame. What is above the head is head -- the same slats
+      // and the same beam across the whole room -- so the title band has one
+      // ground under all of it. `WT` is used everywhere `T` was in this block.
+      var WT = stall.wallTop
       var wallG = ctx.createLinearGradient(stall.vx(L), 0, stall.vx(stall.wallX), 0)
       wallG.addColorStop(0.0, "#3a1129")
       wallG.addColorStop(0.62, "#4d193a")
       wallG.addColorStop(1.0, "#6b2549")
       ctx.fillStyle = wallG
-      ctx.fillRect(stall.vx(L), stall.vy(T), stall.vs(stall.wallX - L), stall.vs(348 - T))
+      ctx.fillRect(stall.vx(L), stall.vy(WT), stall.vs(stall.wallX - L), stall.vs(348 - WT))
 
       // Panel seams and rivets. The seam's lit side faces the opening, so each
       // seam is a dark groove with a warm hairline on its right lip.
-      for (var px = 0; px <= stall.wallX; px += 100) {
-        line(px, T, px, 344, 1, "#3d1230")
-        line(px + 1.4, T, px + 1.4, 344, 0.8, rgbaOf(Theme.duskRim, 0.16))
-        for (var ry = T + 24; ry < 344; ry += 56) {
+      //
+      // ROUND 11: the step is a QUARTER OF THE WALL rather than a fixed 100
+      // units. At the old wallX of 300 a 100-unit step put the last seam
+      // exactly on the jamb, so the wall read as three even panels by accident;
+      // now that the wall's width is set by the board that leans on it, a fixed
+      // step would leave a runt panel of whatever was left over. Four equal
+      // panels is what a masonry wall looks like at any width.
+      var seamStep = stall.wallX / 4
+      for (var px = 0; px <= stall.wallX - seamStep * 0.5; px += seamStep) {
+        line(px, WT, px, 344, 1, "#3d1230")
+        line(px + 1.4, WT, px + 1.4, 344, 0.8, rgbaOf(Theme.duskRim, 0.16))
+        for (var ry = WT + 24; ry < 344; ry += 56) {
           rect(px - 2, ry, 4, 4, "#602c53")
           rect(px + 1, ry, 1, 4, rgbaOf(Theme.duskRim, 0.34))
         }
@@ -474,27 +553,28 @@ Item {
       rect(poX + 5, poY + 66, poW - 10, 2, "#4a1838")
       rect(poX + poW - 2, poY, 2, poH, rgbaOf(Theme.duskRim, 0.5))
 
-      // The checkered flag, pinned to the wall under the terminal. The light
-      // square is the cream the design already gives to plates and road paint,
-      // kept below the kart's value; the fold shadow beside it is purple.
-      // Nothing under this sun is grey.
-      var flagX = 28, flagY = 132, fw = 10
-      wallShadow(flagX, flagY, fw * 6, fw * 5 + 6, 14, 0.34)
-      rect(flagX - 3, flagY, fw * 6 + 6, 4, "#5a2f52")
-      for (var fc = 0; fc < 6; fc++) {
-        var drape = Math.round(Math.abs(Math.sin((fc + 0.4) * 0.7)) * 3)
-        var lit = fc < 3 ? "#a48678" : "#b9937f"
-        for (var fr = 0; fr < 5; fr++) {
-          rect(flagX + fc * fw, flagY + 4 + drape + fr * fw, fw, fw,
-               (fr + fc) % 2 === 0 ? lit : "#301224")
-        }
-        rect(flagX + fc * fw, flagY + 4 + drape + fw * 5, fw, 3, "#5f3a5a")
-      }
+      // ROUND 11: THE CHECKERED FLAG THAT USED TO HANG HERE IS GONE.
+      //
+      // It was pinned under the terminal at (28, 132) and it was 62 view-box
+      // units tall, which put its bottom edge 14 px BELOW the board's top edge
+      // at 1920 x 1080. So the board sliced it, mid-square, across a run of
+      // cream: the loudest value on the wall, cut in half by a panel. It is the
+      // third sign on a wall that after round ten shows only a 291 px band
+      // above the board, and the two that carry words -- WELCOME TO THE PIT and
+      // PRACTICE PAYS OFF -- are the two worth keeping. The checkered motif the
+      // design asks for is still on this screen twice, on the TRACK row's icon
+      // and on READY UP's, and on the road itself in the race.
+      //
+      // It cost 37 `fillRect`s and two filled shadow polygons on every repaint
+      // of a Canvas that repaints on every resize and every theme change. That
+      // is a repaint saving, not a per-frame one -- the Canvas is a cached
+      // image between repaints -- and the honest claim is only that the wall
+      // reads better, not that the frame got cheaper.
 
       // The jamb: the wall's own edge, turned toward the opening, so it is the
       // brightest warm line in the room outside the sky itself.
-      rect(stall.wallX - 3, T, 3, 348 - T, rgbaOf(Theme.duskRim, 0.62))
-      rect(stall.wallX, T, 4, 348 - T, "#280d22")
+      rect(stall.wallX - 3, WT, 3, 348 - WT, rgbaOf(Theme.duskRim, 0.62))
+      rect(stall.wallX, WT, 4, 348 - WT, "#280d22")
 
       // The door's light on the wall: magenta bounce, centred on the opening
       // and dying with distance from it.
@@ -504,7 +584,7 @@ Item {
       wallGlow.addColorStop(0.34, rgbaOf(Theme.duskSkyMid, 0.24))
       wallGlow.addColorStop(1, rgbaOf(Theme.duskSkyTop, 0))
       ctx.fillStyle = wallGlow
-      ctx.fillRect(stall.vx(L), stall.vy(T), stall.vs(stall.wallX + 4 - L), stall.vs(348 - T))
+      ctx.fillRect(stall.vx(L), stall.vy(WT), stall.vs(stall.wallX + 4 - L), stall.vs(348 - WT))
 
       // ======================================================= THE FLOOR
       // The bay's own floor, from the threshold toward the camera. The plan's

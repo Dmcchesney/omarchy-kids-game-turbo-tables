@@ -394,6 +394,105 @@ Item {
       compare(garage.stopIndex(), 0)
     }
 
+    // ROUND 11. THE CELEBRATION, WHICH UNTIL NOW NOTHING ASSERTED.
+    //
+    // Round ten's own report said it: make `Garage.celebrate()` a `return` and
+    // every test in this repository stays green. It was the round's headline
+    // discovery feature -- "something visibly happens the moment a child clicks
+    // a paint or a body" -- and it was the only part of the round with no
+    // assertion behind it at all, which is the same defect class as measuring
+    // 69 strings' contrast and never looking at the picture.
+    //
+    // These three cases pin the mechanism, not a screenshot:
+    //
+    //   20  a real Right key on the body stepper starts the flourish. `ping`
+    //       is set to 1 by the sequence's first `PropertyAction`, so it is 1
+    //       synchronously; the car then lifts OFF the plinth (`heroLift` goes
+    //       negative, and the hero's own `y` follows it up the screen) and both
+    //       come back to rest. A no-op `celebrate()` fails on the first
+    //       compare; deleting the `PropertyAction` fails there too; deleting
+    //       either `heroLift` animation fails the lift or the settle.
+    //   21  the paint route celebrates identically, because it is the same
+    //       function -- so moving one call site and forgetting the other is
+    //       caught rather than assumed.
+    //   22  reduced motion makes it a no-op, by the design's Accessibility
+    //       rule. Removing the guard in `celebrate()` fails here.
+    // Cases above this one press arrow keys, so a flourish one of them started
+    // may still be running when this one begins: the whole file executes in
+    // less time than the 260 ms the animation takes. Rest is waited for, never
+    // assumed.
+    function waitForRest() {
+      tryVerify(function () { return garage.ping === 0 && garage.heroLift === 0 },
+                1500, "a previous case's flourish never finished")
+    }
+
+    function test_20_changing_the_body_lifts_the_car_and_pings_the_plinth() {
+      var hero = findHero()
+      verify(hero !== null, "no item named heroCar on the garage")
+      compare(garage.reducedMotion, false, "this case is about the motion path")
+      waitForRest()
+      var restY = hero.y
+
+      garage.focusStop(0)
+      keyClick(Qt.Key_Right)
+
+      compare(garage.ping, 1,
+              "the turntable ping did not start on a real key press: "
+              + "Garage.celebrate() did nothing")
+      tryVerify(function () { return garage.heroLift < 0 }, 400,
+                "the car never left the plinth")
+      verify(hero.y < restY,
+             "heroLift moved but the hero car's y did not follow it")
+      tryVerify(function () { return garage.ping === 0 && garage.heroLift === 0 },
+                1200, "the flourish never settled back to rest")
+      compare(hero.y, restY, "the car did not come back down to the plinth")
+    }
+
+    function test_21_changing_the_paint_celebrates_the_same_way() {
+      waitForRest()
+      garage.focusStop(1)
+      keyClick(Qt.Key_Right)
+      compare(garage.paintIndex, 1)
+      compare(garage.ping, 1,
+              "the paint route does not celebrate, so the two controls that "
+              + "change the car do not agree")
+      tryVerify(function () { return garage.heroLift < 0 }, 400)
+      tryVerify(function () { return garage.ping === 0 }, 1200)
+    }
+
+    function test_22_reduced_motion_celebrates_nothing() {
+      waitForRest()
+      Store.setSetting("reducedMotion", true)
+      compare(garage.reducedMotion, true)
+      garage.focusStop(0)
+      keyClick(Qt.Key_Right)
+      compare(garage.bodyIndex, 1, "the control still works under reduced motion")
+      compare(garage.ping, 0, "the plinth pinged under reduced motion")
+      compare(garage.heroLift, 0, "the car lifted under reduced motion")
+      wait(120)
+      compare(garage.ping, 0)
+      compare(garage.heroLift, 0)
+      Store.setSetting("reducedMotion", false)
+    }
+
+    function findHero() {
+      return findNamed(garage, "heroCar")
+    }
+
+    function findNamed(item, name) {
+      if (!item)
+        return null
+      if (item.objectName === name)
+        return item
+      var kids = item.children
+      for (var i = 0; kids && i < kids.length; i++) {
+        var hit = findNamed(kids[i], name)
+        if (hit)
+          return hit
+      }
+      return null
+    }
+
     // The walkthrough. Tab from the first stop to the last, recording the
     // screen-reader name reached at every stop.
     function test_13_keyboard_walkthrough() {

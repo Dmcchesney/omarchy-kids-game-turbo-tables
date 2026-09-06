@@ -343,6 +343,44 @@ FocusScope {
       objectName: "garageStall"
       anchors.fill: parent
       cornerRadius: Theme.cornerRadius
+
+      // ROUND 11: THE WALL ENDS WHERE THE BOARD ENDS.
+      //
+      // The room draws a jamb -- a warm hairline and a dark return -- down the
+      // right edge of its left wall, and the board below leans on that wall.
+      // While the wall's edge was a constant (300 view-box units) and the
+      // board's width was another constant (560 px), the two agreed at no
+      // window size at all: at 1920 x 1080 the board's right edge stood at
+      // x = 595 and the jamb at x = 488, so the board crossed out of the room's
+      // dark wall zone into the lit bay, the jamb ran into the board's top edge
+      // and never came out, and the board's own edge was against masonry for
+      // 256 px and against the floor grid for the next 325 px.
+      //
+      // `stall` is anchored to `page` and `board` is a child of `page`, so both
+      // are in the same coordinate space and one division converts. The wall's
+      // right edge and the board's right edge are now the same line by
+      // construction. Nothing here can loop: `unit` is a function of the page's
+      // size only, and the board's x and width are functions of `garage.s`.
+      wallX: stall.unit > 0 ? (board.x + board.width) / stall.unit : 368
+
+      // AND THE DOOR HEAD IS THE TITLE BAND'S FLOOR.
+      //
+      // The title band has no panel under it -- round ten took the policy rail
+      // away and gave the room back, which was right -- so its strings sit
+      // straight on the room. The sky's top stop was picked for exactly that
+      // ("5.8:1 against this", `GarageStall.qml`). But the masonry ran up past
+      // the door head to the top of the frame, so the left third of the band
+      // sat on WALL, and `GARAGE` -- drawn in the theme accent, which this game
+      // may not restate -- measured 1.58:1 against the jamb the moment the wall
+      // moved to meet the board. Under the old constants it cleared that jamb
+      // by one pixel, and round ten's 69-of-69 was read off that pixel.
+      //
+      // Binding the head to the title's own hairline makes the band's ground
+      // one thing across its whole width: rolled slats and the beam under them,
+      // with the beam's trim landing on the rule. The wall starts below it.
+      doorTop: stall.unit > 0
+               ? (titleBar.y + titleBar.height - stall.originY) / stall.unit
+               : -84
     }
 
     readonly property int pad: garage.px(20)
