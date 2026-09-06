@@ -465,6 +465,8 @@ Item {
   function setKarts(list) {
     kartModel.clear()
     fxReset()
+    kartRowOf = ({})
+    lastGapWritten.length = 0
     for (var i = 0; i < list.length; i++) {
       var k = list[i]
       if (k.isHuman === true) {
@@ -537,8 +539,35 @@ Item {
         "fxPlateBorn": 0,
         "fxPlateUntil": 0
       })
+      kartRowOf[k.id] = i
+      lastGapWritten[i] = 0
     }
+    lastGapWritten.length = list.length
   }
+
+  // ---------------------------------------- WHAT `setProgress` STOPPED DOING
+  //
+  // Three of these exist because a `sample` profile of the Race screen put
+  // 11% of the whole main thread inside `QQmlListModel::setProperty`, and 4%
+  // of it inside the `dataChanged` that reaches `QQmlDelegateModel` -- for
+  // roles that mostly had not changed.
+  //
+  //   kartRowOf       kart id -> row. `orderedProgress` rebuilt this map on
+  //                   every frame, and building it called `ListModel.get()`
+  //                   once per kart. Each of those calls BUILDS A JAVASCRIPT
+  //                   OBJECT, which is allocation in a path that runs every
+  //                   frame, and plan v3 forbids that outright. The field is
+  //                   set once a race and so is this.
+  //   lastGapWritten  the last `kartGap` written to each row. A gap is a
+  //                   ROUNDED WHOLE QUESTION: it changes a few times a lap and
+  //                   was written sixty times a second, and `ListModel`
+  //                   notifies on every write whether the value moved or not.
+  //   orderScratch    `orderedProgress`'s output. It was `values.slice()`, a
+  //                   fresh array per frame; nothing outside that function
+  //                   ever holds on to it.
+  property var kartRowOf: ({})
+  property var lastGapWritten: []
+  property var orderScratch: []
 
   // Called every frame with one number per kart, in the same order. Setting a
   // role leaves the delegate alone and only re-evaluates the bindings that
@@ -570,15 +599,27 @@ Item {
     var v = order ? orderedProgress(values, order) : values
     var n = Math.min(v.length, kartModel.count)
     haveExact = !!(exact && exact.length >= n)
-    var mine = 0
-    if (haveExact)
-      for (var h = 0; h < n; h++)
-        if (kartModel.get(h).isHuman)
-          mine = exact[h]
+    // `heroIndex` is the human's row, recorded by `setKarts` and reset to -1
+    // by `fxReset` before it. It is the same answer the scan over
+    // `ListModel.get(h).isHuman` gave, without four object allocations a frame
+    // to get it -- and nothing about which seat the child is in changes during
+    // a race.
+    var hero = heroIndex
+    var mine = (haveExact && hero >= 0 && hero < n) ? exact[hero] : 0
+    var gaps = lastGapWritten
     for (var i = 0; i < n; i++) {
       kartModel.setProperty(i, "kartProgress", v[i])
-      if (haveExact)
-        kartModel.setProperty(i, "kartGap", Math.round(exact[i] - mine))
+      if (haveExact) {
+        var gap = Math.round(exact[i] - mine)
+        // A whole-question gap changes a few times a lap. `ListModel.setProperty`
+        // notifies unconditionally, so writing the same number sixty times a
+        // second is sixty `dataChanged` signals through the delegate model for
+        // one number that did not move.
+        if (gaps[i] !== gap) {
+          gaps[i] = gap
+          kartModel.setProperty(i, "kartGap", gap)
+        }
+      }
       // EVERY DEPTH IS MEASURED FROM THIS NUMBER, SO IT HAS TO BE THE SAME
       // NUMBER THE OTHERS WERE PROJECTED WITH.
       //
@@ -592,9 +633,9 @@ Item {
       // of 5e-5 questions; my own watch forced it once in 1875 on seed 11. It
       // is a seam rather than a defect, and reading the reference back off the
       // array that was just projected closes it without the caller changing.
-      if (order && kartModel.get(i).isHuman)
-        humanProgress = v[i]
     }
+    if (order && hero >= 0 && hero < n)
+      humanProgress = v[hero]
   }
 
   // What the model actually STORES for kart `index`, and the depth the
@@ -633,10 +674,13 @@ Item {
   function orderedProgress(values, order) {
     if (!order || order.length === 0)
       return values
-    var row = ({})
-    for (var i = 0; i < kartModel.count; i++)
-      row[kartModel.get(i).kartId] = i
-    var out = values.slice()
+    // The map and the output array are both built once a race rather than
+    // once a frame; see `kartRowOf` above for what that was costing.
+    var row = kartRowOf
+    var out = orderScratch
+    out.length = 0
+    for (var i = 0; i < values.length; i++)
+      out.push(values[i])
     var cap = Number.POSITIVE_INFINITY
     for (var k = 0; k < order.length; k++) {
       var at = row[order[k]]
