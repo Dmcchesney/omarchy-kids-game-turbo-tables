@@ -227,6 +227,31 @@ FocusScope {
             border.color: chosen ? Theme.focusRing
                                  : (answerHit.hovered ? Theme.hoverRing : Theme.lineStrong)
 
+            // ROUND 4 OF PIECE M. THE ARMED ANSWER DID NOT LIGHT.
+            //
+            // The fill and the border above are `chosen ? ... : hovered ? ...`,
+            // so pointing at the answer that is already armed -- which is KEEP,
+            // every time, because that is where this question opens -- changed
+            // nothing at all on the screen. On the one modal in the game, with
+            // no undo behind it, the safe answer was the answer that gave the
+            // child no sign it could be pressed. Found by the pixel sweep the
+            // round moved onto this sheet; it walked two screens with no modal
+            // on them for three rounds.
+            //
+            // Drawn as a second ring inside the armed one, so "this is the
+            // answer Enter will give" is not taken away to say "your pointer is
+            // here". Both facts, at once, the way `ui/parts/PaintGrid.qml` draws
+            // hover over the chosen swatch.
+            Rectangle {
+              anchors.fill: parent
+              anchors.margins: confirm.px(4)
+              visible: answerHit.hovered && answer.chosen
+              radius: Theme.cornerRadiusSmall
+              color: "transparent"
+              border.width: 1
+              border.color: Theme.hoverRing
+            }
+
             Text {
               anchors.centerIn: parent
               textFormat: Text.PlainText

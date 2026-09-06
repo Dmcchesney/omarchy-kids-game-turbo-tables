@@ -2256,9 +2256,62 @@ Item {
     // rather than assertion, because the failure is never "this control is
     // wrong", it is "nobody thought about this control at all".
     function test_23_every_control_lights_under_the_pointer_and_lights_only_itself() {
+      // ==================================================================
+      // ROUND 4. THE SWEEP MOVED TO WHERE THE RISK IS, AND PAID FOR IT.
+      // ==================================================================
+      //
+      // Round three's version walked the Garage and the Settings screen -- 47
+      // controls, 29.5 seconds, 65 % of this file and 19 % of every QML second
+      // in the repository -- and those are the two screens in the game with ZERO
+      // printed key hints on them. A critic set `ui/parts/KeyHint.qml`'s hover
+      // wash to `visible: false`, so every printed hint in the game stopped
+      // lighting under the pointer, and all 27 cases passed. The hover promise
+      // was enforced everywhere it does not live and nowhere it does.
+      //
+      // It walks the hints now: the race, the hand panel with a card chosen and
+      // with the aim open, the countdown, and the question's own sheet -- plus
+      // the garage, which is the screen the maintainer opens first and the
+      // densest in the game. The Settings screen loses the PIXEL sweep and keeps
+      // the cheap one (`test_32`), which is the trade this file can afford: its
+      // rows are the same `SettingRow` component the garage draws, and its
+      // buttons the same `ActionButton`.
+      //
+      // AND IT IS SWEPT AT 1280 x 720. The claim -- something inside the control
+      // changes, nothing outside it does -- is about the picture and not about
+      // the pixel count, and the cost of this case is two grabs and a full-frame
+      // compare per control in JavaScript, which is quadratic in nothing but the
+      // resolution. 1280 x 720 is 2.25 times fewer pixels than 1920 x 1080 and is
+      // a size a child's machine actually is; it buys five more screens for
+      // about the money the two cost. The window goes back afterwards.
+      var wasWidth = root.width
+      var wasHeight = root.height
+      root.width = 1280
+      root.height = 720
+      // AND THE WORLD HOLDS STILL WHILE IT IS PHOTOGRAPHED. This case compares a
+      // whole frame against a whole frame and calls any difference outside the
+      // control's own box a hover leak, so a screen that moves on its own reports
+      // a leak the size of the window: the race's road and karts did exactly
+      // that. Three switches, all of them the screens' own -- the race's
+      // `externalClock` (already trusted for the piece F strips), the countdown's
+      // own beat length, and reduced motion, which is the design's accessibility
+      // switch for "nothing pulses, nothing slides". None of them changes a
+      // control, a key or an action.
+      Store.setSetting("reducedMotion", true)
+      race.externalClock = true
+      var wasBeat = countdown.beatMs
+      countdown.beatMs = 600000
+      suite.settleFrame()
       var list = [{ "name": "Garage", "item": garage, "showing": "garage" },
-                  { "name": "Settings", "item": settings, "showing": "settings" }]
+                  { "name": "Countdown", "item": countdown, "showing": "countdown" },
+                  { "name": "Race", "item": race, "showing": "race" },
+                  { "name": "Picker, card chosen", "item": picker, "showing": "picker",
+                    "prepare": "card 1" },
+                  { "name": "Picker, aiming", "item": picker, "showing": "picker",
+                    "prepare": "card 3" },
+                  { "name": "Settings, reset asked", "item": settings, "showing": "settings",
+                    "prepare": "RESET SETTINGS" }]
       var checked = 0
+      var hintsSwept = 0
       for (var s = 0; s < list.length; s++) {
         suite.enter(list[s])
         var screen = list[s].item
@@ -2271,7 +2324,16 @@ Item {
           var hit = targets[i]
           if (!suite.usable(hit, screen))
             continue
+          // A BARRIER IS NOT A CONTROL AND MUST NOT LIGHT. It exists to swallow
+          // a press -- it is the thing that makes the one question in the game
+          // modal -- and a scrim that lit up under the pointer would be telling
+          // the child the opposite of what the question is telling them.
+          // `test_22` holds the same rule for a sign.
+          if (hit.barrier === true)
+            continue
           checked += 1
+          if (hit.objectName === "clickKeyHint")
+            hintsSwept += 1
           var at = suite.centreOf(hit)
           mouseMove(root, at.x, at.y)
           suite.settleFrame()
@@ -2289,7 +2351,82 @@ Item {
           suite.settleFrame()
         }
       }
-      verify(checked >= 30, "only " + checked + " controls were swept; the walk is not"
+      root.width = wasWidth
+      root.height = wasHeight
+      countdown.beatMs = wasBeat
+      race.externalClock = false
+      suite.settleFrame()
+      verify(checked >= 40, "only " + checked + " controls were swept; the walk is not"
+             + " seeing the tree")
+      // AND THE HINTS WERE IN IT. The whole reason this case moved is that the
+      // printed key hints -- the idiom whose own file promises "if it lights up
+      // when you point at it, you can press it" -- were on none of the screens it
+      // used to walk. A state list that drifted back to the two screens with no
+      // hints on them has to fail here rather than go on reporting a green sweep
+      // of the wrong thing.
+      verify(hintsSwept >= 8,
+             "only " + hintsSwept + " printed key hints were swept for their hover."
+             + " A critic made every hint in the game stop lighting under the pointer"
+             + " and this case passed, because it walked the two screens that have"
+             + " none.")
+    }
+
+    // ==================================================================
+    // ROUND 4. THE CHEAP HALF OF THE HOVER PROMISE, ON EVERY SCREEN.
+    // ==================================================================
+    //
+    // `test_23` reads PIXELS, which is the only way to catch a hover that is
+    // drawn 500 px away or not drawn at all, and it costs about a third of a
+    // second per control -- so it walks six states and not nine, and the
+    // Settings screen is one of the three it no longer walks.
+    //
+    // This is the half that costs nothing: every live click target on EVERY
+    // state, asked whether the pointer on it turns its own hover flag on, and
+    // whether it turns anybody else's on. It cannot see whether the flag is
+    // PAINTED -- that is what the pixel sweep is for, and a critic broke exactly
+    // that assertion once by making `ActionButton.hovered` constant false -- but
+    // it does hold every screen to the wiring, and it is what stops the pixel
+    // sweep's shorter state list from being a hole.
+    function test_32_every_control_knows_the_pointer_is_on_it_on_every_screen() {
+      var list = suite.states()
+      var checked = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        focusPark.forceActiveFocus(Qt.OtherFocusReason)
+        var targets = suite.clickTargetsIn(screen)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (hit.barrier === true || !suite.usable(hit, screen))
+            continue
+          checked += 1
+          var at = suite.centreOf(hit)
+          mouseMove(root, at.x, at.y)
+          verify(hit.hovered,
+                 list[s].name + ": the pointer is on \"" + hit.label + "\" and the"
+                 + " control does not know it. Everything a screen paints for hover"
+                 + " reads this flag, so a control that never sets it can never light.")
+          // AND NOBODY ELSE THINKS SO. A target that reports the pointer while
+          // the pointer is somewhere else paints a hover state a child cannot
+          // explain, and it is the shape of a control wired to the wrong box.
+          for (var o = 0; o < targets.length; o++) {
+            if (targets[o] === hit || !targets[o].hovered)
+              continue
+            // Two targets of ONE control -- a stepper is one stop with two
+            // arrows and an inert face on it -- are allowed to answer together
+            // for the same pointer. Two controls are not.
+            verify(targets[o].stop !== null && targets[o].stop === hit.stop,
+                   list[s].name + ": the pointer is on \"" + hit.label + "\" and \""
+                   + targets[o].label + "\" reports it too, and they are not two"
+                   + " targets of one control.")
+          }
+          mouseMove(root, 0, 0)
+          verify(!hit.hovered,
+                 list[s].name + ": \"" + hit.label + "\" still reports the pointer with"
+                 + " the pointer in the corner of the window")
+        }
+      }
+      verify(checked >= 60, "only " + checked + " controls were asked; the walk is not"
              + " seeing the tree")
     }
 

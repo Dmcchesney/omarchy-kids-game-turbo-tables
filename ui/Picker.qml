@@ -948,6 +948,34 @@ FocusScope {
                 border.color: aimed ? Theme.focusRing
                                     : (aimHit.hovered ? Theme.hoverRing : Theme.line)
 
+                // ROUND 4 OF PIECE M -- THE ONE TILE THE POINTER DID NOTHING TO.
+                //
+                // The fill and the border above are `aimed ? ... : hovered ?
+                // ...`, so the tag that is ALREADY aimed drew the same picture
+                // whether the pointer was on it or not. Pointing at it changed
+                // nothing on the screen -- which is the exact defect this
+                // component's own doctrine is against, and it went unseen for
+                // three rounds because the pixel sweep walked two screens that
+                // have no aim tags on them.
+                //
+                // Selection is not focus. `ui/parts/ActionButton.qml` suppresses
+                // hover under FOCUS on purpose -- where the keyboard is standing
+                // is the more important fact, and a child needs one answer, not
+                // two -- but "this is the rival you are aiming at" and "your
+                // pointer is here" are two different facts and the child wants
+                // both. Drawn as a second ring inside the aimed one, the way
+                // `ui/parts/PaintGrid.qml` draws hover over the chosen swatch,
+                // so the aimed picture is not taken away to make room for it.
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: 3
+                  visible: aimHit.hovered && aimTile.aimed
+                  radius: Theme.cornerRadiusSmall
+                  color: "transparent"
+                  border.width: 1
+                  border.color: Theme.hoverRing
+                }
+
                 Text {
                   anchors.centerIn: parent
                   textFormat: Text.PlainText
