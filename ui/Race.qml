@@ -362,10 +362,10 @@ FocusScope {
   //
   //     travel   the arch's drawn box, 1920 x 1080       what the frame is
   //     -----    ---------------------------------       -----------------
-  //        0     1920 wide, board clipped off the top     under the arch, no sky
+  //        0     2209 wide, box top at y = -199           under the arch, no sky
   //     -3.0     1190 wide, board across the fact         the fact over the sign
   //     -5.0      910 wide, board still under the fact    the fact over the sign
-  //     -6.5      774 wide, board clear below the fact    the countdown's frame
+  //     -6.5      773 wide, board clear below the fact    the countdown's frame
   //
   // At -6.5 the arch is whole and ahead with `TURBO TABLES` legible under the
   // fact rather than behind it, the chequered grid is a band of road ahead of
