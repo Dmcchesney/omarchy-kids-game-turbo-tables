@@ -273,3 +273,35 @@ HUD, the lamp row growing hollow lamps on a hit.
 
 The maintainer chose option 1 on 2026-09-05: telegraph 900 ms, swings at 0 and
 450, impact at 900. Applied in the design; item 4 above records the decision.
+
+## 6. Sound is handed to someone else, 2026-09-06
+
+The maintainer's decision after playing the wired build: *"I am going to ask for
+someone with more experience to help me refine the sound. Let's just get the
+look right and the performance as efficient as possible."*
+
+**No further sound work in this loop.** What is committed stays and must not
+regress: `shell/SoundBank.qml`, `shell/AudioLoader.qml`, `ui/parts/Sfx.qml`,
+the fifteen WAVs under `assets/sfx/`, `src/tools/bake-sfx.py`, `check:sfx`, and
+the README sentences that pair with them. Do not add cues, do not rebake, do not
+rewire.
+
+The state a sound person inherits, stated plainly so they do not have to
+discover it:
+
+- **Fifteen cues exist and all fifteen are power-up cues.** They fire from three
+  places only — a hand dealt (`deal`), a card slammed (`slam`), and a card's
+  effect landing. There is no sound for a right or wrong answer, the countdown,
+  the garage, READY UP, a lap, a finish, or an engine. A child who does not
+  reach a twelve-answer streak hears nothing at all, which is why the build
+  reads as silent.
+- **The engine loop cannot be built from `SoundEffect`** — it has no rate
+  control, so a pitch rising with speed is unreachable through that class. It
+  needs `MediaPlayer` or the design drops the rising pitch. That is the one
+  finding worth handing over as a design question rather than a task.
+- **Nobody in this loop has heard a single file.** Every claim in
+  `scratchpad/p6/REPORT-round1.md` is about bytes, formats, routing and what Qt
+  reports. The waveforms were synthesised by a script; whether they sound like
+  anything is unknown.
+- Qt Multimedia is present in the VM (6.11.2) and PipeWire has a working sink,
+  so the silent-fallback path is not what a listener will be hearing.
