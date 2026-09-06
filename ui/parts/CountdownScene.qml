@@ -68,6 +68,12 @@ Item {
   // declared down here.
   property real clock: 0
 
+  // Which beat the screen is on, 0..3, and whether motion is off. The gantry's
+  // start lamps read both; see `startLamps` below. They are the only two
+  // things in this file that know the countdown is counting.
+  property int beat: 0
+  property bool reducedMotion: false
+
   // ---------------------------------------------------------------- the sky
   //
   // THE PALETTE IS NOT DECLARED IN THIS FILE ANY MORE. Sixteen colours used to
@@ -75,6 +81,10 @@ Item {
   // the two skies drifted in the first place. What is left is the four tones
   // the GROUND is painted in, which the shared sky has no opinion about.
   readonly property color floorTone: "#3c1228"
+  // What the arch's lamps put on the road. The kit baked the housings in
+  // `#ffd489` and this is that tone; the light and the lamp are one colour
+  // because they are one thing.
+  readonly property color lampTone: "#ffd489"
   readonly property color neon: "#ff4fa3"
   readonly property color tarmac: "#1c0a18"
   readonly property color cream: "#f2e6c4"
@@ -390,8 +400,16 @@ Item {
         // rows, which at 1920 x 1080 is a thin band of small squares -- a
         // different marking on a different road from the one the child is on a
         // second later.
+        //
+        // ROUND 2 PUTS THE CAR ON IT. The band ran 0.50 to 0.66 of the depth,
+        // which is rows 212 to 231 of the plane, and the kart's contact point
+        // is at `kartFootY` = 0.875 of the FRAME, which is row 236: the car
+        // stood a car's length BEHIND the line it was supposed to be waiting
+        // on, and a critic reading the frame said so. The band now runs to
+        // 0.78, which is row 245, so the contact point is inside it and the
+        // wheels are on the chequer.
         var lineY0 = yH + scene.layerDepth * 0.50
-        var lineY1 = yH + scene.layerDepth * 0.66
+        var lineY1 = yH + scene.layerDepth * 0.78
         var cols = 6
         var gridRows = 4
         for (var row = 0; row < gridRows; row++) {
@@ -411,6 +429,41 @@ Item {
             ctx.closePath()
             ctx.fill()
           }
+        }
+
+        // ------------------------------------------- what the lamps land on
+        //
+        // THE OTHER HALF OF THE ARCH'S LAMPS, AND THE ONE WITH AREA IN IT.
+        //
+        // Six lamps coming on over a start line light the tarmac under them,
+        // and the measurement that sent this round at the countdown was about
+        // area: 2.06% of the picture changed between `3` and `2` and 2.11%
+        // between `2` and `1`, so for three of the four seconds 97.9% of the
+        // screen was frozen. Six lit rectangles on a beam are the right device
+        // and they are 0.3% of the frame; this is the same device with the
+        // road in it.
+        //
+        // It is painted HERE, into the 480 x 270 plane, rather than laid over
+        // the frame as a rectangle: at layer resolution the wash is 11,000
+        // pixels of blending instead of 184,000, and it is repainted on a beat
+        // rather than on a frame. `onBeatChanged` below is what asks.
+        //
+        // It stops at 0.14 on GO on purpose. The race opens on the same tarmac
+        // one second later and paints it dark; a countdown that ends with the
+        // road glowing hands over to a frame where it is not.
+        var lampWash = [0.00, 0.06, 0.11, 0.14][Math.max(0, Math.min(3, scene.beat))]
+        if (lampWash > 0) {
+          var pool = ctx.createLinearGradient(0, 0, 0, depth)
+          pool.addColorStop(0, ground.rgba(scene.lampTone, lampWash * 0.35))
+          pool.addColorStop(0.42, ground.rgba(scene.lampTone, lampWash))
+          pool.addColorStop(1, ground.rgba(scene.lampTone, lampWash * 0.30))
+          ctx.fillStyle = pool
+          ctx.beginPath()
+          ctx.moveTo(vx, 0)
+          ctx.lineTo(roadR, depth)
+          ctx.lineTo(roadL, depth)
+          ctx.closePath()
+          ctx.fill()
         }
 
         // ------------------------------------------------ the kart's shadow
@@ -471,6 +524,107 @@ Item {
     keyReach: 0.018
   }
 
+  // ================================================== THE LAMPS ON THE ARCH
+  //
+  // WHAT THIS ANSWERS. Measured frame against frame on the shipped 1920 x 1080
+  // countdown, 2.06% of the picture changed between `3` and `2` and 2.11%
+  // between `2` and `1` -- and that change was the numeral and a drifting
+  // cloud. For three of the four seconds before the thing a child is excited
+  // about, 97.9% of the screen was frozen. Nothing revved, nothing lit, no
+  // camera crept, nothing on the arch moved but its flags.
+  //
+  // The arch has six lamps baked into the underside of its beam, and they were
+  // sitting there unlit. This lights them, two per beat, from the outside in:
+  // the pair at the ends on `3`, the next pair on `2`, all six on `1`, and on
+  // GO all six at full with the halo up. It is the one device every child has
+  // already met in a racing start, it needs no sound to read, and it is a
+  // PERSISTENT change -- the frame a child looks at halfway through a beat is
+  // different from the one before it, which is what the measurement above was
+  // actually complaining about.
+  //
+  // NOTHING IS REDRAWN. The kit is frozen art and this places, scales and
+  // LIGHTS it: the six rectangles below are at the lamps' own positions,
+  // measured off `assets/props/gantry.png` and expressed as fractions of the
+  // prop's opaque box, exactly as `boardBox*` above is. The lamp housings are
+  // palette index 22, `#ffd489`, in six clusters of about 40 x 20 cell pixels
+  // along the beam; the fractions are those clusters divided by the `C0` box
+  // (104, 50) to (1387, 700).
+  //
+  // AND IT IS A LAMP CHANGE, SO IT SURVIVES REDUCED MOTION. The design's
+  // accessibility line is "reduced motion replaces shakes and lurches with
+  // gauge and LAMP changes"; what reduced motion turns off here is the 140 ms
+  // fade, not the lamp.
+  readonly property var lampBoxes: [
+    [0.0912, 0.1239, 0.2862, 0.3185],
+    [0.2447, 0.2759, 0.2877, 0.3185],
+    [0.3983, 0.4279, 0.2877, 0.3185],
+    [0.5511, 0.5807, 0.2877, 0.3185],
+    [0.7030, 0.7350, 0.2877, 0.3185],
+    [0.8550, 0.8885, 0.2862, 0.3185]
+  ]
+  // Which lamps are lit on which beat, outside in. Index is the beat.
+  readonly property var lampsLit: [
+    [1, 0, 0, 0, 0, 1],
+    [1, 1, 0, 0, 1, 1],
+    [1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1]
+  ]
+  readonly property bool lampsGo: scene.beat >= 3
+
+  Repeater {
+    id: startLamps
+    model: scene.lampBoxes.length
+
+    Item {
+      required property int index
+      readonly property var box: scene.lampBoxes[index]
+      readonly property real lit: scene.lampsLit[Math.max(0, Math.min(3, scene.beat))][index]
+      readonly property real lx: gantry.x + gantry.boxLeft + box[0] * gantry.boxWidth
+      readonly property real rx: gantry.x + gantry.boxLeft + box[1] * gantry.boxWidth
+      readonly property real ty: gantry.y + gantry.boxTop + box[2] * gantry.boxHeight
+      readonly property real by: gantry.y + gantry.boxTop + box[3] * gantry.boxHeight
+
+      x: lx
+      y: ty
+      width: Math.max(1, rx - lx)
+      height: Math.max(1, by - ty)
+      z: 3
+      opacity: lit
+      visible: opacity > 0.01
+      Behavior on opacity {
+        enabled: !scene.reducedMotion
+        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+      }
+
+      // The halo, banded rather than blurred, for the same reason `CarLight`'s
+      // key is banded: this is a pixel-art frame and a soft gradient laid over
+      // it reads as a photograph. Two rectangles, no gradient, no shader.
+      Rectangle {
+        anchors.centerIn: parent
+        width: parent.width * (scene.lampsGo ? 3.2 : 2.2)
+        height: parent.height * (scene.lampsGo ? 3.2 : 2.2)
+        color: "#ffd489"
+        opacity: scene.lampsGo ? 0.26 : 0.16
+        antialiasing: false
+      }
+      Rectangle {
+        anchors.centerIn: parent
+        width: parent.width * (scene.lampsGo ? 1.7 : 1.4)
+        height: parent.height * (scene.lampsGo ? 1.7 : 1.4)
+        color: "#ffd489"
+        opacity: scene.lampsGo ? 0.55 : 0.40
+        antialiasing: false
+      }
+      // The lamp itself, hotter than the tone the bake gave it.
+      Rectangle {
+        anchors.fill: parent
+        color: scene.lampsGo ? "#fff6dd" : "#ffe6ad"
+        antialiasing: false
+      }
+    }
+  }
+
+  onBeatChanged: ground.requestPaint()
   onWidthChanged: ground.requestPaint()
   onHeightChanged: ground.requestPaint()
   onKartFootXChanged: ground.requestPaint()

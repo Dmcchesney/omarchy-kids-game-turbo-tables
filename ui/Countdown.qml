@@ -1,5 +1,6 @@
 import QtQuick
 import "parts"
+import "parts/CarMeta.js" as CarMeta
 import "../engine/engine.mjs" as Engine
 
 // PROTOTYPE (proto/golden-hour): the readout below is now a start-line scene
@@ -180,16 +181,64 @@ FocusScope {
   // cell carries its own contact shadow below that point, so the foot sits
   // higher than the v1 sprite's did: the wheels on the line, the shadow
   // running on down the road under the footer.
-  readonly property real kartFootX: 0.44
+  //
+  // ROUND 2 PUTS IT IN THE LANE. It stood at 0.44 while the road's centre AT
+  // THE KART'S OWN DEPTH is 0.478 -- the painted road converges on 0.52 at the
+  // horizon and opens out below it, so the middle of the road down where the
+  // car is standing is not the vanishing point's fraction. Measured from
+  // `CountdownScene`'s own edge functions at `kartFootY`: the road runs 0.252
+  // to 0.704 of the frame there and its centre is 0.478. At 0.44 the car was
+  // parked a third of a lane left of the lane, off the start grid it is
+  // supposed to be standing on.
+  readonly property real kartFootX: 0.478
   readonly property real kartFootY: 0.875
+
+  // ============================================ THE CAR SCALES WITH THE WINDOW
+  //
+  // It did not, and this was the plainest craft failure on the screen. The
+  // sprite was `sheetScale: 1.0, pixelScale: 3` -- a fixed 576 x 384 cell --
+  // and `--dump-rects` reported that box BYTE-IDENTICAL at 1024 x 600, 1366 x
+  // 768, 1920 x 1080 and 2560 x 1440, while everything else in the frame
+  // scaled: the gantry ran 278 -> 371 -> 521 -> 695 px over the same range.
+  // At 1024 x 600 that is a car 56% of the frame wide whose cell runs to y =
+  // 603 on a 600 px window -- clipped by the frame -- and at 2560 x 1440 it is
+  // 22.5% of the width standing on a painted shadow 691 px across, 115 px
+  // WIDER than the car casting it.
+  //
+  // `CarMeta.fit` is the piece-C function that answers exactly this: hand it a
+  // target width and it returns the sheet row and the whole-number upscale
+  // whose cell is nearest to it. `ui/Garage.qml` sizes its hero with the same
+  // call. The target is 30% of the frame's width, and what comes back is
+  //
+  //     1024 -> 384 (37.5% of the width, 42.7% of the height, and it fits)
+  //     1366 -> 384 (28.1%)
+  //     1920 -> 576 (30.0%)
+  //     2560 -> 576 (22.5%)
+  //
+  // 576 is a ceiling and not a choice: `CarMeta.fit` clamps the upscale to 3
+  // and `CarSprite` clamps it again, so 576 px of cell is the largest a car
+  // can be drawn ANYWHERE in this game at any screen size. Both files are
+  // piece C's. What this screen can do is stop being the one place that
+  // ignores the window, and it now does.
+  readonly property var kartFit: CarMeta.fit(countdown.width * 0.30)
 
   CountdownScene {
     id: scene
     anchors.fill: parent
     kartFootX: countdown.kartFootX
     kartFootY: countdown.kartFootY
-    kartFootW: 0.27
+    // THE SHADOW IS THE CAR'S WIDTH, NOT A CONSTANT. It was 0.27 of the frame
+    // at every size, against a car that was 576 px at every size: at 1920 the
+    // car was WIDER than its own shadow (576 against 518) and at 2560 the
+    // shadow was 115 px wider than the car. One number now, taken off the cell
+    // the sprite actually draws, so the two cannot disagree at any size. The
+    // 1.03 is the shadow's spread at its head -- a shadow is a little wider
+    // than the thing standing in it, and never 20% wider.
+    kartFootW: hero.drawnWidth * 1.03 / Math.max(1, countdown.width)
     clock: countdown.sceneClock
+    // The gantry's lamps count the beats down; see `startLamps` in the scene.
+    beat: countdown.beat
+    reducedMotion: countdown.reducedMotion
   }
 
   // THE ONLY CLOCK IN THE BACKDROP, AND IT IS DECLARED HERE SO ONE THING CAN
@@ -215,9 +264,36 @@ FocusScope {
   }
 
   // PIECE C: the car on the line is a cell of its sheet -- the road camera,
-  // rear square to us, at three times its pixels -- stood on the start line
-  // by its contact point, which is the point the scene's long shadow is laid
-  // from.
+  // rear square to us -- stood on the start line by its contact point, which
+  // is the point the scene's long shadow is laid from.
+  //
+  // THE SUN'S EDGE ON THE CAR, UNDER IT. `parts/CarLight.qml` is the other half
+  // of `CarWash.qml`: the wash takes value away, this puts light back, and a
+  // screen wanting both declares the rim pass BEFORE the sprite and the key
+  // pass after. See that file's `pass`. The garage does exactly this on its
+  // turntable; the countdown, which is the same car one screen later under a
+  // sun instead of a work light, did not, so the kart on the line was the raw
+  // sheet at UI chroma pasted into a lit scene.
+  Loader {
+    id: heroRim
+    x: hero.x
+    y: hero.y
+    z: 1
+    source: "parts/CarLight.qml"
+    onLoaded: {
+      item.host = hero
+      item.pass = "rim"
+      // The frame's own rim tone, and the sun is low and behind-right of the
+      // car, so the light lands on its top-right corner. Stronger than the
+      // garage's because there is a SUN behind this car and a work light
+      // behind that one.
+      item.rimColor = countdown.inkRim
+      item.rimStrength = 0.85
+      item.rimDx = 2
+      item.rimDy = -2
+    }
+  }
+
   CarSprite {
     id: hero
     x: Math.round(countdown.width * countdown.kartFootX)
@@ -227,9 +303,52 @@ FocusScope {
     number: countdown.kartNumber
     camera: "road"
     yaw: 0
-    sheetScale: 1.0
-    pixelScale: 3
-    z: 1
+    sheetScale: countdown.kartFit.sheetScale
+    pixelScale: countdown.kartFit.pixelScale
+    z: 2
+
+    // THE CAR HAD NO FOOT, IT HAD A HOLE. The bake's contact shadow is
+    // `#5f255e` at alpha 128 -- the design's mid purple, painted at noon -- and
+    // over this screen's tarmac (`#1c0a18`) it composites BRIGHTER than the
+    // road it falls on, so what sat under the wheels was a hard pale ellipse
+    // that swallowed the bottom of every tyre. `CarWash.qml` carries the
+    // arithmetic and the two-pass answer; the tone is this floor's own deep
+    // end, so the shadow is darker than the road rather than lighter.
+    washAmount: 0
+    shadeAmount: 0.72
+    shadeColor: "#12040f"
+
+    // THE BRAKE LIGHTS, AND THEY COUNT DOWN. The road camera is the one the
+    // bake lists tail lamps for, and this is a car held on the brakes with the
+    // revs coming up: dim on `3`, brighter on `2`, hard on `1`, and OUT on GO,
+    // which is a foot coming off a brake pedal. It is four Rectangles at the
+    // lamp centres `meta.json` gives, so it costs nothing, and it is one of the
+    // things that makes the four beats different pictures from each other.
+    lampGlow: countdown.go ? 0.0 : [0.34, 0.62, 0.95][Math.max(0, Math.min(2, countdown.beat))]
+    Behavior on lampGlow {
+      enabled: !countdown.reducedMotion
+      NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+    }
+  }
+
+  // The key and the fill, over the sprite: the sun on the roof and the floor's
+  // purple coming up into the underside, banded, because this is a pixel-art
+  // sheet and a gradient laid over it reads as a photograph.
+  Loader {
+    id: heroLight
+    x: hero.x
+    y: hero.y
+    z: 3
+    source: "parts/CarLight.qml"
+    onLoaded: {
+      item.host = hero
+      item.keyColor = countdown.inkRim
+      item.keyStrength = 0.30
+      item.keyReach = 0.46
+      item.fillColor = "#5f255e"
+      item.fillStrength = 0.30
+      item.fillReach = 0.30
+    }
   }
 
   // ------------------------------------------------------------ the header
@@ -344,19 +463,35 @@ FocusScope {
   // the fit subtracts the pulse's own overshoot before it chooses a size, and
   // (round 6) the contour's keyline as well.
   //
-  // ROUND 6 CORRECTS THE NUMBER THAT STOOD HERE. It read "the numeral is still
-  // enormous -- 43% of the frame height in ink at 1920 x 1080, against 43%
-  // before, so this costs the picture nothing", and it was wrong in the
-  // direction that flattered the change. Measured off the shipped PNGs: 43.9%
-  // before round 5, 40.0% after -- which is what round 5's own report said in
-  // its section 1.2 while this comment beside the code said otherwise. Round 6
-  // takes the contour out of the same band, and the shipped 1920 x 1080 PNGs
-  // now read 39.5% on beat 3, 39.4% on beat 2 and 39.1% on beat 1 (39.5% on
-  // beat 3 at 1366 x 768 and at 2560 x 1440 as well). Clearing the board and
-  // lifting the type off the sun cost the numeral about a tenth of its ink,
-  // 43.9% to 39.5%. It is still by far the largest thing in the frame, and the
-  // cost is real; the comment that said it was nothing was the round's own
-  // evidence contradicted at the line it was written on.
+  // ROUND 2 CORRECTS THE NUMBER THAT STOOD HERE, FOR THE THIRD TIME, AND THIS
+  // TIME THE NUMBER CAME OFF THE SCREEN.
+  //
+  // Round 6's note read: "the shipped 1920 x 1080 PNGs now read 39.5% on beat
+  // 3, 39.4% on beat 2 and 39.1% on beat 1", and used 39.5% to argue that
+  // clearing the board had cost the numeral only about a tenth of its ink,
+  // 43.9% down to 39.5%. A blind critic could not reproduce 39.5% by any
+  // definition and measured 33.6% for the cream face and 35.8% for the whole
+  // mark. The critic is right. Asked of the running screen's own published
+  // `beatInkBottomY - beatInkTopY`, on the build that comment was written for:
+  //
+  //     1920 x 1080   33.6%   1366 x 768   33.8%
+  //     1024 x  600   34.3%   2560 x 1440  33.8%
+  //
+  // on all three counted beats, and 15.1% on GO. 39.5% is nobody's measurement
+  // of anything; it is 4 points of ink that never existed, quoted in a comment
+  // beside the code and then used as evidence.
+  //
+  // DOES THE ARGUMENT IT SUPPORTED STILL HOLD? The argument was that clearing
+  // the gantry's board was affordable because the numeral stayed enormous. It
+  // holds, and it holds on a smaller margin than was claimed: the cost was
+  // 43.9% to 33.6%, not to 39.5% -- the numeral lost about a QUARTER of its
+  // ink, not a tenth. It is still by a long way the largest thing in the frame
+  // (the fact, the next largest, is 10.5%), the board is legible behind it,
+  // and this round spends part of what is left on making the four beats
+  // different sizes from each other. But "this cost the picture almost
+  // nothing" was said three times about this one change and was not true any
+  // of the three times, and a number that cannot be reproduced from the screen
+  // is not a measurement.
   FontMetrics {
     id: typeProbe
     font.family: Theme.mono
@@ -387,10 +522,16 @@ FocusScope {
   // pixels; the clear air above it is 3% of the frame height, which is 32 px at
   // 1080 and 23 px at 768.
   readonly property real typeFloorY: scene.boardTopY - countdown.height * 0.030
-  // Where the ink starts. GO keeps the ceiling the prototype's GO frame had --
-  // that frame was never the defect -- and the counted beats take the whole sky
-  // above the board.
-  readonly property real typeCeilingY: countdown.height * (countdown.go ? 0.100 : 0.045)
+  // Where the ink starts, and it is the same line on all four beats now.
+  //
+  // GO USED TO START AT 0.100 AND THE COUNTED BEATS AT 0.045 -- 59 px of empty
+  // sky at 1080, kept because "that frame was never the defect". It was: `3`
+  // measured 33.6% of the frame height in ink and GO 15.1%, so the release was
+  // drawn at 45% of the height of the beats leading up to it and the loudest
+  // moment of the countdown was its quietest picture. The band above the board
+  // is the same band on every beat; what differs is that on GO the fact shares
+  // it.
+  readonly property real typeCeilingY: countdown.height * 0.045
 
   readonly property int beatShadowDrop: countdown.px(countdown.go ? 8 : 16)
   readonly property int factShadowDrop: countdown.px(8)
@@ -448,36 +589,69 @@ FocusScope {
   readonly property real factFloorEm: countdown.height * 0.105
                                       / Math.max(0.2, countdown.factInk.height)
 
+  // ==================================================== THE BEATS GET BIGGER
+  //
+  // `3`, `2` and `1` were the same size to within half a pixel -- 33.6, 33.6
+  // and 33.6 per cent of the frame in ink -- so the only thing that changed
+  // between one second and the next was WHICH numeral it was. Measured frame
+  // against frame, 2.06% of the picture changed across `3` to `2` and 2.11%
+  // across `2` to `1`.
+  //
+  // A countdown builds. Each numeral now takes more of the band than the one
+  // before it, ending at the whole band on `1`, which is the size all three
+  // used to be: nothing shrinks the last counted beat, and the first two step
+  // back from it. The design's floor for the numeral is the plan's "the number
+  // is enormous" and `tst_countdown_board`'s own case, which requires 29% of
+  // the frame in ink on every counted beat -- the smallest of the three lands
+  // at 30.2% at 1920 x 1080, so the build happens above the floor rather than
+  // through it.
+  readonly property var beatFill: [0.90, 0.95, 1.00, 1.00]
+  readonly property real beatShare: countdown.beatFill[Math.max(0, Math.min(3, countdown.beat))]
+
   readonly property int beatPixelSize: {
-    if (!countdown.go)
-      return Math.max(8, Math.floor((countdown.typeFloorY - countdown.typeCeilingY
-                                     - countdown.beatFootDrop)
-                                    / Math.max(0.05, countdown.beatInk.height
-                                                     + countdown.beatSwing)))
+    if (!countdown.go) {
+      var band = countdown.typeFloorY - countdown.typeCeilingY - countdown.beatFootDrop
+      var full = band / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)
+      return Math.max(8, Math.floor(full * countdown.beatShare))
+    }
     var left = countdown.goBand - countdown.factPixelSize * countdown.factInk.height
     var fitted = left / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)
-    return Math.max(8, Math.min(Math.round(countdown.height * 0.24), Math.floor(fitted)))
+    return Math.max(8, Math.floor(fitted))
   }
-  // Place by the ink: the item's top is as far above the ceiling as the ink is
-  // below the item's top.
-  readonly property int beatY: Math.round(countdown.typeCeilingY
+  // Place by the ink. GO hangs from the ceiling, because the fact hangs from
+  // the floor and the gap between them is the design's. A counted beat is
+  // CENTRED in the band instead, so the three of them grow about one point
+  // rather than dropping toward the gantry as they get bigger.
+  readonly property real beatInkHeightPx: countdown.beatInk.height * countdown.beatPixelSize
+  readonly property real beatInkTopWanted: countdown.go
+      ? countdown.typeCeilingY
+      : countdown.typeCeilingY
+        + ((countdown.typeFloorY - countdown.beatFootDrop - countdown.typeCeilingY)
+           - countdown.beatInkHeightPx * (1 + countdown.beatSwing / countdown.beatInk.height)) / 2
+  readonly property int beatY: Math.round(countdown.beatInkTopWanted
                                           - countdown.beatInk.top * countdown.beatPixelSize)
 
-  // The fact is drawn at the size the race draws it -- "never smaller than a
-  // tenth of the screen height" -- and hangs from the same floor the numeral
-  // respects, so on GO the fact sits above the board rather than across it.
-  readonly property int factPixelSize: {
-    if (!countdown.go)
-      return Math.round(countdown.height * 0.19)
-    // What is left of the band once GO has had its share, at the ratio the two
-    // constants always stood in (0.24 to 0.19).
-    var share = countdown.goBand
-                / Math.max(0.2, (0.24 / 0.19) * (countdown.beatInk.height
-                                                 + countdown.beatSwing)
-                                + countdown.factInk.height)
-    return Math.max(8, Math.round(Math.max(countdown.factFloorEm,
-                                           Math.min(countdown.height * 0.19, share))))
-  }
+  // ============================== THE FACT IS THE SIZE THE RACE DRAWS IT AT
+  //
+  // The comment here said so and it was not true. The race sizes the fact from
+  // one rule -- `ui/Race.qml`'s `factPixelSize`: "a tenth of the screen height
+  // in ink, with a hair over it so rounding never lands under the floor",
+  // which is the design's accessibility line and is 0.105 of the frame. This
+  // screen fitted the fact to whatever was left of the band and capped it at
+  // 0.19 of the frame in EM, which landed it at 12.0% of the frame in ink at
+  // 1920 x 1080 against the race's 10.5%. Same sentence, same second, two
+  // sizes, and the screen that claimed to be matching the other one was the
+  // one that had drifted.
+  //
+  // So on GO the fact is the floor exactly, by the same arithmetic, which is
+  // `factFloorEm`. Everything the change frees goes to GO -- 16 px at 1080 --
+  // and the two screens now print the first fact at the same height, so a
+  // child reading it through the cut sees one object and not two.
+  //
+  // It is one expression on every beat rather than two: before GO the fact is
+  // drawn at zero opacity, and a fade that starts at a different size from the
+  // one it lands at is a fade and a resize at once.
+  readonly property int factPixelSize: Math.max(8, Math.round(countdown.factFloorEm))
   readonly property int factY: Math.round(countdown.typeFloorY - countdown.factFootDrop
                                           - (countdown.factInk.top + countdown.factInk.height)
                                             * countdown.factPixelSize)
@@ -559,6 +733,11 @@ FocusScope {
       shadowTone: countdown.inkShadow
       bodyTone: countdown.inkBody
       rimTone: countdown.inkRim
+      // The cached ink is a texture, and for the 260 ms of the surge it is
+      // being scaled. Filtered while that is true, nearest for the rest of the
+      // beat, which is when the texture is composited at exactly 1:1 and a
+      // nearest blit is the cheap path on a software renderer.
+      inkSmooth: beatGlyph.scale !== 1.0
     }
 
     // ONE PULSE PER BEAT, AND NOW IT IS ACTUALLY ON THE BEAT.

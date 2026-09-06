@@ -711,16 +711,33 @@ Item {
         // sun, and the design puts it there on purpose: "the first fact
         // readable behind GO", over the disc. So it has to be standing on the
         // sun AND not touching it.
-        verify(worst.onTheDisc > 300,
+        // THE FLOOR MOVED FROM 300 TO 180, AND WHAT MOVED IT IS RECORDED HERE
+        // RATHER THAN IN A COMMIT MESSAGE, because lowering a guard is the
+        // cheapest way to make a suite lie.
+        //
+        // The fact used to be drawn at 12.0% of the frame height in ink on this
+        // screen and at 10.5% in the race, one second later, off the same
+        // string -- and `ui/Countdown.qml`'s own comment claimed it was "drawn
+        // at the size the race draws it". It is now, by the race's own rule
+        // (`Race.factPixelSize`: a tenth of the frame in ink, plus a hair). The
+        // fact is therefore SMALLER, and the sun sits right of centre, so the
+        // `6` reaches less far onto the disc: measured on the shipped GO frames
+        // at the three sizes, 271 / 615 / 1042 in this runner's fallback face
+        // and 1419 / 2934 / 5244 in the shell's own Menlo, against 868 / 1717 /
+        // 3025 before. 180 keeps a margin over the worst of those and stays an
+        // order of magnitude above the failure this guard exists for: with
+        // `CountdownScene.gantryFoot` at 0.165 this case read 20.
+        verify(worst.onTheDisc > 180,
                label + ": only " + worst.onTheDisc + " cream pixels of the type"
                + " stand within the sun's disc -- the fact is supposed to be on it."
-               + " The shipped frames read 868, 1717 and 3025 at the three sizes;"
-               + " the floor is 300. IT IS `CountdownScene.gantryFoot` THAT"
-               + " DECIDES THIS. The arch's distance sets the type's floor, the"
-               + " floor sets the fact's size, and the fact's size is how far it"
-               + " reaches toward a sun that sits right of centre: at 0.165 the"
-               + " same frame read 20 here and 0 for the clearance below, which"
-               + " would have made this whole case vacuous without failing.")
+               + " The shipped frames read 271, 615 and 1042 at the three sizes"
+               + " in this runner's fallback face; the floor is 180. IT IS"
+               + " `CountdownScene.gantryFoot` THAT DECIDES THIS. The arch's"
+               + " distance sets the type's floor, the floor sets the fact's"
+               + " size, and the fact's size is how far it reaches toward a sun"
+               + " that sits right of centre: at 0.165 the same frame read 20"
+               + " here and 0 for the clearance below, which would have made"
+               + " this whole case vacuous without failing.")
         // The keyline, measured rather than assumed. Six pixels of contour put
         // the type's cream that far from the disc; a one-pixel rim does not.
         // Read by this case on the shipping build: 7 at 1366 x 768, 4 at
