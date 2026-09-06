@@ -350,3 +350,66 @@ function smooth(edge0, edge1, v) {
 function mix3(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
+
+// --------------------------------------------------- THE SAME, WITHOUT A NEW
+//
+// `sectorMix`, `mix3` and `rowContext` each build a fresh array or object, and
+// `ui/CanvasRoad.qml` calls them once per band on every repaint of the road --
+// which, on a scene graph with no shader, is every frame. Measured on the Race
+// screen at 480x270 with `qt.qml.gc.allocatorStats`, disabling the repaint
+// alone took garbage collections from 184.5 to 81.2 per thousand animation
+// ticks: over half of all the allocation pressure in the game is here. Plan v3
+// forbids per-frame allocation outright.
+//
+// These write into a buffer the caller owns and reuses. The ARITHMETIC IS
+// COPIED, not re-derived -- same order of operations, same constants -- so a
+// band comes out at the same bits it did before, and `tst_trackview_road`
+// still holds `rowContext`/`rowGround` to `groundAt` sample by sample.
+function sectorMixInto(s, out) {
+  var p = ((s % CIRCUIT_LENGTH) + CIRCUIT_LENGTH) % CIRCUIT_LENGTH / SECTOR_LENGTH
+  var i = Math.floor(p)
+  var f = p - i
+  var t = (f - 0.62) / 0.38
+  t = t < 0 ? 0 : (t > 1 ? 1 : t)
+  out[0] = wrapSector(i)
+  out[1] = wrapSector(i + 1)
+  out[2] = t * t * (3 - 2 * t)
+  return out
+}
+
+function mix3Into(a, b, t, out) {
+  out[0] = a[0] + (b[0] - a[0]) * t
+  out[1] = a[1] + (b[1] - a[1]) * t
+  out[2] = a[2] + (b[2] - a[2]) * t
+  return out
+}
+
+// The buffer `rowContextInto` fills. Its `mix` slot is scratch for the sector
+// blend, so a row needs no allocation at all once this exists.
+function newRowContext() {
+  return {
+    "s": 0, "ff": 0, "soil": [0, 0, 0], "scrub": [0, 0, 0], "mix": [0, 0, 0],
+    "amount": 0, "wind": 0, "water": 0, "grid": 0,
+    "coarseS": 0, "fineS": 0, "rutS": 0, "windS": 0, "windShear": 0
+  }
+}
+
+function rowContextInto(s, z, c) {
+  var m = sectorMixInto(s, c.mix)
+  var a = m[0], b = m[1], t = m[2]
+  c.s = s
+  c.ff = fineFade(z)
+  mix3Into(SOIL[a], SOIL[b], t, c.soil)
+  mix3Into(SCRUB[a], SCRUB[b], t, c.scrub)
+  var fa = FLAGS[a], fb = FLAGS[b]
+  c.amount = fa[3] + (fb[3] - fa[3]) * t
+  c.wind = fa[2] + (fb[2] - fa[2]) * t
+  c.water = fa[1] + (fb[1] - fa[1]) * t
+  c.grid = fa[0] + (fb[0] - fa[0]) * t
+  c.coarseS = Math.floor(s / COARSE)
+  c.fineS = Math.floor(s / FINE)
+  c.rutS = Math.floor(s * 0.24 / RUT)
+  c.windS = Math.floor(s * 0.10 / COARSE)
+  c.windShear = s * 0.65
+  return c
+}

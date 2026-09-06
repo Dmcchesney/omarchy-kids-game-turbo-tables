@@ -141,6 +141,38 @@ Canvas {
   smooth: false
   antialiasing: false
 
+  // ------------------------------------ THE BUFFERS, AND WHY THEY ARE HERE
+  //
+  // THIS FUNCTION IS THE GAME'S ALLOCATOR. On a scene graph with no shader --
+  // the software renderer this project's whole evidence trail is taken on, and
+  // the fallback any machine without a working GL lands on -- `onPaint` runs on
+  // every frame, and it built a fresh array or object for every band of the
+  // road and every row of the ground: the sector mix, the flags, the soil, the
+  // scrub, the shoulder, the row context, the depth ladder. Measured on the
+  // Race screen at 480x270 with Qt's own `qt.qml.gc.allocatorStats` and the
+  // start-up collections differenced out, disabling this one function's body
+  // took garbage collections from 184.5 to 81.2 per thousand animation ticks,
+  // and a bare moving TrackView from 104.7 to 10.9 -- ninety per cent of the
+  // view's allocation pressure, in one function.
+  //
+  // Plan v3: "No per-frame allocation in anything that runs every frame -- no
+  // new arrays, strings or objects in a paint or an update path." These are
+  // what the paint writes into instead. Every one of them is scratch: nothing
+  // outside a single `onPaint` ever reads one, and the arithmetic that fills
+  // them is the same arithmetic, in the same order, as the code that used to
+  // return a new array.
+  property var zsBuf: []
+  property var mixBuf: [0, 0, 0]
+  property var flagsBuf: [0, 0, 0, 0]
+  property var soilBuf: [0, 0, 0]
+  property var scrubBuf: [0, 0, 0]
+  property var shoulderBuf: [0, 0, 0]
+  property var rowBuf: Terrain.newRowContext()
+  // The dusk triple is a function of the hour alone, so it is a binding rather
+  // than three multiplies per band: it is rebuilt when the lap changes and at
+  // no other time.
+  readonly property var duskNow: Terrain.duskMul(nightfall)
+
   // ------------------------------------------------------- the projection
   function vAt(z) { return horizon + (focal * camHeight) / (2 * z) }
   function zAt(v) { return (focal * camHeight) / (2 * Math.max(1e-4, v - horizon)) }
@@ -236,7 +268,10 @@ Canvas {
     // `height * focal * camHeight * dz / (2 z^2)` plane pixels tall, so half a
     // pixel is `dz = z^2 / (height * focal * camHeight)`.
     var half = stripe * 0.5
-    var zs = []
+    // Reused, not rebuilt: the ladder is up to four hundred entries and this
+    // ran on every frame. See the buffers above.
+    var zs = zsBuf
+    zs.length = 0
     var z = drawDistance
     zs.push(z)
     var guard = 0
@@ -375,7 +410,10 @@ Canvas {
       var cHere = Terrain.curveNormAt(sMid)
       var bend = Terrain.smooth(0.22, 0.72, Math.abs(cHere))
       var soilRgb = sectorSoil(sMid)
-      var shoulder = [soilRgb[0] * 0.72, soilRgb[1] * 0.72, soilRgb[2] * 0.72]
+      var shoulder = shoulderBuf
+      shoulder[0] = soilRgb[0] * 0.72
+      shoulder[1] = soilRgb[1] * 0.72
+      shoulder[2] = soilRgb[2] * 0.72
       var zebra = Qt.rgba(rur + (rlr - rur) * soft, rug + (rlg - rug) * soft,
                           rub + (rlb - rub) * soft, 1)
       var kerbR = cHere > 0 ? bend : 0
@@ -565,7 +603,7 @@ Canvas {
     // at the same point in the same order; read once per repaint rather than
     // once per block, for the reason the whole of this function's preamble
     // exists.
-    var dusk = Terrain.duskMul(nightfall)
+    var dusk = duskNow
     var dmR = dusk[0], dmG = dusk[1], dmB = dusk[2]
     var scratch = [0, 0, 0]
     var z = nearDistance
@@ -614,7 +652,7 @@ Canvas {
       var sMid = mid + uTravel
       var fFloor = Math.max(0, Math.min(1, Math.exp(-uFog * mid * mid * 0.0011)))
       var sx = -shimmerPx(yNear / h)
-      var row = Terrain.rowContext(sMid, mid)
+      var row = Terrain.rowContextInto(sMid, mid, rowBuf)
 
       var reach = mid * uAspect / uFocal
       var mid0 = -uCurve * mid * mid
@@ -746,30 +784,47 @@ Canvas {
 
   // The blended sector flags and soil at a point down the track: the same two
   // lookups road.frag makes with `sectorMix`.
+  //
+  // ONE BUFFER EACH, AND THE CALLER MUST NOT HOLD ON TO ONE. Every one of
+  // these ran once per band per frame and returned a new array; see the note
+  // on the buffers above for what that was costing. `flagsBuf`, `soilBuf` and
+  // `scrubBuf` are separate arrays precisely because the road loop holds all
+  // three at once; `mixBuf` is shared because no caller keeps it past the line
+  // that reads it.
   function sectorFlags(s) {
-    var m = Terrain.sectorMix(s)
+    var m = Terrain.sectorMixInto(s, mixBuf)
     var a = Terrain.FLAGS[m[0]], b = Terrain.FLAGS[m[1]], t = m[2]
-    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t]
+    var out = flagsBuf
+    out[0] = a[0] + (b[0] - a[0]) * t
+    out[1] = a[1] + (b[1] - a[1]) * t
+    out[2] = a[2] + (b[2] - a[2]) * t
+    out[3] = a[3] + (b[3] - a[3]) * t
+    return out
   }
   // The grid's own backing tone. Dusked with the same triple the terrain takes,
   // so the pit's floor under the neon dims with everything else rather than
   // staying at noon under a lap-12 sky.
   function sectorSoil(s) {
-    var m = Terrain.sectorMix(s)
-    var soil = Terrain.mix3(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2])
-    var d = Terrain.duskMul(nightfall)
-    return [soil[0] * d[0], soil[1] * d[1], soil[2] * d[2]]
+    var m = Terrain.sectorMixInto(s, mixBuf)
+    var out = Terrain.mix3Into(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2], soilBuf)
+    var d = duskNow
+    out[0] *= d[0]
+    out[1] *= d[1]
+    out[2] *= d[2]
+    return out
   }
 
   // The sector's crest tone, dusked: what the dunes' sand drifts over the
   // shoulder are made of. road.frag has `scrub` as a local at that point;
   // this renderer has to go and get it.
   function sectorScrub(s) {
-    var m = Terrain.sectorMix(s)
-    var scrub = Terrain.mix3(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2])
-    var d = Terrain.duskMul(nightfall)
-    return [scrub[0] * d[0], scrub[1] * d[1], scrub[2] * d[2]]
+    var m = Terrain.sectorMixInto(s, mixBuf)
+    var out = Terrain.mix3Into(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2], scrubBuf)
+    var d = duskNow
+    out[0] *= d[0]
+    out[1] *= d[1]
+    out[2] *= d[2]
+    return out
   }
 
   // The pit's diagnostic grid, three octaves, both directions. Unchanged from
