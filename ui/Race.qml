@@ -2635,7 +2635,17 @@ FocusScope {
       does: leaveHint.putsCardBack ? "put the chosen card back"
                                    : "go back to the garage"
       key: "Escape"
-      destructive: !leaveHint.putsCardBack
+      // DESTRUCTIVE WHATEVER IT SAYS TODAY, and the repeat sweep is why.
+      //
+      // Three clicks 16 ms apart on `ESC  BACK` put the card back with the
+      // first and LEFT THE RACE with the second: the control changed its
+      // meaning under the pointer, and the half of the double-click nobody
+      // meant to send arrived at the new meaning. A guard that switched off
+      // while the label said BACK would be a guard that was off at exactly the
+      // moment it was needed. This control can leave a race -- sometimes on its
+      // second press -- so it is guarded on every press, and the `does` column
+      // goes on telling the truth about what ONE press does.
+      destructive: true
       help: leaveHint.putsCardBack
             ? "Puts the chosen card back. All three cards are still yours."
               + " The Escape key does it too."

@@ -230,6 +230,20 @@ FocusScope {
   }
 
   function footerAct(act) {
+    // NOTHING ON THIS PANEL ACTS WHILE THE HAND IS FLYING OFF.
+    //
+    // The cards have had this guard since piece F (`onTapped: if
+    // (!picker.slamming)`), and the footer needed it for a sharper reason that
+    // the round-2 repeat sweep found: the chips CHANGE under the pointer the
+    // instant a card is spent. `⏎  USE IT` is replaced at the same pixel by
+    // `1 2 3  CHOOSE A CARD`, so the second press of a double-click on USE
+    // landed on the chip that had taken its place and chose a card the child
+    // never asked for. In the game the hand empties and the panel goes with it,
+    // which is why the same sweep reads SAME on the race screen; standing alone
+    // in the harness the hand stays and the walk-through is visible. It is the
+    // same defect either way and this is where it stops.
+    if (picker.slamming)
+      return
     if (act === "chooseFirst")
       picker.tapCard(0)
     else if (act === "use")

@@ -235,6 +235,11 @@ Item {
       picker.clearChoice()
       picker.slamBorn = -1e9
       settings.pending = ""
+      // And the 400 ms in which the settings page stays switched off after a
+      // question is answered, so the press that answered cannot reach the
+      // screen behind it. A test that drove the answer and then wants the
+      // screen back is not that press.
+      settings.justAnswered = false
     }
 
     // ------------------------------------------------------------------

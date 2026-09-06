@@ -103,9 +103,50 @@ FocusScope {
     Qt.callLater(function () { asker.ask() })
   }
 
+  // PIECE M ROUND 2 -- THE SCREEN BEHIND A QUESTION DOES NOT TAKE THE SECOND
+  // HALF OF THE DOUBLE-CLICK THAT ANSWERED IT.
+  //
+  // The repeat sweep drove three clicks 16 ms apart at the question's own
+  // `⏎  ANSWER` line and watched the RIVALS row behind it go from PRO to
+  // ROOKIE. The first press answered and closed the question, the page
+  // re-enabled on the same turn of the event loop, and the second press --
+  // which no hand meant to send anywhere -- landed on a control that had been
+  // switched off a millisecond earlier.
+  //
+  // The hazard is this round's own doing: the question's footer became three
+  // click targets, and they sit over the settings rows. It would be a hazard
+  // for any modal whose controls overlap the screen behind it, so it is fixed
+  // here rather than by moving a line: the page stays switched off for the
+  // length of a double-click after the question closes, which is exactly the
+  // window in which a second press cannot have been meant for it.
+  property bool justAnswered: false
+
+  Timer {
+    id: answerGuard
+    // The same 400 ms `ui/parts/Clickable.qml` uses, and for the same reason.
+    interval: 400
+    onTriggered: {
+      settings.justAnswered = false
+      // AND THE KEYBOARD IS PUT BACK. A disabled item cannot hold active focus,
+      // so the stop `answer()` moved the keyboard to lost it the moment the
+      // page went off; without this the child would come out of the guard with
+      // the keyboard nowhere, which is the state `--focus -1` exists to
+      // photograph and no child should ever be in.
+      //
+      // Only while this screen is the one on show. A timer that grabs the
+      // keyboard 400 ms after the fact would otherwise take it off whatever the
+      // child had moved on to -- which is not hypothetical: it took the focus
+      // ring off the garage in the middle of the next test in the file.
+      if (settings.visible)
+        settings.focusStop(settings.resumeStop)
+    }
+  }
+
   function answer(yes) {
     var which = settings.pending
     settings.pending = ""
+    settings.justAnswered = true
+    answerGuard.restart()
     var done = (yes && which.length > 0) ? settings.applyReset(which) : false
     settings.focusStop(settings.resumeStop)
     // The banner reports what happened to the file, not what was asked for. A
@@ -311,7 +352,7 @@ FocusScope {
     anchors.margins: settings.px(16)
     color: Theme.panelOnGround
     border.color: Theme.lineStrong
-    enabled: !settings.confirming
+    enabled: !settings.confirming && !settings.justAnswered
 
     readonly property int pad: settings.px(30)
     readonly property int contentX: pad
