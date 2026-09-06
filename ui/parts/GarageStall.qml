@@ -188,12 +188,25 @@ Item {
   // than the far arc, so it swings further down than the far arc swings up.
   // `daisY` stays the contact point, because that is what Garage.qml stands
   // the kart on.
-  readonly property real daisGroundR: 53.7
+  // ROUND 12: 53.7 BECOMES 45, AND 26 BECOMES 12, BECAUSE THE PLINTH OUTWEIGHED
+  // THE HERO TWO TO ONE.
+  //
+  // Measured by a critic on the shipped frame: the turntable was about
+  // 90,000 px of rendered purple against the car's 45,000 px of painted
+  // silhouette, and at 1024 x 600 the car was 145 px wide on a 250 px table.
+  // A pedestal with twice the visual mass of the thing it presents is not
+  // staging, it is competition, and this screen's whole problem was that four
+  // other objects reach the eye before the car does. The radius comes down
+  // until the plinth is narrower than the car standing on it -- which is what a
+  // turntable under a car looks like anyway, the wheels overhanging the near
+  // and far arcs -- and the rim is halved, so the thickness reads without the
+  // slab.
+  readonly property real daisGroundR: 48
   readonly property var daisFit: Theme.groundEllipse(daisGroundR)
   readonly property real daisRadius: daisFit.a * kartToStall
   readonly property real daisRy: daisFit.b * kartToStall
   readonly property real daisCy: daisY + daisFit.dy * kartToStall
-  readonly property real daisRim: 26
+  readonly property real daisRim: 12
   // How far the plinth's far arc rises above the contact point, in view-box
   // units. `daisY` is clamped by it, so the turntable can never be drawn as a
   // floor circle whose far edge is above the ground line -- which is what a
@@ -698,11 +711,6 @@ Item {
                  cy: stall.daisY + e.dy * stall.kartToStall }
       }
 
-      function daisPoint(angle, drop) {
-        return [stall.vx(dx0 + Math.cos(angle) * dr),
-                stall.vy(dcy + Math.sin(angle) * dry + drop)]
-      }
-
       // The plinth's own shadow, thrown by the sun through the door: away from
       // the door, which is up and right of it, so toward the camera and to the
       // left. Purple, because the ambient is a magenta sky.
@@ -725,23 +733,24 @@ Item {
       ellipse(dx0, dcy + rim, dr, dry, "#150a14")
       ellipse(dx0, dcy + rim * 0.45, dr, dry, "#22121f")
 
-      // The kerb, cut from the rim on a constant arc pitch and anchored to the
-      // top face's own edge at both ends.
-      var kerbs = 30
-      for (var k = 0; k < kerbs; k++) {
-        var a0 = -0.08 * Math.PI + (1.16 * Math.PI) * (k / kerbs)
-        var a1 = -0.08 * Math.PI + (1.16 * Math.PI) * ((k + 0.66) / kerbs)
-        var p0 = daisPoint(a0, 0), p1 = daisPoint(a1, 0)
-        var p2 = daisPoint(a1, rim * 0.62), p3 = daisPoint(a0, rim * 0.62)
-        ctx.fillStyle = (k % 2 === 0) ? "#5f4262" : "#251523"
-        ctx.beginPath()
-        ctx.moveTo(p0[0], p0[1])
-        ctx.lineTo(p1[0], p1[1])
-        ctx.lineTo(p2[0], p2[1])
-        ctx.lineTo(p3[0], p3[1])
-        ctx.closePath()
-        ctx.fill()
-      }
+      // ROUND 12: THIRTY ALTERNATING KERB SEGMENTS ARE GONE.
+      //
+      // They were the second most rendered thing on the screen -- thirty filled
+      // quads on every repaint -- and what they bought was a high-frequency
+      // black-and-lilac ladder wrapped round the near edge of the object that
+      // stands directly under the hero. At a squint it was a bright dashed band,
+      // which is exactly the kind of mass that beat the car to the eye. What a
+      // plinth needs to read as a plinth is a thickness and a lit near edge, and
+      // that is one stroke.
+      ctx.save()
+      ctx.beginPath()
+      ctx.translate(stall.vx(dx0), stall.vy(dcy + rim * 0.52))
+      ctx.scale(dr * u, dry * u)
+      ctx.arc(0, 0, 1, 0.02 * Math.PI, 0.98 * Math.PI, false)
+      ctx.restore()
+      ctx.strokeStyle = Qt.rgba(0.42, 0.24, 0.38, 0.85)
+      ctx.lineWidth = Math.max(1, rim * 0.34 * u)
+      ctx.stroke()
 
       // The top face, lit from the door: a gradient across the ellipse from
       // the far (door) edge, where it is pink, to the near edge, where it is
@@ -761,10 +770,17 @@ Item {
         ctx.fillStyle = topG
         ctx.fill()
       }
-      daisTop(dcy, dr, dry, "#8f3f72", "#391f33")
-      var r90 = ring(0.90), r70 = ring(0.70)
-      daisTop(r90.cy - 2, r90.rx, r90.ry, "#99457b", "#40243a")
-      daisTop(r70.cy - 4, r70.rx, r70.ry, "#a34b84", "#472a41")
+      // ROUND 12: DARKER, AND THE THREE RINGS ARE TWO.
+      //
+      // The top face was `#8f3f72` at its far edge, which is a mid purple --
+      // brighter than the floor it stands on and, with a purple, pink or blue
+      // paint on the car, within a few steps of the hero itself. A critic
+      // rendered `kartPaint=5` and reported that the car "nearly disappears".
+      // A stage is darker than what stands on it; the work light's own pool,
+      // which now lands here, is what lifts it back where the car is.
+      daisTop(dcy, dr, dry, "#5f2a4d", "#2a1626")
+      var r70 = ring(0.70)
+      daisTop(r70.cy - 3, r70.rx, r70.ry, "#6b3157", "#31192c")
 
       // Two rims on the top face. The near arc catches the amber work light --
       // the design's own rim, kept -- and the far arc catches the sun, in the
@@ -857,34 +873,61 @@ Item {
         ctx.fillStyle = glow
         ctx.fillRect(stall.vx(x + w / 2 - w * 1.6), stall.vy(y + 16 - w * 1.6),
                      stall.vs(w * 3.2), stall.vs(w * 3.2))
-        function beam(spread, a0, a1) {
-          var cone = ctx.createLinearGradient(0, stall.vy(y + 22), 0, stall.vy(stall.daisY + 40))
+        // ROUND 12 -- THE LAMP WAS AIMED AT EMPTY AIR, MEASURED.
+        //
+        // A critic sampled down the cone's axis against off-cone columns and
+        // found it clearly brighter at y = 280 and INDISTINGUISHABLE by y = 560,
+        // with the car occupying y 600 to 800. The design's own line for this
+        // room is "a big kart under a work light" and the one lighting gesture
+        // the room made stopped three hundred pixels above the hero, because the
+        // gradient's last stop -- alpha zero -- was pinned just below the
+        // turntable and its midpoint was already down at 0.028.
+        //
+        // The cone now HOLDS its value to the plinth and stops there, on the
+        // dais's own top face, which is where a work light's beam ends: at the
+        // thing it is pointed at. The car is drawn over this canvas, so the beam
+        // is occluded by the hero exactly as a real one would be, and what the
+        // child sees is a shaft of light with a car standing in it.
+        var landY = stall.daisY + stall.daisRim * 0.4
+        function beam(spread, a0, a1, a2) {
+          var cone = ctx.createLinearGradient(0, stall.vy(y + 22), 0, stall.vy(landY))
           cone.addColorStop(0, Qt.rgba(1, 0.76, 0.36, a0))
-          cone.addColorStop(0.50, Qt.rgba(1, 0.75, 0.34, a1))
-          cone.addColorStop(1, Qt.rgba(1, 0.74, 0.33, 0))
+          cone.addColorStop(0.55, Qt.rgba(1, 0.75, 0.34, a1))
+          cone.addColorStop(1, Qt.rgba(1, 0.74, 0.33, a2))
           ctx.fillStyle = cone
           ctx.beginPath()
           ctx.moveTo(stall.vx(x + 2), stall.vy(y + 22))
           ctx.lineTo(stall.vx(x + w - 2), stall.vy(y + 22))
-          ctx.lineTo(stall.vx(x + w + spread), stall.vy(stall.daisY + 40))
-          ctx.lineTo(stall.vx(x - spread), stall.vy(stall.daisY + 40))
+          ctx.lineTo(stall.vx(x + w + spread), stall.vy(landY))
+          ctx.lineTo(stall.vx(x - spread), stall.vy(landY))
           ctx.closePath()
           ctx.fill()
         }
-        beam(120, 0.075, 0.028)
-        beam(44, 0.075, 0.026)
+        beam(104, 0.085, 0.055, 0.030)
+        beam(40, 0.085, 0.062, 0.048)
       }
       workLight(stall.daisX - 88, 34, 176)
 
       // A pool of warm light on the floor under the kart: the amber
       // counterpoint, local, sitting inside the door's wide pink.
-      var pool = ctx.createRadialGradient(stall.vx(stall.daisX), stall.vy(stall.daisY - 4), 0,
-                                          stall.vx(stall.daisX), stall.vy(stall.daisY - 4), stall.vs(230))
-      pool.addColorStop(0, Qt.rgba(1, 0.75, 0.34, 0.16))
+      //
+      // ROUND 12: TIGHTER AND HOTTER, AND SQUASHED ONTO THE FLOOR PLANE. It was
+      // a 460-unit circle at alpha 0.16 -- a wide, weak warm haze over a quarter
+      // of the bay, which is not a pool of light, it is a tint. A pool is an
+      // ellipse on the ground with an edge, and a lamp's is the size of the
+      // thing under the lamp.
+      ctx.save()
+      ctx.translate(stall.vx(stall.daisX), stall.vy(stall.daisY + stall.daisRim * 0.3))
+      ctx.scale(stall.vs(stall.daisRadius * 1.5), stall.vs(stall.daisRy * 2.6))
+      var pool = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+      pool.addColorStop(0, Qt.rgba(1, 0.78, 0.40, 0.30))
+      pool.addColorStop(0.55, Qt.rgba(1, 0.75, 0.34, 0.15))
       pool.addColorStop(1, Qt.rgba(1, 0.7, 0.3, 0))
       ctx.fillStyle = pool
-      ctx.fillRect(stall.vx(stall.daisX - 230), stall.vy(stall.daisY - 234),
-                   stall.vs(460), stall.vs(460))
+      ctx.beginPath()
+      ctx.arc(0, 0, 1, 0, Math.PI * 2, false)
+      ctx.fill()
+      ctx.restore()
 
       // ---------------------------------------------------------- vignette
       // Purple, not black: the corners fall toward the bar's ground colour.

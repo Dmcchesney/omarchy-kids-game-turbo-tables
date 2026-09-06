@@ -590,6 +590,18 @@ FocusScope {
     // is what round ten's declutter spends its winnings on: the middle and the
     // bottom-centre of this screen now hold the car, the plinth and the floor
     // and nothing else at all. The width is piece C's to give.
+    // The sun's edge on the hero, UNDER it: see `parts/CarLight.qml`, `pass`.
+    Loader {
+      id: heroRim
+      x: heroKart.x
+      y: heroKart.y
+      source: "parts/CarLight.qml"
+      onLoaded: {
+        item.host = heroKart
+        item.pass = "rim"
+      }
+    }
+
     CarSprite {
       id: heroKart
       objectName: "heroCar"
@@ -611,6 +623,47 @@ FocusScope {
       yaw: 6
       sheetScale: 1.0
       pixelScale: fit.pixelScale
+
+      // ROUND 12 -- THE CAR IS IN THE ROOM NOW, AND THESE FOUR NUMBERS ARE HOW.
+      //
+      // A critic measured this sprite against the room it stands in and found
+      // no light of any kind on it: the body was `rgb(224,72,58)`, which is
+      // byte-for-byte `Theme.paints[0]`, the colour of the red chip in the
+      // swatch grid on the other side of the screen -- so the hero wore its own
+      // UI colour, at UI chroma, in a lit scene. Its darks measured
+      // `rgb(107,114,145)` and `rgb(26,27,38)`: a blue-grey at saturation 0.26,
+      // in a room whose floor and wall shadows measure S = 0.69 and 0.70 purple
+      // and whose stated rule is *shadow is purple, never grey*. And nothing
+      // darkened under the wheels, so it floated.
+      //
+      // `washAmount` is the dusk `CarWash.qml` was written for, used here for
+      // the room's ambient rather than the track's hour: one lerp of every tone
+      // toward the bay's own purple, which is what drags the sheet's cold darks
+      // into this room's palette and takes the body off the swatch's exact
+      // bytes. `shadeAmount` is the same file's second half -- the bake's
+      // contact shadow is an absolute `#5f255e` at half cover, a MID purple that
+      // over this dais composites to something lighter than the dais, which is
+      // why there appeared to be no contact shadow at all. Two passes in the
+      // plinth's own deep tone put it back.
+      //
+      // What puts light BACK is `parts/CarLight.qml` below.
+      washAmount: 0.14
+      washColor: "#3a0f34"
+      shadeAmount: 0.92
+      shadeColor: "#190616"
+    }
+
+    // The key and the rim, over the wash and under nothing. A Loader for the
+    // reason `CarSprite` loads `CarWash` through one: `ColorImage` lives in
+    // `QtQuick.Controls.impl`, a Qt-internal module, and an import of it at the
+    // top of this screen would let a Qt build without it take the whole garage
+    // down instead of one lighting pass.
+    Loader {
+      id: heroLight
+      x: heroKart.x
+      y: heroKart.y
+      source: "parts/CarLight.qml"
+      onLoaded: item.host = heroKart
     }
 
     // =====================================================  the left board
