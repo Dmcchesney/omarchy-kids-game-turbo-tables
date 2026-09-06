@@ -228,6 +228,20 @@ Item {
   Clickable {
     id: rowHit
     objectName: "clickSettingRow"
+    // ROUND 5 OF PIECE M, AND WHAT IS *NOT* DONE HERE, MEASURED.
+    //
+    // At 1024 x 600 the GARAGE's three rows render 23 px tall -- one pixel under
+    // the WCAG 2.2 AA floor, which is the floor for an adult and not for the
+    // seven-year-old this game is for. (The Settings screen's rows are 57 px;
+    // this is the garage's denser layout.) Flooring the hit area at 24 here was
+    // tried and `test_44` refused it: the rows are stacked with no gap left at
+    // that size, so each grown target overlapped its neighbour by a pixel, and
+    // the control under the pointer would not be the one the child is reading.
+    //
+    // A pixel of room between three rows is the GARAGE's layout, which is piece
+    // 3's and not this one's. It is left measured rather than fixed: `test_44`
+    // prints all six of these by name at 1024 x 600 and holds the count where it
+    // is, so it can come down and cannot go up.
     enabled: row.changeable
     stop: row.changeable ? change : null
     label: (row.spokenName.length > 0 ? row.spokenName : row.label) + " row"

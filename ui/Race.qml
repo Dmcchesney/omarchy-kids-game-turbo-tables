@@ -2697,7 +2697,19 @@ FocusScope {
     anchors.leftMargin: race.px(30)
     anchors.bottom: parent.bottom
     anchors.bottomMargin: race.px(28)
-    spacing: race.px(6)
+    // ROUND 5 -- TEN PIXELS, AND THEY ARE THE ONLY PIXELS THIS PIECE MOVES ON
+    // THIS SCREEN.
+    //
+    // Two DESTRUCTIVE controls, one above the other, and the lower one abandons
+    // the race. Measured at 1024 x 600 they were 16 px tall and 3 px apart: a
+    // critic's sentence was "he will hit the wrong one", and he is right --
+    // that is a 35 px column holding two irreversible presses. The targets are
+    // 24 px square at minimum now (`ui/parts/KeyHint.qml`), which needs at least
+    // eight pixels between the words or the two hit areas grow into each other
+    // and the pointer is on the one the child is not reading. `test_44` refuses
+    // that overlap; this is the room it needs, floored so it survives the small
+    // window rather than scaling away in it.
+    spacing: Math.max(10, race.px(6))
 
     KeyHint {
       id: pitCrewHint

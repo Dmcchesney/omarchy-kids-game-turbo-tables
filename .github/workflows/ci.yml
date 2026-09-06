@@ -216,18 +216,28 @@ jobs:
       # The parity walk itself, on every screen the game has. It exits non-zero
       # when a click target names no key, when a declared control or a Tab stop
       # has no click target under it, when a printed key on the screen cannot be
-      # pressed, when a destructive control names no guard, or when a mouse
-      # handler that is not a Clickable exists anywhere in the tree.
+      # pressed, when a destructive control names no guard, when a mouse handler
+      # that is not a Clickable exists anywhere in the tree, or -- round 5 -- when
+      # a control that does something a child cannot undo is smaller than
+      # 24 x 24 px.
+      #
+      # ROUND 5 -- AT THREE WINDOW SIZES, because the size rule is the one that
+      # only bites at the small end. Every number in the piece was taken at
+      # 1920 x 1080 until a critic walked 1024 x 600 and found both of the race's
+      # destructive controls at 16 px tall. Twenty-one walks at about a second and
+      # a half each.
       - name: The parity walk, on every screen
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
         run: |
           set -euo pipefail
-          for screen in Game Garage Settings Picker Countdown Race Results; do
-            echo "--- $screen"
-            /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
-              --screen "$screen" --print-controls
+          for size in 1920x1080 1366x768 1024x600; do
+            for screen in Game Garage Settings Picker Countdown Race Results; do
+              echo "--- $screen at $size"
+              /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+                --screen "$screen" --size "$size" --print-controls
+            done
           done
 
       # ROUND 5. AND THE TWO STATES A SCREEN HAS TO BE DRIVEN INTO.

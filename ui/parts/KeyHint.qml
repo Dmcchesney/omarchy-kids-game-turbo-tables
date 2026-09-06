@@ -152,6 +152,21 @@ Item {
   Clickable {
     id: hintHit
     objectName: "clickKeyHint"
+    // ROUND 5. THE FLOOR, AND WHY IT IS HERE RATHER THAN ON EVERY TARGET.
+    //
+    // A printed key hint is the small-type idiom of this game -- it is the
+    // pit crew, the way out of a race, the way out of a countdown, the chip that
+    // spends a hand and the line that answers the one question -- and at
+    // 1024 x 600 they were the smallest things on every screen: 14 to 22 px
+    // tall, against a WCAG 2.2 AA floor of 24 for an adult. The hit area is 24
+    // square at minimum, centred on the words, and the words do not move.
+    //
+    // Not on `Clickable` itself, because the other targets in this game are rows
+    // and cards that are already larger and are stacked with small gaps: a
+    // blanket floor there would grow neighbours into each other, which puts the
+    // wrong control under the pointer.
+    minWidth: 24
+    minHeight: 24
     stop: hint.stop
     label: hint.name.length > 0 ? hint.name : hint.action.toLowerCase()
     does: hint.does

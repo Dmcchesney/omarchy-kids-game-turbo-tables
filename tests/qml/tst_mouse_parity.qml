@@ -2843,6 +2843,145 @@ Item {
              + " cursor; the walk is not seeing the tree")
     }
 
+    // ==================================================================
+    // ROUND 5. HOW BIG A THING A CHILD HAS TO HIT, WITH A NUMBER IN IT.
+    // ==================================================================
+    //
+    // NOTHING IN THIS REPOSITORY MEASURED THIS. The parity walk prints `w` and
+    // `h` in the click table and compares them to nothing; no test reads them.
+    // A critic measured them off the walk and the answer is not shippable to a
+    // seven-year-old at the small end:
+    //
+    //     window       live targets   smallest   under 24 px tall
+    //     1920 x 1080       67          26 px          0
+    //     1366 x  768       67          20 px          3
+    //     1024 x  600       67          16 px         21
+    //
+    // and the two 16 px ones were `H  PIT CREW` and `ESC  LEAVE` -- BOTH
+    // DESTRUCTIVE, stacked 3 px apart in the corner of the screen the child
+    // spends the whole game on, with a mis-hit on the lower one abandoning the
+    // race. WCAG 2.2 AA (2.5.8) puts the floor at 24 x 24 CSS px FOR AN ADULT.
+    //
+    // TWO RULES, AND THEY ARE DIFFERENT ON PURPOSE.
+    //
+    //   A HARD FLOOR ON THE ONES THAT CANNOT BE UNDONE. Every live destructive
+    //   target is at least 24 x 24 at every size this game is played at. This is
+    //   the rule that fails the build.
+    //
+    //   A RATCHET ON THE REST. Raising every small target means moving type and
+    //   layout on screens other pieces own, and this piece may not do that. So
+    //   the count of live standalone targets under the floor is measured, stated
+    //   here as a number, and may not grow. It is a number that exists, which is
+    //   what did not exist before, and it can only come down.
+    //
+    // A row and its `CHANGE` chip are ONE control -- `controlBoxOf` is the
+    // file's own definition of that -- so a chip standing on a 57 px row is
+    // measured as the row. Counting them separately is how a 101 x 20 chip
+    // inside a 612 x 57 row reads as a target too small to hit when the whole
+    // row is the target.
+    readonly property var sizeFloor: 24
+    readonly property var sizesToWalk: [{ "w": 1920, "h": 1080, "small": 0 },
+                                        { "w": 1366, "h": 768, "small": 0 },
+                                        { "w": 1024, "h": 600, "small": 6 }]
+
+    function test_44_nothing_a_child_must_hit_is_smaller_than_the_floor() {
+      var wasWidth = root.width
+      var wasHeight = root.height
+      var list = suite.states()
+      var report = []
+      var failures = []
+      for (var z = 0; z < suite.sizesToWalk.length; z++) {
+        var size = suite.sizesToWalk[z]
+        root.width = size.w
+        root.height = size.h
+        suite.settleFrame()
+        var seen = 0
+        var small = 0
+        var smallest = 1e9
+        var smallestLabel = ""
+        var smallNames = []
+        for (var s = 0; s < list.length; s++) {
+          suite.enter(list[s])
+          // PER STATE. This file stands seven screens on top of each other and
+          // shows one at a time, so two targets from two screens share pixels by
+          // construction and say nothing about either.
+          var live = []
+          var screen = list[s].item
+          var targets = suite.clickTargetsIn(screen)
+          for (var i = 0; i < targets.length; i++) {
+            var hit = targets[i]
+            if (hit.barrier === true || !suite.usable(hit, screen))
+              continue
+            // THE WHOLE CONTROL, not this target's own share of it.
+            var box = suite.controlBoxOf(hit, screen, 0)
+            var w = Math.round(box.right - box.x)
+            var h = Math.round(box.bottom - box.y)
+            seen += 1
+            live.push({ "hit": hit, "box": box,
+                        "name": list[s].name + "::" + hit.label })
+            if (h < smallest) {
+              smallest = h
+              smallestLabel = list[s].name + " :: " + hit.label
+            }
+            if (hit.destructive === true && (h < suite.sizeFloor || w < suite.sizeFloor))
+              failures.push(size.w + "x" + size.h + "  " + list[s].name + " :: \""
+                            + hit.label + "\"  " + w + "x" + h)
+            if (h < suite.sizeFloor || w < suite.sizeFloor) {
+              small += 1
+              smallNames.push(list[s].name + "::" + hit.label + " " + w + "x" + h)
+            }
+          }
+          // ROUND 5 -- AND THEY MAY NOT HAVE GROWN INTO EACH OTHER.
+          //
+          // A hit area larger than its ink is only a fix if the neighbour did not
+          // grow the same way. `H  PIT CREW` and `ESC  LEAVE` are stacked three
+          // pixels apart at 1024 x 600 and one of them ends the race: two 24 px
+          // targets on 16 px lines three pixels apart overlap by five, and the
+          // control under the pointer is then not the one the child is reading.
+          // Two targets of ONE control -- a row and its CHANGE chip, a stepper's
+          // arrows and its face -- share a stop and are allowed to.
+          for (var a = 0; a < live.length; a++) {
+            for (var b = a + 1; b < live.length; b++) {
+              if (live[a].hit.stop !== null && live[a].hit.stop === live[b].hit.stop)
+                continue
+              var one = live[a].box
+              var two = live[b].box
+              if (one.x >= two.right || two.x >= one.right
+                  || one.y >= two.bottom || two.y >= one.bottom)
+                continue
+              failures.push(size.w + "x" + size.h + "  " + live[a].name + " and "
+                            + live[b].name + " overlap: " + suite.boxText(one) + " and "
+                            + suite.boxText(two) + " are two different controls sharing"
+                            + " pixels, so the pointer is on one of them and the child is"
+                            + " reading the other.")
+            }
+          }
+        }
+        report.push(size.w + "x" + size.h + ": " + seen + " live controls, smallest "
+                    + smallest + " px tall (" + smallestLabel + "), " + small
+                    + " under " + suite.sizeFloor + " px")
+        if (small > 0)
+          report.push("    " + smallNames.join("\n    "))
+        verify(small <= size.small,
+               size.w + "x" + size.h + ": " + small + " live controls are under "
+               + suite.sizeFloor + " px, and the measured number this build may not"
+               + " exceed is " + size.small + ". The floor is WCAG 2.2 AA 2.5.8, which"
+               + " is the number for an ADULT; the child this game is for is seven.")
+      }
+      root.width = wasWidth
+      root.height = wasHeight
+      suite.settleFrame()
+      console.log("target sizes:\n  " + report.join("\n  "))
+      compare(failures.length, 0,
+              "a control is too small to hit, or two controls share pixels. The floor"
+              + " for a control that does something a child cannot take back is "
+              + suite.sizeFloor + " x " + suite.sizeFloor + " px:\n  "
+              + failures.join("\n  ")
+              + "\nWCAG 2.2 AA 2.5.8 is 24 x 24 for an adult. `H  PIT CREW` and"
+              + " `ESC  LEAVE` were 16 px tall at 1024 x 600 and stacked 3 px apart,"
+              + " and one of them ends the race.")
+    }
+
     /** The race's own ESC line, as a guarded control that can leave the race. */
     function guardedEscapeLine() {
       var inRace = suite.clickTargetsIn(race)

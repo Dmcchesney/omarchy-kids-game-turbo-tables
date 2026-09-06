@@ -231,9 +231,37 @@ MouseArea {
   // lit up under the pointer would be saying the opposite.
   readonly property bool hovered: hit.containsMouse && hit.enabled && !hit.barrier
 
+  // ======================================================== ROUND 5
+  //
+  // A TARGET MAY BE BIGGER THAN THE INK IT SITS ON.
+  //
+  // Measured at the three window sizes this game is played at, the two
+  // destructive controls on the race screen were 90 x 16 and 83 x 16 at
+  // 1024 x 600 -- two thirds of the WCAG 2.2 AA floor, which is the number for
+  // an ADULT -- stacked three pixels apart, with a mis-hit on the lower one
+  // abandoning the race. Nothing in the repository measured it; `test_44` does
+  // now, and this is what it takes to pass.
+  //
+  // The fix may not be "draw them bigger". The race screen is the one screen
+  // where nothing may compete with the fact, design v4.1 has these lines down to
+  // be redrawn as key caps by another piece, and growing the type is that
+  // piece's decision and not this one's. What this piece owns is the TARGET, and
+  // a target has never had to be the same size as the words: the hit area grows
+  // around the ink, centred on it, and not one pixel of the picture moves.
+  //
+  // The caller is responsible for the gap. Two targets grown into each other
+  // would put the wrong one under the pointer, which is the defect this is
+  // fixing wearing a different hat -- so `test_20` and `test_32` (no second
+  // control reports the pointer) are the cases that fail if a floor is set
+  // without room for it.
+  property int minWidth: 0
+  property int minHeight: 0
+
   signal acted()
 
-  anchors.fill: parent
+  anchors.centerIn: parent
+  width: Math.max(hit.parent ? hit.parent.width : 0, hit.minWidth)
+  height: Math.max(hit.parent ? hit.parent.height : 0, hit.minHeight)
   // ROUND 4 -- A BARRIER EATS PRESSES, AND IT MAY NOT EAT THE POINTER.
   //
   // `ui/parts/Confirm.qml`'s extent outlives the question by one double-click

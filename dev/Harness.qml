@@ -688,6 +688,32 @@ Window {
     var mouseOnly = 0
     var unpressableKey = 0
     var destructive = 0
+    // PIECE M ROUND 5. HOW BIG A THING A CHILD HAS TO HIT.
+    //
+    // This table has printed `w` and `h` since round 2 and compared them to
+    // nothing, and no test read them. A critic measured them by hand off seven
+    // walks at three window sizes and found both of the race's DESTRUCTIVE
+    // controls at 16 px tall at 1024 x 600 -- two thirds of the WCAG 2.2 AA floor
+    // (2.5.8), which is the number for an adult. The number exists here now, and
+    // an undersized destructive control fails the walk rather than printing
+    // quietly beside the ones that are fine.
+    //
+    // The floor is only ENFORCED on the destructive ones, which is the same
+    // split `test_44` in `tests/qml/tst_mouse_parity.qml` makes and for the same
+    // reason: raising the rest means moving layout on screens other pieces own.
+    // The smallest live target is printed whatever it is, so the number a reader
+    // needs is on the evidence and not in somebody's notes.
+    //
+    // THIS IS THE RAW TARGET, not the control. A settings row and its `CHANGE`
+    // chip are two targets of one control -- they share a focus stop -- and this
+    // table has one line per target, so `smallestLiveTarget` on the garage reads
+    // 18 where the ROW a child actually presses is 23. `test_44` in
+    // `tests/qml/tst_mouse_parity.qml` unions targets by stop and reports the
+    // control; the two numbers differ on purpose and this walk says which it is.
+    var targetFloor = 24
+    var undersizedDestructive = 0
+    var smallestLive = -1
+    var smallestLabel = ""
     var barriers = 0
     var unguardedDestructive = 0
     var declaredGaps = 0
@@ -740,6 +766,20 @@ Window {
         unpressableKey += 1
       if (live && hit.destructive === true)
         destructive += 1
+      if (live) {
+        var boxH = Math.round(box.height)
+        var boxW = Math.round(box.width)
+        if (smallestLive < 0 || boxH < smallestLive) {
+          smallestLive = boxH
+          smallestLabel = String(hit.label)
+        }
+        if (hit.destructive === true && (boxH < targetFloor || boxW < targetFloor)) {
+          undersizedDestructive += 1
+          console.log("undersized\t" + hit.label + "\t" + boxW + "x" + boxH
+                      + "\tthe floor for a control a child cannot undo is "
+                      + targetFloor + "x" + targetFloor)
+        }
+      }
       // ROUND 4. A DESTRUCTIVE CONTROL WITH NO GUARD IS A GUARD NOBODY SET, and
       // it is a failing row rather than a quiet one: `H  PIT CREW` spent three
       // of a child's questions on one gesture because it was neither marked nor
@@ -936,6 +976,9 @@ Window {
     console.log("parity\tfocusStops\t" + stopCount)
     console.log("parity\tprintedKeyHints\t" + hints)
     console.log("parity\tdestructiveTargets\t" + destructive)
+    console.log("parity\tsmallestLiveTarget\t" + smallestLive + "\t" + smallestLabel)
+    console.log("parity\ttargetFloor\t" + targetFloor)
+    console.log("parity\tundersizedDestructive\t" + undersizedDestructive)
     console.log("parity\tbarriers\t" + barriers)
     console.log("parity\tsigns\t" + signs)
     console.log("parity\tmouseOnly\t" + mouseOnly)
@@ -950,7 +993,7 @@ Window {
     console.log("parity\tdeclaredKeyGaps\t" + declaredGaps)
     var bad = mouseOnly + keyOnly + stopsWithoutClick + strays
               + unpressableKey + hintsWithoutClick + unguardedDestructive
-              + deadPrintedKeys
+              + deadPrintedKeys + undersizedDestructive
     console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
     Qt.exit(bad === 0 ? 0 : 1)
   }
