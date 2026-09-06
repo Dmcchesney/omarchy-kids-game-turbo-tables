@@ -51,6 +51,23 @@ Item {
   property int labelSize: 16
   property int valueSize: 24
   property int labelWidth: 190
+
+  // PIECE 3. THE VALUE'S OWN TONE, AND WHY A FIXED ROW MAY NOT BORROW IT.
+  //
+  // Five rows in one column, two of which can never change, all five with a
+  // cream value at the same size: a child has to read the words to find out
+  // which three do anything. The chip column already says it -- CHANGE against
+  // 1 OF 1 and FIXED -- and a chip is 100 px at the far right of a row the
+  // child is reading at the left. The value is where the eye is, so the value
+  // carries the difference too. Default is the cream it has always been.
+  property color valueColor: Theme.cream
+
+  // The CHANGE chip's resting face. It was 5 % of a border tone on a hairline,
+  // which is a control that only exists once you are already pointing at it.
+  // Defaults to exactly what it was, so Settings is unchanged.
+  property color chipFill: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g,
+                                   Theme.menuBorder.b, 0.05)
+  property color chipBorder: Theme.lineStrong
   property alias buttonFocus: change.activeFocus
 
   signal stepped(int delta)
@@ -114,7 +131,7 @@ Item {
     x: name.x + name.width
     width: change.x - x - Math.round(row.valueSize * 0.5)
     text: row.value
-    color: Theme.cream
+    color: row.valueColor
     font.family: Theme.mono
     font.bold: true
     font.pixelSize: row.valueSize
@@ -177,11 +194,9 @@ Item {
       visible: row.changeable
       anchors.fill: parent
       radius: Theme.cornerRadiusSmall
-      color: row.hovered
-             ? Theme.hoverFill
-             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      color: row.hovered ? Theme.hoverFill : row.chipFill
       border.width: 1
-      border.color: row.hovered ? Theme.hoverRing : Theme.lineStrong
+      border.color: row.hovered ? Theme.hoverRing : row.chipBorder
     }
 
     // ROUND-4: the right rail is one line. A chip has no box, so centring its

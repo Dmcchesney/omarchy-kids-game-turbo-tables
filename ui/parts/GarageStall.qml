@@ -108,7 +108,18 @@ Item {
   readonly property real sunR: 70
 
   // Where a kart stands: the centre of the turntable, in view-box units.
-  readonly property real daisX: 498
+  //
+  // ROUND 10, PIECE 3. 498 becomes 558. The turntable was placed when the
+  // garage carried a settings board and a PRESET SIGNALS board along the whole
+  // bottom edge and a kart card up the left, so the only clear ground was
+  // left of centre. Those are one narrower board now and the open floor runs
+  // from the board's right edge to the roster column; 558 stands the car in
+  // the middle of the room it is actually standing in, and nearer the sun it
+  // is lit by. Everything the plinth is made of -- the rim, the cast shadow,
+  // the work light overhead and the warm pool under it -- is derived from this
+  // one number, so they move with it and the lighting stays consistent by
+  // construction rather than by three numbers being edited together.
+  readonly property real daisX: 558
   // The contact point, placed against the item and then clamped so the
   // plinth's far arc stays below the yard's ground line.
   readonly property real daisY: Math.max(groundLineY + daisRise + 8,

@@ -36,6 +36,23 @@ Item {
   // that does not set it is unchanged.
   property color faceColor: Theme.panelSunken
 
+  // PIECE 3. THE ARROW IS A KEY A CHILD CAN SEE FROM ACROSS THE ROOM.
+  //
+  // The arrows were `rgba(menuBorder, 0.05)` on a hairline -- 5 % of a colour
+  // that is itself a border tone -- so at rest they were a chevron floating in
+  // a box you had to already believe in. They lit beautifully once the pointer
+  // was on them, which is no use at all to the child who has not worked out
+  // that pointing at things does anything: the maintainer played this screen
+  // and reported that the buttons did not click, when in fact every one of
+  // them did. Discovery is the defect, not reach.
+  //
+  // So the resting state carries a real face and a real edge. Both default to
+  // exactly what they were, so Settings renders byte-identical and only the
+  // screen that sets them changes.
+  property color restFill: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g,
+                                   Theme.menuBorder.b, 0.05)
+  property color restBorder: Theme.line
+
   signal stepped(int delta)
 
   // ROUND-8: NOT in Qt's implicit tab chain, and that is what makes the
@@ -78,12 +95,11 @@ Item {
       // PIECE M. The arrow lights under the pointer, in the accent wash the
       // focus ring uses, so a child sweeping across the control can see which
       // half of it they are about to press.
-      color: leftHit.hovered
-             ? Theme.hoverFill
-             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      color: leftHit.hovered ? Theme.hoverFill : stepper.restFill
       border.width: 1
       border.color: leftHit.hovered ? Theme.hoverRing
-                                    : (stepper.activeFocus ? Theme.lineStrong : Theme.line)
+                                    : (stepper.activeFocus ? Theme.lineStrong
+                                                           : stepper.restBorder)
 
       PixelIcon {
         anchors.centerIn: parent
@@ -146,12 +162,11 @@ Item {
       width: stepper.arrowWidth
       height: parent.height
       radius: Theme.cornerRadiusSmall
-      color: rightHit.hovered
-             ? Theme.hoverFill
-             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.05)
+      color: rightHit.hovered ? Theme.hoverFill : stepper.restFill
       border.width: 1
       border.color: rightHit.hovered ? Theme.hoverRing
-                                     : (stepper.activeFocus ? Theme.lineStrong : Theme.line)
+                                     : (stepper.activeFocus ? Theme.lineStrong
+                                                            : stepper.restBorder)
 
       PixelIcon {
         anchors.centerIn: parent

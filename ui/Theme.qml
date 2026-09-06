@@ -147,6 +147,31 @@ QtObject {
   // only alpha step the garage still uses for text.
   readonly property color duskTextQuiet: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.92)
 
+  // PIECE 3. WHAT A PRESSABLE THING LOOKS LIKE WHEN NOBODY IS POINTING AT IT.
+  //
+  // The maintainer played this screen and said the buttons did not let a mouse
+  // click them. They did -- twenty-seven targets, all live, all with a hover
+  // state, all proved by `--print-controls`. What he could not see was which
+  // things were pressable BEFORE he pressed them, because a stepper arrow and
+  // a CHANGE chip at rest were a chevron in a 5 %-alpha box on a hairline, and
+  // the eye reads that as printing. Reach was solved; discovery was not.
+  //
+  // These two are the resting look of a control on the garage's dusk surfaces:
+  // a face one step PROUD of the card it sits on, and an edge bright enough to
+  // read as a moulding rather than a rule. The hover accent, the focus ring and
+  // the hairline for things that are NOT controls are all unchanged, so the
+  // three states stay three: printed, pressable, and pointed at.
+  // MEASURED, NOT PICKED. The face has to do two jobs that pull against each
+  // other: stand proud of `duskSurface` (#5a1d3e), and carry `text` at the
+  // design's 4.5:1 floor, because the CHANGE chip's own word sits on it. At
+  // #7c2f59 the step was a comfortable 1.43x and the word measured 4.13:1 --
+  // a control that announced itself and could not be read. #6a2650 is 1.19x
+  // the card and 4.96:1 under the word, and the white top edge below is what
+  // pays back the value the face gave up: an edge catching the light is what
+  // makes a face read as proud, and it costs no contrast at all.
+  readonly property color duskPressFace: "#6a2650"
+  readonly property color duskPressEdge: Qt.rgba(1, 1, 1, 0.26)
+
   // Eight paints, in the order the swatch grid reads them: two rows of four.
   readonly property var paints: ["#e0483a", "#ee8b3a", "#f2c93c", "#6dc94a",
                                  "#3f7fe0", "#9a55d6", "#e05fb0", "#d8dbe0"]

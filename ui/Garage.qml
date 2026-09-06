@@ -17,6 +17,72 @@ import "parts/CarMeta.js" as CarMeta
 // Everything scales from one factor against a 1920 x 1080 reference, so the
 // composition is identical at 1366 x 768 and at 2560 x 1440 and only the
 // pixel sizes change.
+//
+// ===================================================================== ROUND 10
+//
+// THE MAINTAINER PLAYED IT AND SAID THREE THINGS ABOUT THIS SCREEN.
+//
+//   "The menus there are still too busy and last I used them did not let a
+//    mouse click the buttons. Declutter the menu, make everything clickable
+//    and make the page an exciting, polished, and professional hook to reflect
+//    the game well and get kids excited to start their first race."
+//
+// The middle one is the interesting one, because it is FALSE and it is still a
+// defect. Piece M landed after he last played: this screen has twenty-seven
+// live click targets, both steppers, all eight swatches and every settings row
+// on both the row and its chip, and `dev/Harness.qml --print-controls` prints
+// the parity table in both directions and exits non-zero if any of it is a lie.
+// He could not tell, and a control a child cannot tell is pressable is a
+// control they will not press. So half this round is not making clicking work.
+// It is making it OBVIOUS, before the pointer arrives:
+//
+//   1. The screen says so, first, in the band a reader reads first:
+//      `CLICK  ANYTHING THAT LIGHTS UP`, ahead of the four keys. Until this
+//      round the only sentence about input on the garage was a keyboard legend,
+//      on a screen where every single thing is clickable.
+//   2. A pressable face is drawn PROUD of the card it sits on, at rest, with a
+//      lit top edge (`Theme.duskPressFace` / `duskPressEdge`). The stepper
+//      arrows and the CHANGE chips were 5 % of a border tone on a hairline.
+//   3. Things that are NOT pressable stop borrowing a control's clothes: the
+//      two fixed rows lose the cream value the three live ones keep, so the
+//      loud rows are exactly the rows that do something.
+//   4. Something visibly happens the moment a child clicks a paint or a body:
+//      the car lifts and settles and the turntable pings. See `celebrate()`.
+//
+// AND THE DECLUTTER, ITEM BY ITEM. A previous critic counted 299 drawn items
+// and 39 translucent rounded rectangles on this screen. What went:
+//
+//   * the `OFFLINE` badge -- `docs/open-questions.md` §5.4, the maintainer's
+//     own list: it reads as broken, and the rail already says THIS COMPUTER
+//     ONLY, which is the same fact in words a parent and a child both parse.
+//   * the policy rail itself. It was a second full-width band under the title
+//     carrying three chips, one of which (`SOLO GARAGE`) says what THIS
+//     COMPUTER ONLY says and one of which (`PRESET SIGNALS`) named a panel
+//     that names itself. One fact and the legend survive, in the title band,
+//     and 70 px of room comes back to the bay.
+//   * the PRESET SIGNALS board -- a 500 x 268 panel, a heading, four tiles and
+//     a two-line paragraph, in the centre of the bottom edge, about a thing
+//     that happens in a race the child has not started yet. The catalogue the
+//     design asks for is still here, as one strip in the footer of the board
+//     the race is set up on, which is where it belongs: it is a note about the
+//     race, not a third region of the screen.
+//   * three boards became one. The kart card and the settings board were two
+//     cards of different widths stacked with a gap; they are one board now,
+//     ruled into YOUR KART / THE RACE / the signal strip, so the left of the
+//     screen is one object in the room instead of three.
+//   * `RACE A FRIEND` went from a 602 x 112 block with a 27 px heading to one
+//     quiet line. It is a notice about something that does not exist yet, and
+//     it was the third loudest thing in the frame.
+//   * the three rival seats are drawn at 0.86 of the child's own seat. Nothing
+//     is removed from them -- the design lists kart, colour, number, lamp and
+//     level badge, and `tst_garage_keyboard.qml` checks all four karts are
+//     drawn at full strength -- but the child's row is now visibly the row
+//     about the child.
+//
+// What that bought went to the two things a child is here for: the car, which
+// now has the whole middle and bottom of the frame with nothing standing in
+// it, and READY UP, which is 1.6x taller than it was and is the only large
+// filled object on the screen.
 FocusScope {
   id: garage
 
@@ -35,7 +101,12 @@ FocusScope {
   readonly property var modeNames: ["PRACTICE", "TIME TRIAL", "GHOST", "GRAND PRIX"]
   readonly property var setNames: ["TIMES TABLES 2-5", "TIMES TABLES 2-10", "TIMES TABLES 1-12"]
   readonly property var setLaps: [4, 9, 12]
-  readonly property string circuit: "MIDNIGHT GARAGE"
+  // §5.4, in the maintainer's own words: "`MIDNIGHT GARAGE` for a sunset
+  // track. `GOLDEN HOUR`, or `THE PIT`." The whole art direction of this build
+  // is called Golden Hour, the sky behind this room is a sunset, and the
+  // terminal on the wall already says WELCOME TO THE PIT -- so the track takes
+  // the first of the two and the room keeps the second.
+  readonly property string circuit: "GOLDEN HOUR"
 
   readonly property int bodyIndex: Store.setting("kartBody")
   readonly property int paintIndex: Store.setting("kartPaint")
@@ -44,6 +115,7 @@ FocusScope {
   readonly property int raceMode: Store.setting("raceMode")
   readonly property int mathSet: Store.setting("mathSet")
   readonly property bool rivalsRace: raceMode === 3
+  readonly property bool reducedMotion: Store.setting("reducedMotion") === true
 
   function cycle(key, delta, count) {
     Store.setSetting(key, ((Store.setting(key) + delta) % count + count) % count)
@@ -56,6 +128,55 @@ FocusScope {
     if (next < 1)
       next = 99
     Store.setSetting("kartNumber", next)
+  }
+
+  // ------------------------------------------------- the car answers a press
+  //
+  // The complaint this round exists to answer is "clicking things did not do
+  // much", and on this screen the honest reading of it is that the RESULT of a
+  // press was a two-pixel tick on a swatch and a repaint of a 411 px car that
+  // is already there. A child pressing a colour should see the garage react.
+  //
+  // It is called from the three controls that change the car -- not from the
+  // property changing -- so that loading a save file, seeding the harness or
+  // reloading the store does not fire a celebration nobody caused. Every one
+  // of the three is the same function the key handler calls, so the click and
+  // the arrow key celebrate identically; `test_29` crosses the two routes over
+  // and would fail if they did not.
+  //
+  // Reduced motion switches it off entirely, by the design's Accessibility
+  // rule ("Reduced motion removes all shake, lurch, and streak lines"), and
+  // the ping is not drawn at all when it is not running, so at rest this costs
+  // one comparison against zero.
+  property real heroLift: 0
+  property real ping: 0
+
+  function celebrate() {
+    if (garage.reducedMotion)
+      return
+    flourish.restart()
+  }
+
+  SequentialAnimation {
+    id: flourish
+
+    PropertyAction { target: garage; property: "ping"; value: 1 }
+    ParallelAnimation {
+      NumberAnimation {
+        target: garage; property: "heroLift"
+        from: 0; to: -garage.px(9); duration: 70; easing.type: Easing.OutQuad
+      }
+    }
+    ParallelAnimation {
+      NumberAnimation {
+        target: garage; property: "heroLift"
+        to: 0; duration: 190; easing.type: Easing.OutQuad
+      }
+      NumberAnimation {
+        target: garage; property: "ping"
+        to: 0; duration: 230; easing.type: Easing.InQuad
+      }
+    }
   }
 
   // ---------------------------------------------------------- focus chain
@@ -128,7 +249,7 @@ FocusScope {
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Garage"
-  Accessible.description: "Set up your kart and the race, then ready up. Tab moves, arrows change, Enter chooses, Escape leaves."
+  Accessible.description: "Set up your kart and the race, then ready up. Click anything, or Tab moves, arrows change, Enter chooses, Escape leaves."
 
   // Escape backs out; Tab, Backtab, Up and Down all walk `stops`.
   //
@@ -203,9 +324,9 @@ FocusScope {
   //
   // The stall is now the page. `GarageStall` fills this card, the sunset is
   // the backdrop of the whole screen, and every panel here -- the title, the
-  // rail, the kart card, the roster, the three boards along the bottom -- is
-  // an object standing in that room. The faked light is deleted: what falls on
-  // this page is the room's own sky, hills, threshold and floor, drawn once.
+  // kart card, the roster, the board along the bottom -- is an object standing
+  // in that room. The faked light is deleted: what falls on this page is the
+  // room's own sky, hills, threshold and floor, drawn once.
   //
   // The card itself is therefore transparent. A 0.30 film of `duskSurface`
   // over the sunset is the same mistake the page light was, one layer up.
@@ -224,17 +345,27 @@ FocusScope {
       cornerRadius: Theme.cornerRadius
     }
 
-    readonly property int pad: garage.px(22)
+    readonly property int pad: garage.px(20)
     readonly property int contentX: pad
     readonly property int contentW: width - pad * 2
 
-    // =====================================================  title bar
+    // =====================================================  title band
+    //
+    // ONE BAND, NOT TWO. Round nine had a title bar and, 14 px below it, a
+    // full-width policy rail: two horizontal chrome objects across the top of
+    // a picture whose subject is a sunset. The rail carried three chips and a
+    // legend; of the three, SOLO GARAGE said what THIS COMPUTER ONLY says and
+    // PRESET SIGNALS named a panel two feet below it that named itself. What a
+    // parent glancing at this screen wants is the one fact -- nothing here
+    // leaves this computer -- and what the child wants is to know they can
+    // click. Both fit beside the title, and the rail's 56 px plus its 14 px of
+    // gap go back to the room.
     Item {
       id: titleBar
       x: page.contentX
       y: page.pad
       width: page.contentW
-      height: garage.px(80)
+      height: garage.px(78)
 
       Row {
         anchors.left: parent.left
@@ -255,10 +386,17 @@ FocusScope {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           text: "//"
-          // 0.6 alpha measured 3.44:1 on the shipped frame -- the only string
-          // on the screen under 4.5:1. It is decorative, but a floor that has
-          // an exception is not a floor.
-          color: Theme.accent
+          // ROUND 10, AND IT WAS ALREADY BELOW THE FLOOR BEFORE THIS ROUND
+          // TOUCHED IT. Round eight took it from 0.6 alpha to full strength for
+          // exactly this reason -- "a floor that has an exception is not a
+          // floor" -- and full-strength accent was still 4.01:1 at 981f535,
+          // because these two glyphs land on the bay's own lit threshold and
+          // the accent is a mid-value blue. Measured on the shipped frame, not
+          // on the surface it is nominally over. Cream reads 9:1 on the same
+          // pixels and the accent keeps the two places the design gives it --
+          // the focus ring and the thing the pointer is on -- plus GARAGE,
+          // which lands further into the bay and measures clear.
+          color: Theme.cream
           font.family: Theme.mono
           font.bold: true
           font.pixelSize: garage.fs(34)
@@ -275,136 +413,121 @@ FocusScope {
         }
       }
 
-      // Where the mock carries the invite code, solo carries the fact that
-      // makes an invite code impossible. It is said once here and once on the
-      // rail below, and no more: round one said it three times in the top
-      // 190 px, with the value stacked above its own label, and hung a
-      // decorative glyph square beside it wearing a control's border and fill.
-      // Round two spent a 268 x 62 chip at 34 px on a word that the policy
-      // rail already says 50 px below it, in more useful terms. It stays --
-      // "offline" is the one fact a parent glancing at this screen wants --
-      // but at the size of a status readout rather than of a heading.
-      Readout {
+      Column {
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        width: garage.px(148)
-        height: garage.px(44)
-        value: "OFFLINE"
-        // ROUND-8: was Theme.lime. Design v3's Visual style names amber,
-        // cream, the rim and the purples; it names no green at all, and the
-        // bar has 0.039% of its pixels in the green band against our 5.6%.
-        valueColor: Theme.amber
-        valueSize: garage.fs(20)
-        valueSpacing: garage.px(2)
-        rivetInset: garage.px(5)
-        rivetSize: garage.px(2)
-      }
-    }
+        spacing: garage.px(9)
 
-    // =====================================================  policy rail
-    Rectangle {
-      id: rail
-      x: page.contentX
-      y: titleBar.y + titleBar.height + garage.px(14)
-      width: page.contentW
-      height: garage.px(56)
-      radius: Theme.cornerRadius
-      color: Theme.duskSurfaceSunken
-      border.width: 1
-      border.color: Theme.line
+        // The one policy fact. §5.4 retires the `OFFLINE` chip that used to
+        // stand in the opposite corner saying the same thing in a word a child
+        // reads as "broken"; this is the sentence that survives, and it is now
+        // the only place the fact is said.
+        Row {
+          anchors.right: parent.right
+          spacing: garage.px(10)
 
-      Row {
-        anchors.verticalCenter: parent.verticalCenter
-        x: garage.px(22)
-        spacing: garage.px(22)
-
-        Repeater {
-          model: [
-            { art: Glyphs.lock, tone: Theme.cream, label: "SOLO GARAGE" },
-            { art: Glyphs.preset, tone: Theme.amber, label: "PRESET SIGNALS" },
-            { art: Glyphs.monitor, tone: Theme.accent, label: "THIS COMPUTER ONLY" }
-          ]
-
-          Row {
-            spacing: garage.px(22)
-
-            Rectangle {
-              visible: index > 0
-              anchors.verticalCenter: parent.verticalCenter
-              width: garage.px(4)
-              height: garage.px(4)
-              radius: width / 2
-              color: Theme.textFaint
-            }
-            PixelIcon {
-              anchors.verticalCenter: parent.verticalCenter
-              width: garage.px(26)
-              height: width
-              art: modelData.art
-              color: modelData.tone
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: modelData.label
-              color: modelData.tone
-              font.family: Theme.mono
-              font.bold: true
-              font.pixelSize: garage.fs(17)
-              font.letterSpacing: garage.px(2)
-            }
+          PixelIcon {
+            anchors.verticalCenter: parent.verticalCenter
+            width: garage.px(22)
+            height: width
+            art: Glyphs.monitor
+            color: Theme.accent
           }
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: "THIS COMPUTER ONLY"
+            color: Theme.accent
+            font.family: Theme.mono
+            font.bold: true
+            font.pixelSize: garage.fs(17)
+            font.letterSpacing: garage.px(2)
+          }
+        }
+
+        // PIECE M -- THIS IS A LEGEND, NOT A ROW OF CONTROLS.
+        //
+        // Every printed key hint in this game is a control except the ones in a
+        // rail like this: it states the whole screen's input from the title
+        // band rather than offering an action at the place the action happens,
+        // and there is no honest mouse equivalent of "TAB moves" other than
+        // pointing at the thing you want, which is what the mouse already does.
+        // An on-screen Tab key would be a second way to do everything and a
+        // control a child could press that changes nothing they were looking
+        // at. So: no box, no border, no fill -- see ui/parts/KeyLegend.qml,
+        // which declares itself as the one exemption in the game so the check
+        // that forbids a dead printed key can name it rather than not see it.
+        //
+        // ROUND 10 -- AND IT LEADS WITH THE MOUSE NOW.
+        //
+        // This screen's every control has been clickable since piece M and the
+        // only sentence about input on it was four keyboard hints. The
+        // maintainer played it and reported that a mouse could not click the
+        // buttons. `CLICK  ANYTHING THAT LIGHTS UP` is the rule the whole
+        // hover grammar is built on, said once, in the first band a reader
+        // reads, in the same caption voice as the keys beside it. It is not a
+        // key, so it is not a promise about a keycap and the printed-key check
+        // has nothing to catch: it is the promise the pointer makes.
+        KeyLegend {
+          anchors.right: parent.right
+          gap: garage.px(18)
+          textSize: garage.fs(15)
+          letterSpacing: garage.px(1)
+          // MEASURED. The legend used to sit on the policy rail's own sunken
+          // fill; with the rail gone it sits on the room, whose wall runs from
+          // #541648 to #6a2448 across the band. `textLabel` is 0.80 alpha and
+          // measured 4.13:1 on the brightest of that, so both halves are full
+          // strength here and the key is told from the action by weight and by
+          // hue instead of by alpha.
+          keyColor: Theme.cream
+          actionColor: Theme.text
+          groups: [ { key: "CLICK", what: "ANYTHING THAT LIGHTS UP" },
+                    { key: "TAB", what: "MOVE" },
+                    { key: "ARROWS", what: "CHANGE" },
+                    { key: "ENTER", what: "CHOOSE" },
+                    { key: "ESC", what: "LEAVE" } ]
         }
       }
 
-      // The right half of the rail was empty. This is a keyboard-only game,
-      // so what belongs in it is the keyboard.
-      //
-      // PIECE M -- THIS IS A LEGEND, NOT A ROW OF CONTROLS.
-      //
-      // Every printed key hint in this game is a control except the ones in a
-      // rail like this: it states the whole screen's keyboard from the title
-      // band rather than offering an action at the place the action happens,
-      // and there is no honest mouse equivalent of "TAB moves" other than
-      // pointing at the thing you want, which is what the mouse already does.
-      // An on-screen Tab key would be a second way to do everything and a
-      // control a child could press that changes nothing they were looking at.
-      //
-      // ROUND 3 took a self-granted exemption (`keyLegend: true`) off this rail
-      // and called the problem solved. ROUND 4 is the rest of that sentence: the
-      // flag went and the CONTRADICTION STAYED ON THE SCREEN. Four keys in
-      // bordered, filled boxes here; `S  SETTINGS AND RESETS` in an identical
-      // bordered, filled box seven hundred pixels to the left on the same band,
-      // lighting under the pointer and opening the settings. The rule a child
-      // can actually learn -- IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU CAN
-      // PRESS IT -- is only useful in the direction they use it if the things
-      // that never light do not look like the things that do. So the rail is a
-      // caption now: no box, no border, no fill, and it declares itself as the
-      // one legend in the game. See ui/parts/KeyLegend.qml.
-      KeyLegend {
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.right: parent.right
-        anchors.rightMargin: garage.px(22)
-        gap: garage.px(20)
-        textSize: garage.fs(15)
-        letterSpacing: garage.px(1)
-        groups: [ { key: "TAB", what: "MOVE" },
-                  { key: "ARROWS", what: "CHANGE" },
-                  { key: "ENTER", what: "CHOOSE" },
-                  { key: "ESC", what: "LEAVE" } ]
+      // The band ends somewhere. One hairline instead of a second filled bar.
+      Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: Theme.lineStrong
       }
     }
 
-    // =====================================================  main row
-    readonly property int mainY: rail.y + rail.height + garage.px(16)
-    // ROUND-9: 292 becomes 268. The three boards along the bottom now stand ON
-    // the bay floor with the turntable running behind them, so every pixel
-    // taken off this band is a pixel of plinth the child can see. The rows
-    // inside it come down from 50 to 44 to pay for it.
-    readonly property int bottomH: garage.px(268)
-    readonly property int bottomY: height - pad - bottomH
-    readonly property int mainH: bottomY - garage.px(16) - mainY
-    readonly property int rosterW: garage.px(602)
+    // =====================================================  main geometry
+    readonly property int mainY: titleBar.y + titleBar.height + garage.px(14)
+    readonly property int bottomEdge: height - pad
+    // The right-hand column: the four seats, the friend notice, and the two
+    // actions, as ONE column running the height of the page. Round nine had
+    // the seats in the main row and the actions in the bottom band, which made
+    // the bottom of the screen three regions wide and pinned READY UP to the
+    // height the settings board happened to be.
+    readonly property int rightW: garage.px(556)
+    readonly property int rightX: contentX + contentW - rightW
+
+    // The turntable's answer to a press. Declared BEFORE the car, because it
+    // is paint on the ground and the car is standing on the ground: a ring of the work light's own tone
+    // running out across the plinth and fading. Not drawn at all unless it is
+    // running, so the idle cost of it is one comparison; not drawn at all
+    // under reduced motion, because `celebrate()` never starts it there.
+    Rectangle {
+      id: pingRing
+      visible: garage.ping > 0
+      readonly property real grow: 1.0 + 0.34 * (1 - garage.ping)
+      width: Math.round(stall.vs(stall.daisRadius) * 2 * grow)
+      height: Math.round(stall.vs(stall.daisRy) * 2 * grow)
+      x: Math.round(stall.vx(stall.daisX) - width / 2)
+      y: Math.round(stall.vy(stall.daisCy) - height / 2)
+      radius: height / 2
+      color: "transparent"
+      border.width: Math.max(1, garage.px(3))
+      border.color: Theme.amberGlow
+      opacity: garage.ping * 0.7
+    }
 
     // ------------------------------------------------- the kart on the dais
     // PIECE C: the car on the turntable is a cell of its baked sheet -- the
@@ -425,14 +548,19 @@ FocusScope {
     // are piece C's, both are outside piece 3's scope, and
     // `tests/qml/tst_carsprite.qml` asserts `pixelScale === 3` on this very
     // item. What piece 3 CAN do is put the hero low and centre, against the
-    // glow, with a plinth sized to it -- and that is what the room around it
-    // now does. The width is piece C's to give.
+    // glow, with a plinth sized to it, and CLEAR THE FRAME AROUND IT -- which
+    // is what round ten's declutter spends its winnings on: the middle and the
+    // bottom-centre of this screen now hold the car, the plinth and the floor
+    // and nothing else at all. The width is piece C's to give.
     CarSprite {
       id: heroKart
       objectName: "heroCar"
       readonly property var fit: CarMeta.fit(stall.vs(stall.kartWidth))
       x: Math.round(stall.vx(stall.daisX))
-      y: Math.round(stall.vy(stall.daisY))
+      // `heroLift` is 0 except during the 260 ms after the child changes the
+      // paint or the body, so at rest this is the same expression, to the
+      // pixel, that `tst_carsprite.qml` compares against `stall.vy(daisY)`.
+      y: Math.round(stall.vy(stall.daisY) + garage.heroLift)
       body: garage.bodyIndex
       paint: garage.paintIndex
       number: garage.kartNumber
@@ -447,122 +575,145 @@ FocusScope {
       pixelScale: fit.pixelScale
     }
 
-    // ------------------------------------------------------ the kart card
-    // ROUND-9: ONE CARD, NOT TWO PANELS IN TWO CORNERS.
+    // =====================================================  the left board
     //
-    // Body was a card in the bay's bottom-left corner and colour and number
-    // were a translucent scrim over its bottom-right, and between them they
-    // held the middle of the picture. Two defects came straight out of that
-    // arrangement and both are gone with it: the room's hazard stripe ran
-    // through the NUMBER heading (the scrim was genuinely translucent, which
-    // was the previous round's fix for a different complaint), and the number
-    // stepper's arrows were near-invisible outlines with the floor grid
-    // showing through them.
+    // ONE BOARD, LEANING AGAINST THE ONE WALL THE ROOM HAS LEFT.
     //
-    // The three stall controls are one opaque board leaning against the one
-    // wall the room has left, in the reading order the Tab chain already used:
-    // body and number down the left of it, the eight paints down the right.
-    // It is the width of the settings board under it, it clears the turntable,
-    // and it takes 5,900 px out of the sky instead of 43,000.
+    // Round nine had three cards down the left and centre: the kart card, the
+    // settings board and the PRESET SIGNALS board. They are one object now,
+    // ruled into three sections in the order a child needs them -- the car
+    // they are making, the race they are about to run, and the note about what
+    // rivals say during it -- so the left of the screen is one thing to read
+    // instead of three things to choose between, and the centre-bottom, where
+    // the signals board used to sit under the car's own nose, is floor.
     Panel {
-      id: kartCard
+      id: board
       x: page.contentX
-      width: garage.px(500)
-      height: kartColumn.height + garage.px(40)
-      y: page.bottomY - garage.px(16) - height
+      width: garage.px(560)
+      height: boardColumn.height + garage.px(26)
+      y: page.bottomEdge - height
       color: Theme.duskSurface
       // The opening is above and right of this board, so the sun lands on its
       // top edge.
       litSide: "top"
 
       Column {
-        id: kartColumn
-        x: garage.px(20)
-        y: garage.px(20)
-        width: parent.width - garage.px(40)
-        spacing: garage.px(12)
+        id: boardColumn
+        x: garage.px(18)
+        y: garage.px(14)
+        width: parent.width - garage.px(36)
+        spacing: garage.px(8)
+
+        // ------------------------------------------------ section one: the car
+        Text {
+          textFormat: Text.PlainText
+          text: "YOUR KART"
+          color: Theme.amber
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: garage.fs(16)
+          font.letterSpacing: garage.px(3)
+        }
 
         Row {
           id: kartRow
           spacing: garage.px(16)
-          readonly property int colW: Math.floor((kartColumn.width - garage.px(16)) / 2)
+          readonly property int colW: Math.floor((boardColumn.width - garage.px(16)) / 2)
 
           Column {
             width: kartRow.colW
-            spacing: garage.px(9)
+            spacing: garage.px(8)
 
             Text {
               textFormat: Text.PlainText
-              text: "KART BODY   " + (garage.bodyIndex + 1) + " / 6"
-              color: Theme.cream
+              text: "BODY   " + (garage.bodyIndex + 1) + " / 6"
+              // Full strength, not the 0.92 step: these three labels sit in the
+              // board's own lit wash (#6a2448 at its brightest), where 0.92
+              // measured 4.53:1 -- inside the floor by three hundredths.
+              color: Theme.text
               font.family: Theme.mono
               font.bold: true
-              font.pixelSize: garage.fs(15)
+              font.pixelSize: garage.fs(14)
               font.letterSpacing: garage.px(2)
             }
 
             Stepper {
               id: bodyStepper
               width: parent.width
-              height: garage.px(56)
-              arrowWidth: garage.px(48)
-              valueSize: garage.fs(22)
+              height: garage.px(50)
+              arrowWidth: garage.px(46)
+              valueSize: garage.fs(21)
               valueSpacing: garage.px(2)
               faceColor: Theme.duskSurfaceSunken
+              // ROUND 10. The resting look of a thing a child may press. See
+              // `Theme.duskPressFace`.
+              restFill: Theme.duskPressFace
+              restBorder: Theme.duskPressEdge
               value: Theme.bodyName(garage.bodyIndex)
               name: "Kart body"
-              hint: "Six bodies. Left and right change it."
-              onStepped: function (delta) { garage.cycle("kartBody", delta, 6) }
+              hint: "Six bodies. Click an arrow, or press left and right."
+              onStepped: function (delta) {
+                garage.cycle("kartBody", delta, 6)
+                garage.celebrate()
+              }
             }
 
-            Item { width: 1; height: garage.px(4) }
+            Item { width: 1; height: garage.px(2) }
 
             Text {
               textFormat: Text.PlainText
               text: "NUMBER"
-              color: Theme.cream
+              color: Theme.text
               font.family: Theme.mono
               font.bold: true
-              font.pixelSize: garage.fs(15)
+              font.pixelSize: garage.fs(14)
               font.letterSpacing: garage.px(3)
             }
 
             Stepper {
               id: numberStepper
               width: parent.width
-              height: garage.px(56)
-              arrowWidth: garage.px(48)
-              valueSize: garage.fs(26)
+              height: garage.px(50)
+              arrowWidth: garage.px(46)
+              valueSize: garage.fs(25)
               valueSpacing: garage.px(3)
               faceColor: Theme.duskSurfaceSunken
+              restFill: Theme.duskPressFace
+              restBorder: Theme.duskPressEdge
               value: String(garage.kartNumber)
               name: "Kart number"
-              hint: "One to ninety-nine. Left and right change it."
-              onStepped: function (delta) { garage.stepNumber(delta) }
+              hint: "One to ninety-nine. Click an arrow, or press left and right."
+              onStepped: function (delta) {
+                garage.stepNumber(delta)
+                garage.celebrate()
+              }
             }
           }
 
           Column {
             width: kartRow.colW
-            spacing: garage.px(9)
+            spacing: garage.px(8)
 
             Text {
               textFormat: Text.PlainText
               text: "COLOR"
-              color: Theme.cream
+              color: Theme.text
               font.family: Theme.mono
               font.bold: true
-              font.pixelSize: garage.fs(15)
+              font.pixelSize: garage.fs(14)
               font.letterSpacing: garage.px(3)
             }
 
             PaintGrid {
               id: paintGrid
               width: parent.width
-              height: garage.px(118)
+              height: garage.px(96)
               gap: garage.px(8)
               selected: garage.paintIndex
-              onPicked: function (index) { Store.setSetting("kartPaint", index) }
+              onPicked: function (index) {
+                Store.setSetting("kartPaint", index)
+                garage.celebrate()
+              }
             }
           }
         }
@@ -574,28 +725,272 @@ FocusScope {
           text: "Colors and numbers are visible to all racers."
           color: Theme.text
           font.family: Theme.mono
-          font.pixelSize: garage.fs(15)
-          lineHeight: 1.25
+          font.pixelSize: garage.fs(14)
+          lineHeight: 1.2
+        }
+
+        // ----------------------------------------------- section two: the race
+        Rectangle {
+          width: parent.width
+          height: 1
+          color: Theme.line
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          text: "THE RACE"
+          color: Theme.amber
+          font.family: Theme.mono
+          font.bold: true
+          font.pixelSize: garage.fs(16)
+          font.letterSpacing: garage.px(3)
+        }
+
+        // Five rows, written out rather than repeated over a model: the values
+        // change as the child cycles them, and a model that changes rebuilds
+        // its delegates, which would destroy the very control the child has
+        // focus on. Explicit rows keep focus where the child put it.
+        //
+        // ROUND 10 -- THREE OF THE FIVE DO SOMETHING, AND NOW THEY LOOK LIKE
+        // IT. TRACK and GOAL are fixed by the design and always were; they
+        // carried the same cream value at the same size as the three rows that
+        // change, so the only thing separating them was a word in a 100 px
+        // column at the far right of a row the child reads at the left. They
+        // keep their place, their icon and their reason -- a fixed row that
+        // vanished would be a question a child cannot answer -- and they lose
+        // the value tone that says "this is the thing you are choosing".
+        Column {
+          id: settingsColumn
+          width: parent.width
+          spacing: 0
+
+          // ROUND 10 -- THE ROWS THAT DO SOMETHING ARE THE BIGGER ROWS, AND
+          // THAT CLOSES A MEASURED HOLE PIECE M HANDED THIS PIECE.
+          //
+          // `tst_mouse_parity.qml` test_44 measures every live control at
+          // 1024 x 600 against the WCAG 2.2 AA 24 px floor -- which is the
+          // number for an adult, and this game is for a seven-year-old. Six
+          // controls were under it and all six were these rows: 23 px, stacked
+          // flush, so piece M could not grow the hit area without two rows
+          // sharing pixels. Its own note says so and hands the fix here: "A
+          // pixel of room between three rows is the GARAGE's layout, which is
+          // piece 3's and not this one's."
+          //
+          // The fix is the hierarchy this section already wanted. A row that
+          // can be changed is 50 px and a row that is a fact is 38, so the
+          // three the child can press clear the floor at every size the game is
+          // played at, the two they cannot are smaller as well as quieter, and
+          // the column is shorter than it would be with five rows at 50.
+          readonly property int rowH: garage.px(50)
+          readonly property int fixedRowH: garage.px(38)
+          readonly property int labelPx: garage.fs(14)
+          readonly property int valuePx: garage.fs(20)
+          readonly property int labelWidthPx: garage.px(118)
+
+          SettingRow {
+            width: parent.width
+            height: parent.fixedRowH
+            art: Glyphs.flag
+            label: "TRACK"
+            spokenName: "Track"
+            value: garage.circuit
+            changeable: false
+            fixedLabel: "1 OF 1"
+            labelSize: parent.labelPx
+            valueSize: parent.valuePx
+            labelWidth: parent.labelWidthPx
+            labelColor: Theme.duskTextQuiet
+            valueColor: Theme.duskTextQuiet
+            fixedColor: Theme.duskTextQuiet
+          }
+          SettingRow {
+            id: modeRow
+            width: parent.width
+            height: parent.rowH
+            separator: true
+            labelColor: Theme.text
+            art: Glyphs.clock
+            label: "RACE MODE"
+            spokenName: "Race mode"
+            value: garage.modeNames[garage.raceMode]
+            labelSize: parent.labelPx
+            valueSize: parent.valuePx
+            labelWidth: parent.labelWidthPx
+            chipFill: Theme.duskPressFace
+            chipBorder: Theme.duskPressEdge
+            onStepped: function (delta) { garage.cycle("raceMode", delta, 4) }
+          }
+          SettingRow {
+            id: mathRow
+            width: parent.width
+            height: parent.rowH
+            separator: true
+            labelColor: Theme.text
+            art: Glyphs.times
+            label: "MATH SET"
+            spokenName: "Math set"
+            value: garage.setNames[garage.mathSet]
+            labelSize: parent.labelPx
+            valueSize: parent.valuePx
+            labelWidth: parent.labelWidthPx
+            chipFill: Theme.duskPressFace
+            chipBorder: Theme.duskPressEdge
+            onStepped: function (delta) { garage.cycle("mathSet", delta, 3) }
+          }
+          SettingRow {
+            id: rivalRow
+            width: parent.width
+            height: parent.rowH
+            separator: true
+            labelColor: Theme.text
+            art: Glyphs.wheel
+            label: "RIVALS"
+            spokenName: "Rivals"
+            value: Theme.levelNames[garage.rivalLevel]
+            labelSize: parent.labelPx
+            valueSize: parent.valuePx
+            labelWidth: parent.labelWidthPx
+            chipFill: Theme.duskPressFace
+            chipBorder: Theme.duskPressEdge
+            onStepped: function (delta) { garage.cycle("rivalLevel", delta, 3) }
+          }
+          SettingRow {
+            width: parent.width
+            height: parent.fixedRowH
+            separator: true
+            art: Glyphs.trophy
+            label: "GOAL"
+            spokenName: "Goal"
+            value: "FINISH ALL " + garage.setLaps[garage.mathSet] + " LAPS"
+            changeable: false
+            labelColor: Theme.duskTextQuiet
+            valueColor: Theme.duskTextQuiet
+            fixedColor: Theme.duskTextQuiet
+            labelSize: parent.labelPx
+            valueSize: parent.valuePx
+            labelWidth: parent.labelWidthPx
+          }
+        }
+
+        // -------------------------------------------- section three: signals
+        //
+        // The design's "four-signal catalog shown so the child learns them
+        // before racing rivals who use them" -- as a footnote to the race it
+        // is about, which is what it is. Round nine gave it a 500 x 268 board
+        // of its own with a heading, four bordered-height tiles and a two-line
+        // paragraph, dead centre of the bottom edge, in front of the car. The
+        // vocabulary is unchanged and every tile is still a declared sign
+        // (`isSign`, `tst_mouse_parity.qml` test_22): they take no click,
+        // because no key sends a signal from the garage and a click with no key
+        // behind it is the mouse-only path the design forbids.
+        Rectangle {
+          width: parent.width
+          height: 1
+          color: Theme.line
+        }
+
+        Item {
+          id: signalStrip
+          width: parent.width
+          height: garage.px(44)
+
+          Accessible.role: Accessible.Grouping
+          Accessible.name: "Signals in a race"
+          Accessible.description: "These are the only signals in a race. The rivals send them too. Nice run, ready, rematch, good game."
+
+          Text {
+            id: signalCaption
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            width: garage.px(80)
+            text: "SIGNALS"
+            color: Theme.amber
+            font.family: Theme.mono
+            font.bold: true
+            font.pixelSize: garage.fs(13)
+            font.letterSpacing: garage.px(1)
+          }
+
+          Row {
+            id: signalRow
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - signalCaption.width - garage.px(8)
+            height: parent.height
+            spacing: garage.px(6)
+
+            readonly property real tileW: (width - spacing * 3) / 4
+
+            SignalTile {
+              id: signal0
+              width: signalRow.tileW
+              height: parent.height
+              art: Glyphs.thumbUp
+              caption: "NICE RUN"
+              // ROUND-8: the four tones are now four hues of the room -- cream,
+              // amber, the deep amber and the sky's own neon pink. Lime and the
+              // theme accent were the two off-bar colours in the set.
+              tone: Theme.cream
+              captionSize: garage.fs(13)
+            }
+            SignalTile {
+              id: signal1
+              width: signalRow.tileW
+              height: parent.height
+              art: Glyphs.flag
+              caption: "READY"
+              tone: Theme.amber
+              captionSize: garage.fs(13)
+            }
+            SignalTile {
+              id: signal2
+              width: signalRow.tileW
+              height: parent.height
+              art: Glyphs.rematch
+              caption: "REMATCH?"
+              tone: "#ee8b3a"
+              captionSize: garage.fs(13)
+            }
+            SignalTile {
+              id: signal3
+              width: signalRow.tileW
+              height: parent.height
+              art: Glyphs.hand
+              caption: "GOOD GAME"
+              // The sky's own neon pink, one step paler. `duskNeon` itself
+              // (#ff4fa3) measured 4.11:1 on this board at 13 px; #ff8cc4 is
+              // the same hue at 5.83:1. The design names the hue, not the step.
+              tone: "#ff8cc4"
+              captionSize: garage.fs(13)
+            }
+          }
         }
       }
     }
 
-
-    // ------------------------------------------------------- the roster
+    // =====================================================  the right column
+    //
+    // The grid, then the way on to it. Round nine split this into a roster
+    // block that ended where the bottom band began and an actions block that
+    // started there, so READY UP was as tall as the settings board happened to
+    // be. It is one column now and the button is sized on its own merit.
     Item {
-      id: roster
-      x: page.contentX + page.contentW - page.rosterW
+      id: rightColumn
+      x: page.rightX
       y: page.mainY
-      width: page.rosterW
-      height: page.mainH
+      width: page.rightW
+      height: page.bottomEdge - page.mainY
 
-      readonly property int slotH: garage.px(100)
-      readonly property int slotGap: garage.px(10)
+      readonly property int youH: garage.px(104)
+      readonly property int rivalH: garage.px(92)
+      readonly property int gap: garage.px(9)
 
       RosterSlot {
+        id: youSlot
         objectName: "rosterYou"
         width: parent.width
-        height: roster.slotH
+        height: rightColumn.youH
         y: 0
         scaleUnit: garage.s
         surface: Theme.duskSurfaceRaised
@@ -609,14 +1004,25 @@ FocusScope {
         statusText: "YOUR KART"
       }
 
+      // ROUND 10 -- THE THREE RIVALS ARE A SMALLER VERSION OF THE SAME ROW.
+      //
+      // Four identical 100 px seats meant the child's own row -- the one row on
+      // this screen that changes as they build their car -- carried a quarter
+      // of the roster's weight. Nothing is taken out of a rival seat: the
+      // design lists kart, colour, number, ready lamp and level badge, and
+      // `tst_garage_keyboard.qml` test_18 checks all four karts are drawn at
+      // full strength in every race mode. The whole seat is drawn at 0.86 of
+      // the child's, through the scale unit the component already takes, so
+      // the hierarchy is size and nothing is dimmed or dropped.
       Repeater {
         model: 3
 
         RosterSlot {
-          width: roster.width
-          height: roster.slotH
-          y: (index + 1) * (roster.slotH + roster.slotGap)
-          scaleUnit: garage.s
+          width: rightColumn.width
+          height: rightColumn.rivalH
+          y: rightColumn.youH + rightColumn.gap
+             + index * (rightColumn.rivalH + rightColumn.gap)
+          scaleUnit: garage.s * 0.86
           surface: Theme.duskSurfaceRaised
           sunkenSurface: Theme.duskSurfaceSunken
           name: Theme.rivalNames[index]
@@ -632,11 +1038,18 @@ FocusScope {
 
       // Where the mock's approved-friend and device-verified legend sits.
       // A sign, not a control: no fill, no border, and out of the Tab chain.
+      //
+      // ROUND 10: one line, not a block. It was 602 x 112 with a 27 px heading
+      // and a lock glyph the size of the settings icons -- the third loudest
+      // object in a frame whose subject is a car, about a thing that cannot be
+      // done and will not exist until a platform does. It says exactly what it
+      // said, quietly, where a footnote goes.
       ActionButton {
         id: friendTile
         width: parent.width
-        height: parent.height - (roster.slotH * 4 + roster.slotGap * 3) - garage.px(12)
-        y: parent.height - height
+        height: garage.px(56)
+        y: rightColumn.youH + rightColumn.gap
+           + 3 * (rightColumn.rivalH + rightColumn.gap)
         art: Glyphs.lock
         tone: "off"
         variant: "sign"
@@ -646,225 +1059,15 @@ FocusScope {
         focusable: false
         label: "RACE A FRIEND"
         sublabel: "Ask a parent to install Kids Play"
-        labelSize: garage.fs(27)
-        sublabelSize: garage.fs(17)
-        iconSize: garage.px(32)
+        labelSize: garage.fs(19)
+        sublabelSize: garage.fs(14)
+        iconSize: garage.px(20)
         Accessible.name: "Race a friend, not available"
         Accessible.description: "Ask a parent to install Kids Play. This game races the three rivals on this computer only."
       }
-    }
 
-    // =====================================================  bottom row
-    readonly property int settingsW: garage.px(660)
-    readonly property int signalsW: contentW - settingsW - rosterW - garage.px(32)
-
-    // ------------------------------------------------- race settings
-    Panel {
-      id: settingsPanel
-      x: page.contentX
-      y: page.bottomY
-      width: page.settingsW
-      height: page.bottomH
-      color: Theme.duskSurface
-      // The bay is above this band, so the sun lands on its top edge.
-      litSide: "top"
-
-      // Five rows, written out rather than repeated over a model: the values
-      // change as the child cycles them, and a model that changes rebuilds
-      // its delegates, which would destroy the very control the child has
-      // focus on. Explicit rows keep focus where the child put it.
-      Column {
-        x: garage.px(24)
-        y: garage.px(18)
-        width: parent.width - garage.px(48)
-        spacing: 0
-
-        readonly property int rowH: garage.px(44)
-        readonly property int labelPx: garage.fs(15)
-        readonly property int valuePx: garage.fs(23)
-        readonly property int labelW: garage.px(180)
-
-        SettingRow {
-          width: parent.width
-          height: parent.rowH
-          art: Glyphs.flag
-          label: "TRACK"
-          spokenName: "Track"
-          value: garage.circuit
-          changeable: false
-          fixedLabel: "1 OF 1"
-          labelSize: parent.labelPx
-          valueSize: parent.valuePx
-          labelWidth: parent.labelW
-          labelColor: Theme.text
-          fixedColor: Theme.duskTextQuiet
-        }
-        SettingRow {
-          id: modeRow
-          width: parent.width
-          height: parent.rowH
-          separator: true
-          labelColor: Theme.text
-          art: Glyphs.clock
-          label: "RACE MODE"
-          spokenName: "Race mode"
-          value: garage.modeNames[garage.raceMode]
-          labelSize: parent.labelPx
-          valueSize: parent.valuePx
-          labelWidth: parent.labelW
-          onStepped: function (delta) { garage.cycle("raceMode", delta, 4) }
-        }
-        SettingRow {
-          id: mathRow
-          width: parent.width
-          height: parent.rowH
-          separator: true
-          labelColor: Theme.text
-          art: Glyphs.times
-          label: "MATH SET"
-          spokenName: "Math set"
-          value: garage.setNames[garage.mathSet]
-          labelSize: parent.labelPx
-          valueSize: parent.valuePx
-          labelWidth: parent.labelW
-          onStepped: function (delta) { garage.cycle("mathSet", delta, 3) }
-        }
-        SettingRow {
-          id: rivalRow
-          width: parent.width
-          height: parent.rowH
-          separator: true
-          labelColor: Theme.text
-          art: Glyphs.wheel
-          label: "RIVALS"
-          spokenName: "Rivals"
-          value: Theme.levelNames[garage.rivalLevel]
-          labelSize: parent.labelPx
-          valueSize: parent.valuePx
-          labelWidth: parent.labelW
-          onStepped: function (delta) { garage.cycle("rivalLevel", delta, 3) }
-        }
-        SettingRow {
-          width: parent.width
-          height: parent.rowH
-          separator: true
-          art: Glyphs.trophy
-          label: "GOAL"
-          spokenName: "Goal"
-          value: "FINISH ALL " + garage.setLaps[garage.mathSet] + " LAPS"
-          changeable: false
-          labelColor: Theme.text
-          fixedColor: Theme.duskTextQuiet
-          labelSize: parent.labelPx
-          valueSize: parent.valuePx
-          labelWidth: parent.labelW
-        }
-      }
-    }
-
-    // ------------------------------------------------- preset signals
-    Panel {
-      id: signalsPanel
-      x: page.contentX + page.settingsW + garage.px(16)
-      y: page.bottomY
-      width: page.signalsW
-      height: page.bottomH
-      color: Theme.duskSurface
-      litSide: "top"
-      pad: garage.px(22)
-      title: "PRESET SIGNALS"
-      titleColor: Theme.amber
-      titleSize: garage.fs(17)
-      titleSpacing: garage.px(3)
-
-      Row {
-        id: signalRow
-        x: garage.px(22)
-        y: garage.px(54)
-        width: parent.width - garage.px(44)
-        height: garage.px(138)
-        spacing: garage.px(12)
-
-        readonly property real tileW: (width - spacing * 3) / 4
-
-        SignalTile {
-          id: signal0
-          width: signalRow.tileW
-          height: parent.height
-          art: Glyphs.thumbUp
-          caption: "NICE RUN"
-          surface: Theme.duskSurfaceRaised
-          // ROUND-9: OFF the sunken step. Four near-black cards in a row along the
-          // bottom edge were, after round eight raised everything else, the
-          // darkest large areas left in a frame with no other dark -- so they
-          // read MORE like holes at the new value than they did at the old
-          // one. A legend is not a hole; the tiles now sit on the raised step.
-          // ROUND-8: the four tones are now four hues of the room -- cream,
-          // amber, the deep amber and the sky's own neon pink. Lime and the
-          // theme accent were the two off-bar colours in the set.
-          tone: Theme.cream
-          captionSize: garage.fs(15)
-        }
-        SignalTile {
-          id: signal1
-          width: signalRow.tileW
-          height: parent.height
-          art: Glyphs.flag
-          caption: "READY"
-          surface: Theme.duskSurfaceRaised
-          tone: Theme.amber
-          captionSize: garage.fs(15)
-        }
-        SignalTile {
-          id: signal2
-          width: signalRow.tileW
-          height: parent.height
-          art: Glyphs.rematch
-          caption: "REMATCH?"
-          surface: Theme.duskSurfaceRaised
-          tone: "#ee8b3a"
-          captionSize: garage.fs(15)
-        }
-        SignalTile {
-          id: signal3
-          width: signalRow.tileW
-          height: parent.height
-          art: Glyphs.hand
-          caption: "GOOD GAME"
-          surface: Theme.duskSurfaceRaised
-          tone: Theme.duskNeon
-          captionSize: garage.fs(15)
-        }
-      }
-
-      Accessible.role: Accessible.Grouping
-      Accessible.name: "Preset signals"
-      Accessible.description: "These are the only signals in a race. The rivals send them too. Nice run, ready, rematch, good game."
-
-      Text {
-        x: garage.px(22)
-        y: signalRow.y + signalRow.height + garage.px(16)
-        width: parent.width - garage.px(44)
-        textFormat: Text.PlainText
-        wrapMode: Text.WordWrap
-        text: "These are the only signals in a race. The rivals send them too."
-        color: Theme.text
-        font.family: Theme.mono
-        font.pixelSize: garage.fs(15)
-        lineHeight: 1.25
-      }
-    }
-
-    // ------------------------------------------------- start and leave
-    Item {
-      id: actions
-      x: page.contentX + page.contentW - page.rosterW
-      y: page.bottomY
-      width: page.rosterW
-      height: page.bottomH
-
-      // The primary action is filled, is more than twice the height of the
-      // way out, and carries the only 46 px word on the screen after the
+      // The primary action is filled, is more than three times the height of
+      // the way out, and carries the only 54 px word on the screen after the
       // title. Round one gave the two the same outline, the same layout and
       // nearly the same footprint, so a child scanning this column saw two
       // equal buttons one of which quits.
@@ -887,11 +1090,16 @@ FocusScope {
       // on the amber. Focus still brightens the fill and thickens the border,
       // never pales it. `goFill` and `goInk` default to the old behaviour, so
       // Results and Settings are byte-identical.
+      //
+      // ROUND 10: 148 px becomes 236, because the room to do it came out of
+      // the friend notice and the rival seats and there is nothing else in
+      // this column competing for it. This is the screen's one exciting thing
+      // and it should read as the exciting thing, not as one more row.
       ActionButton {
         id: readyButton
         width: parent.width
-        y: garage.px(12)
-        height: garage.px(148)
+        height: garage.px(236)
+        y: leaveButton.y - garage.px(11) - height
         art: Glyphs.flag
         tone: "go"
         goTone: Theme.amber
@@ -901,9 +1109,9 @@ FocusScope {
         label: "READY UP"
         sublabel: garage.rivalsRace ? "STARTS THE COUNTDOWN AGAINST THREE RIVALS"
                                     : "STARTS THE COUNTDOWN"
-        labelSize: garage.fs(46)
+        labelSize: garage.fs(54)
         sublabelSize: garage.fs(17)
-        iconSize: garage.px(46)
+        iconSize: garage.px(52)
         Accessible.name: "Ready up"
         Accessible.description: "Starts the countdown. " + garage.modeNames[garage.raceMode]
                                 + ", " + garage.setNames[garage.mathSet] + "."
@@ -913,7 +1121,7 @@ FocusScope {
       ActionButton {
         id: leaveButton
         width: parent.width
-        height: garage.px(72)
+        height: garage.px(66)
         y: parent.height - height
         art: Glyphs.exit
         tone: "quit"
@@ -921,9 +1129,9 @@ FocusScope {
         mutedColor: Theme.text
         label: "LEAVE"
         sublabel: "ESCAPE DOES IT TOO"
-        labelSize: garage.fs(27)
+        labelSize: garage.fs(25)
         sublabelSize: garage.fs(15)
-        iconSize: garage.px(30)
+        iconSize: garage.px(28)
         Accessible.name: "Leave"
         Accessible.description: "Back to the garage home. Escape does it too."
         onActivated: garage.leaveRequested()
