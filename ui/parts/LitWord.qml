@@ -88,6 +88,12 @@ Item {
   width: wordFace.implicitWidth
   height: wordFace.implicitHeight
 
+  // The face's own font, published. A caller that has to MEASURE this word --
+  // `ui/Race.qml` sizes the answer field and the fact's contrast plate off the
+  // fact's tight bounding box -- needs the font the cream is actually drawn in,
+  // and reading it off a private id is what makes two files drift.
+  readonly property alias faceFont: wordFace.font
+
   // Where the ink pass reaches outside the face's own box: the keyline every
   // way, the cast shadow left and down under it, the rim up and right. The
   // layer is given that margin explicitly, because a layer is clipped to its

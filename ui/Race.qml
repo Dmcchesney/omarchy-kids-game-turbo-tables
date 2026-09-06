@@ -2152,17 +2152,17 @@ FocusScope {
   // rather than trusting the arithmetic.
   TextMetrics {
     id: factInkNow
-    font: factText.font
-    text: factText.text
+    font: factWord.faceFont
+    text: factWord.words
   }
   FontMetrics {
     id: factFace
-    font: factText.font
+    font: factWord.faceFont
   }
   readonly property rect factInkRect: {
     var r = factInkNow.tightBoundingRect
-    return Qt.rect(question.x + factText.x + r.x,
-                   question.y + factText.y + factFace.ascent + r.y,
+    return Qt.rect(question.x + factWord.x + r.x,
+                   question.y + factWord.y + factFace.ascent + r.y,
                    r.width, r.height)
   }
 
@@ -2266,15 +2266,33 @@ FocusScope {
     y: race.px(118)
     spacing: race.px(14)
 
-    Text {
-      id: factText
+    // THE FACT IS DRAWN THE WAY THE COUNTDOWN DRAWS IT, AND IT IS THE SAME
+    // OBJECT ONE SECOND APART.
+    //
+    // What stood here was a cream `Text` with `style: Text.Outline` -- Qt's
+    // native hairline, about a pixel wide at any size. What the countdown drew,
+    // off the same string, one second earlier, was a cast shadow, an opaque
+    // keyline six pixels wide and a warm rim on the sun side, and a blind
+    // critic measured why: cream against this sky and this sun is 3.10 : 1
+    // mean and 1.26 : 1 worst, which raw would fail; it reads only because of
+    // the keyline, at 5.32 : 1 mean and 2.57 : 1 worst against the same ground.
+    // The contrast problem was solved on the screen that has one second of it
+    // and left standing on the screen that has the whole race, and a child met
+    // the same sentence in two designs across one cut.
+    //
+    // `ui/parts/LitWord.qml` is that treatment as a part, and this is it. Its
+    // nineteen ink items live in one cached layer, so what the race pays per
+    // frame is one textured quad -- see that file for the measurement.
+    //
+    // The plate below it stays exactly as it was. It answers a DISTURBANCE --
+    // a crossbar, a card's wash, a Turbo's horizon dip -- and comes up and goes
+    // down with it; the keyline answers the sky, which is always there. They
+    // are two different problems and the round that added the plate said so.
+    LitWord {
+      id: factWord
       anchors.horizontalCenter: parent.horizontalCenter
-      textFormat: Text.PlainText
-      text: (race.human && race.human.currentFact >= 0)
-            ? Engine.factLabel(race.human.currentFact) : ""
-      color: Theme.cream
-      font.family: Theme.mono
-      font.bold: true
+      words: (race.human && race.human.currentFact >= 0)
+             ? Engine.factLabel(race.human.currentFact) : ""
       // The largest type on the screen, and never below a tenth of its height
       // -- measured as INK, which is the only reading of that rule a child can
       // see. `font.pixelSize` is an em box with ascent, descent and leading in
@@ -2284,10 +2302,16 @@ FocusScope {
       // tenth. The size below is derived from the ink the face actually draws,
       // so the rule holds at every screen size and in any font the shell hands
       // down.
-      font.pixelSize: race.factPixelSize
-      font.letterSpacing: race.px(6)
-      style: Text.Outline
-      styleColor: Qt.rgba(0, 0, 0, 0.85)
+      size: race.factPixelSize
+      spacing: race.px(6)
+      // The same four numbers the countdown hands it, at this screen's scale.
+      drop: race.px(6)
+      contour: Math.max(2, race.px(5))
+      rimOffset: Math.max(1, Math.round(Math.max(2, race.px(5)) * 0.55))
+      faceTone: Theme.cream
+      shadowTone: Qt.rgba(0.235, 0.07, 0.157, 0.82)
+      bodyTone: "#280e27"
+      rimTone: "#f0b07a"
     }
 
     // The field. It is a readout, not something to type into: the digits the
