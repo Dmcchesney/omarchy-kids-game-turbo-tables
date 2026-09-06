@@ -265,6 +265,9 @@ Window {
 
   // ---------------------------------------------------------------- piece M
   readonly property bool printControls: flag("print-controls")
+  // Open the screen on a save file that could not be read. See the note beside
+  // `unreadableBackend` below.
+  readonly property bool quarantineArg: flag("quarantine")
   readonly property string doArg: argument("do", "")
   readonly property bool driving: doArg.length > 0
 
@@ -1054,6 +1057,22 @@ Window {
   // ---------------------------------------------------------------- store
   MemoryStore { id: memory }
 
+  // PIECE M ROUND 2 -- `--quarantine`, AND THE HOLE ROUND ONE NAMED HONESTLY.
+  //
+  // `START A NEW SAVE FILE` is the one way out of a quarantined save, it is a
+  // real `ActionButton` with a real click target, and no walk and no drive
+  // could ever reach it: `Store.quarantined` is false in every state the
+  // harness could seed, so the button appeared in every table as
+  // `enabled=no, h=0` and its click, its hover and its focus were CLAIMED
+  // rather than shown. Round one said so and left it.
+  //
+  // `ui/Store.qml`'s own rule is that "a backend with no `load`" is a
+  // quarantine, so the state is reachable by handing it exactly that. Nothing
+  // is faked and no property is written from outside: the store quarantines
+  // itself, for the reason it quarantines a real unreadable file, and the walk
+  // then enumerates the screen the child would actually be looking at.
+  QtObject { id: unreadableBackend }
+
   // ---------------------------------------------------------------- theme
   // The one place the mock shell singletons are read. Copy, do not bind: this
   // is the same handoff layer 3 makes, and doing it as an explicit copy is
@@ -1106,7 +1125,7 @@ Window {
     if (harness.sheetsArg.length > 0)
       Theme.carSheetRoot = harness.sheetsArg
     seedSettings(harness.settingsArg)
-    Store.backend = memory
+    Store.backend = harness.quarantineArg ? unreadableBackend : memory
     // Only now may the screen load: the theme, the sheets and the seeded
     // save file are all in place, so nothing binds to a default and then
     // rebinds a frame later.
