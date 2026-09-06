@@ -1,49 +1,60 @@
 import QtQuick
 import "../"
 
-// PROTOTYPE (proto/golden-hour): the start-line backdrop behind the countdown.
+// The start-line backdrop behind the countdown.
 //
-// One canvas, painted once at the design's 480x270 layer and scaled up with
-// nearest-neighbour, so the sky, the sun, the hills, the neon floor, the road
-// and the gantry share one pixel size with the race's own sprites. Everything
-// in it is a gradient, a silhouette or a flat fill: the bar is palette, light
-// and composition, not brushwork.
+// ================================ PIECE 5: THE SECOND SKY AND THE FLAT GANTRY
 //
-// The light is the one key the direction names: the sun, low, ahead and to the
-// right of the camera. Every prop in here is a silhouette against it with a
-// warm rim on its sun side, and the child's kart (a CarSprite cell drawn on
-// top of this) throws its shadow toward the camera, across this floor -- that
-// shadow is drawn here because the floor is here.
+// This file used to paint its own sunset. Sky gradient, cloud bands, banded
+// sun, three sine-wave ridges, neon floor, road, start line and a gantry, all
+// into one 480 x 270 canvas -- and `ui/parts/SunsetSky.qml` painted a DIFFERENT
+// sunset for the race view and the garage door. Plan v3's piece-5 row says what
+// this file is supposed to be in five words: "`CountdownScene.qml` on
+// `SunsetSky` and the sheets". It was not, for one honest reason recorded in
+// round 6's own note -- the shared sky knew nothing about a road, a gantry or a
+// floor, and taking it over from a screen that needed all three was a piece of
+// work nobody owned.
 //
-// NOTE, CORRECTED IN ROUND 6. `ui/parts/SunsetSky.qml` DOES exist -- 213
-// lines of it -- and `ui/TrackView.qml:594` draws the race view's sky with it.
-// The note that stood here said the opposite, and it was written before the
-// part landed. So this file is a second sky, and the two have drifted: this
-// one paints sky, sun, hills, floor, grid, road, start line, gantry and the
-// kart's cast shadow into ONE canvas at 480 x 270 and never repaints while the
-// countdown runs; SunsetSky paints sky and hills into four canvases that
-// parallax against a `lateral` the track drives, and knows nothing about a
-// road, a gantry or a floor. Plan v2 wants one part shared by TrackView, the
-// garage door and this screen.
+// Piece T owns it now. `SunsetSky` grew the hour, drifting parallax clouds,
+// terrain-stepped ridges and the first stars, and `ui/parts/KitProp.qml` draws
+// one cell of the frozen prop kit -- which has a `gantry`: a steel truss arch
+// with a checkered beam, lamps, two chequered flags that flap, and TURBO TABLES
+// baked on its header board. So the two things this screen was faking are now
+// parts, and this file stops faking them:
 //
-// Adopting it is a real piece of work -- SunsetSky would have to grow the
-// horizon-and-below half, or this file would have to split -- and the part is
-// shared and unowned, so round 6 did not take it unilaterally. What round 6
-// did do is fix the defect the divergence was hiding: both suns draw the
-// genre's cut lines and both had them eaten by their own hills. The fit below
-// (`layerSkylineY`) is the recipe SunsetSky needs too.
+//   * THE SKY IS THE RACE'S SKY. One `SunsetSky` at `nightfall` 0, which is
+//     lap 1, which is the lap the child is one second away from starting. The
+//     cut lines, the ridge line, the cloud streaks and the halo are the ones
+//     the race opens on, because they are the same object.
+//   * THE GANTRY IS THE KIT'S. A `KitProp` standing on the road at the world
+//     scale the race stands it at, flags flapping at the circuit's own three a
+//     second. It is the FIRST landmark of the circuit -- `Circuit.js` puts a
+//     `gantry` at s = 3.5, over the start grid -- so the arch the child counts
+//     down under is the arch they drive under.
+//
+// WHAT IS STILL PAINTED HERE, AND WHY. The ground. The race's floor is
+// `shaders/road.frag` and `ui/CanvasRoad.qml`, both of which are piece 4's and
+// both of which need a moving camera, a circuit and a terrain to say anything;
+// this screen is one still frame of a road that is not moving yet. So the floor,
+// the grid, the tarmac, the start grid and the kart's cast shadow are a canvas,
+// as they were -- painted once, never repainted while the countdown runs.
+//
+// THE LIGHT IS THE PLAN'S: one key, the sun, low and behind-right of the
+// subject; every object a silhouette with a warm rim on its sun side; shadows
+// long, toward the camera. The gantry gets that from `Circuit.TINT`'s own
+// numbers for a gantry rather than from a second opinion invented here.
 Item {
   id: scene
 
-  // The layer resolution. 480x270 is where the design puts the game's art;
-  // doubling it is the one knob to turn if the maintainer wants finer hills.
+  // The layer resolution. 480 x 270 is where the design puts the game's art,
+  // and it is what `ui/TrackView.qml` draws its own sky and road into, so the
+  // two screens share a pixel size as well as a sky.
   property int layerW: 480
   property int layerH: 270
 
   // Composition, as fractions of the frame.
   property real horizon: 0.575
   property real sunX: 0.66
-  property real sunRadius: 0.20      // of frame height
   property real vanishX: 0.52        // where the road and the grid converge
 
   // Where the kart stands, so its long shadow can be laid on the floor.
@@ -51,70 +62,59 @@ Item {
   property real kartFootY: 0.905
   property real kartFootW: 0.28
 
-  // The palette the direction sampled off the bar.
-  readonly property color skyTop: "#5e1a50"
-  readonly property color skyHigh: "#a4337b"
-  readonly property color skyMid: "#c24073"
-  readonly property color glow: "#d75d6b"
-  readonly property color sunCore: "#efcb72"
-  readonly property color sunEdge: "#f0956e"
-  readonly property color hillFar: "#bc405f"
-  readonly property color hillMid: "#8e2c50"
-  readonly property color hillNear: "#5e1a50"
-  readonly property color floor: "#3c1228"
+  // Seconds. The two things in this scene that move are bound to it: the
+  // gantry's flags and the cloud drift. The countdown drives it, and stops
+  // driving it under reduced motion, which is why neither is an animation
+  // declared down here.
+  property real clock: 0
+
+  // ---------------------------------------------------------------- the sky
+  //
+  // THE PALETTE IS NOT DECLARED IN THIS FILE ANY MORE. Sixteen colours used to
+  // be, and eight of them were a second copy of `SunsetSky`'s -- which is how
+  // the two skies drifted in the first place. What is left is the four tones
+  // the GROUND is painted in, which the shared sky has no opinion about.
+  readonly property color floorTone: "#3c1228"
   readonly property color neon: "#ff4fa3"
   readonly property color tarmac: "#1c0a18"
-  readonly property color signage: "#280e27"
-  readonly property color rim: "#f0b07a"
   readonly property color cream: "#f2e6c4"
 
-  // The sponsor board's own two colours, named here because a contrast figure
-  // is a claim about a PAIR and the pair should be legible in one place.
-  //
-  // ROUND 6. Round 5 drew the words in `skyMid` on `signage`: 3.62:1, which
-  // passes WCAG AA for large text and fails it for normal text -- and these
-  // glyphs are 9 layer pixels tall, which at 1366 x 768 is about 25 screen
-  // pixels, right on the boundary. The board's own neon against the same
-  // near-black is 5.83:1 and passes AA for normal text outright. It is also
-  // what the bar does: the `quattro` board in `docs/golden-hour-reference.png`
-  // is hot pink type on near-black, not a darker pink on it.
-  //
-  // It must not be cream. The evidence for "the numeral no longer covers the
-  // board" is a count of CREAM pixels inside the board's own rows, and cream
-  // type on the board would make that count meaningless. `#ff4fa3` is 54 and
-  // 74 away from `#f2e6c4` in green and blue, well outside the +/-14 per
-  // channel that count allows.
-  readonly property color boardFill: scene.signage
-  readonly property color boardInk: scene.neon
+  // What the sky says its colours are, republished so the screen above and the
+  // spec can read them from one place. `sunCore` and `sunEdge` are the disc's
+  // two tones and the type has to clear both; the three hill tones are how a
+  // test finds the skyline without re-deriving `SunsetSky`'s ridge arithmetic,
+  // which is the copied-number mistake this whole file is a correction of.
+  readonly property color sunCore: sunset.sunCore
+  readonly property color sunEdge: sunset.sunEdge
+  readonly property color hillFar: sunset.hillFar
+  readonly property color hillMid: sunset.hillMid
+  readonly property color hillNear: sunset.hillNear
+  readonly property color skyLow: sunset.skyLow
 
-  // ------------------------------------------------------ the gantry board
-  //
-  // ROUND 5. The sponsor board over the road carries the only words in this
-  // painting, and for three rounds the countdown's numeral was drawn straight
-  // through them: at 1920 x 1080 the `3` covered the middle of `TURBO TABLES`
-  // on every one of beats 3, 2 and 1, and the board only became legible on GO,
-  // when the numeral shrank and moved. The plan lists that as this piece's
-  // remaining defect.
-  //
-  // The screen above cannot keep its type off the board unless it knows where
-  // the board is, and a number copied into two files is a number that drifts.
-  // So the geometry the painter uses is declared here, once, in the layer's own
-  // pixels -- and `boardTopY` republishes it in this item's pixels, which are
-  // the frame's. `paint()` reads these properties rather than recomputing them,
-  // so the published edge and the painted edge cannot disagree.
+  // The disc, in this item's own coordinates, from the sky's own numbers.
+  // `SunsetSky` puts the sun's centre `sunLift` of a radius above the horizon
+  // and draws a true circle in plane pixels, so it is an ellipse here whenever
+  // the frame is not 16:9 -- hence two radii.
+  readonly property real layerSunR: sunset.sunRadius * scene.layerH
+  readonly property real layerSunY: scene.layerHorizonY
+                                    - scene.layerSunR * (sunset.sunLift * 2 - 1)
+  readonly property real sunCentreX: scene.frameX(Math.round(scene.sunX * scene.layerW))
+  readonly property real sunCentreY: scene.frameY(scene.layerSunY)
+  readonly property real sunRadiusX: scene.frameX(scene.layerSunR)
+  readonly property real sunRadiusY: scene.frameY(scene.layerSunR)
+  readonly property real sunTopY: scene.frameY(scene.layerSunY - scene.layerSunR)
+  // The line the hills stand on. A test walking the sun's centre column stops
+  // at the first hill TONE above this, not at this line: the ridges rise above
+  // the horizon and how far is `SunsetSky`'s business.
+  readonly property real horizonYPx: scene.frameY(scene.layerHorizonY)
+
   readonly property real layerHorizonY: Math.round(scene.layerH * scene.horizon)
   readonly property real layerDepth: scene.layerH - scene.layerHorizonY
-  readonly property real layerGantryFootY: scene.layerHorizonY + scene.layerDepth * 0.30
-  readonly property int gantryPostH: 40
-  readonly property int gantryPostW: 4
-  readonly property int gantryBoardH: 12
-  readonly property real layerBeamY: Math.round(scene.layerGantryFootY - scene.gantryPostH)
-  readonly property real layerBoardTopY: scene.layerBeamY - scene.gantryBoardH
 
-  // The road's own convergence, hoisted out of paint() for the same reason:
-  // the gantry stands on the road's edges, so the board's left and right are
-  // the road's, and a test that wants to look at the board's pixels needs to
-  // be told where they are rather than re-deriving them.
+  // ------------------------------------------------------------- the road
+  // The road's convergence, hoisted out of paint(): the gantry stands on the
+  // road, so where the road is at the gantry's depth is what decides how big
+  // the gantry is and where its posts land.
   readonly property real layerVanishX: Math.round(scene.layerW * scene.vanishX)
   readonly property real layerRoadL: scene.layerW * 0.14
   readonly property real layerRoadR: scene.layerW * 0.78
@@ -126,383 +126,354 @@ Item {
     return scene.layerVanishX + (scene.layerRoadR - scene.layerVanishX)
            * (y - scene.layerHorizonY) / Math.max(1, scene.layerDepth)
   }
-  readonly property real layerBoardLeftX: Math.round(scene.layerEdgeL(scene.layerGantryFootY)) - 8
-  readonly property real layerBoardRightX: Math.round(scene.layerEdgeR(scene.layerGantryFootY))
-                                           + 4 + scene.gantryPostW
 
   // Layer pixels to this item's pixels, which are the frame's.
   function frameX(lx) { return scene.width * lx / Math.max(1, scene.layerW) }
   function frameY(ly) { return scene.height * ly / Math.max(1, scene.layerH) }
 
-  // The board's rectangle in this item's own coordinates. Type above the scene
-  // keeps its ink above `boardTopY`; a test that wants to read the words off
-  // the picture reads the whole rect.
-  readonly property real boardTopY: scene.frameY(scene.layerBoardTopY)
-  readonly property real boardBottomY: scene.frameY(scene.layerBeamY)
-  readonly property real boardLeftX: scene.frameX(scene.layerBoardLeftX)
-  readonly property real boardRightX: scene.frameX(scene.layerBoardRightX)
-
-  // ------------------------------------------------------------ the hills
+  // ====================================================== THE KIT'S GANTRY
   //
-  // The three silhouettes, far to near, as data rather than as three closures
-  // inside paint(). `ridgeBase` is how far above the horizon each one stands
-  // before its own undulation; `ridgeWave` is that undulation. They are up
-  // here because the sun's cut lines have to be fitted to the arc the hills
-  // LEAVE, and a ridge line copied into two places is a ridge line that
-  // drifts -- which is exactly how the sun lost its bands.
-  readonly property var ridgeBase: [14, 7, 2]
-  function ridgeWave(i, x) {
-    var W = scene.layerW
-    if (i === 0)
-      return 10 * Math.sin(x * 0.021 + 1.2) + 5 * Math.sin(x * 0.053 + 0.4)
-           + 3 * Math.sin(x * 0.13) + 9 * (1 - x / W)
-    if (i === 1)
-      return 6 * Math.sin(x * 0.030 + 2.6) + 3 * Math.sin(x * 0.080)
-           + 2 * Math.sin(x * 0.19 + 0.9)
-    return 3 * Math.sin(x * 0.045 + 0.7) + 2 * Math.sin(x * 0.11 + 1.9)
-  }
-  function ridgeTopY(x) {
-    var top = scene.layerHorizonY
-    for (var i = 0; i < scene.ridgeBase.length; i++)
-      top = Math.min(top, scene.layerHorizonY - scene.ridgeBase[i] - scene.ridgeWave(i, x))
-    return top
-  }
-
-  // -------------------------------------------------------------- the sun
-  readonly property real layerSunX: Math.round(scene.layerW * scene.sunX)
-  readonly property real layerSunR: Math.round(scene.layerH * scene.sunRadius)
-  readonly property real layerSunY: scene.layerHorizonY
-                                    - Math.round(scene.layerSunR * 0.62)
-
-  // The highest any ridge reaches anywhere across the sun's own width. A cut
-  // line drawn above this row is visible right across the disc; one drawn
-  // below it may be behind a hill at some column.
+  // How far down the depth the arch stands, as a fraction. It is the one number
+  // that trades the size of the countdown's numeral against the size of the
+  // words on the board, and both of those are things the plan asks for by name
+  // ("the number is enormous"; "the numeral covers the gantry's board"), so it
+  // is declared here with the trade written next to it rather than buried.
   //
-  // ROUND 6, and this is the whole fix. The cut lines are the genre's
-  // signature and the reference's defining feature, and ours were laid from
-  // `sy + R * 0.10` downward on a fixed rhythm -- which put four of the seven
-  // above the horizon and three of THOSE four behind the ridge. A column
-  // through the disc's centre gave 208 unbroken rows of flat `#efcb72` and one
-  // 4-row band: a flat yellow dome with a stripe. So the stack is now FITTED
-  // to `layerSkylineY`, computed from the same ridge data that draws the
-  // hills, and the sun is banded everywhere a child can see it.
-  readonly property real layerSkylineY: {
-    var top = scene.layerHorizonY
-    var x0 = Math.floor(scene.layerSunX - scene.layerSunR)
-    var x1 = Math.ceil(scene.layerSunX + scene.layerSunR)
-    for (var x = x0; x <= x1; x++)
-      top = Math.min(top, scene.ridgeTopY(x))
-    return top
-  }
-  // Where the banding begins: a little above the disc's own centre, so the top
-  // of the sun stays a solid dome the way the reference's does, and everything
-  // below it is cut.
-  readonly property real layerSunBandTopY: Math.round(scene.layerSunY
-                                                      - scene.layerSunR * 0.55)
-  // Each entry is (how far down the banded span the cut starts, how thick it
-  // is in layer pixels). Thin at the top, thickening downward, gaps closing:
-  // the shape the reference's sun has.
-  readonly property var sunCutStack: [[0.00, 1], [0.15, 1], [0.30, 2], [0.45, 2],
-                                      [0.62, 3], [0.79, 3], [0.94, 4]]
-  // What a test can read back without knowing the arithmetic: how many of the
-  // stack's cuts land in the arc the hills leave uncovered.
-  readonly property int sunCutsAboveSkyline: {
-    var n = 0
-    var span = scene.layerSkylineY - 1 - scene.layerSunBandTopY
-    for (var i = 0; i < scene.sunCutStack.length; i++)
-      if (Math.round(scene.layerSunBandTopY + span * scene.sunCutStack[i][0])
-          < scene.layerSkylineY)
-        n += 1
-    return n
-  }
-  // The disc, in this item's own coordinates. It is drawn as a circle in layer
-  // pixels and then scaled, so it is an ellipse here whenever the frame is not
-  // 16:9 -- hence two radii.
-  readonly property real sunCentreX: scene.frameX(scene.layerSunX)
-  readonly property real sunCentreY: scene.frameY(scene.layerSunY)
-  readonly property real sunRadiusX: scene.frameX(scene.layerSunR)
-  readonly property real sunRadiusY: scene.frameY(scene.layerSunR)
-  readonly property real sunTopY: scene.frameY(scene.layerSunY - scene.layerSunR)
-  readonly property real skylineY: scene.frameY(scene.layerSkylineY)
+  //   the arch is 10.46 world units across its opaque box and 5.30 tall, on a
+  //   road 3.80 wide (`TrackView.roadHalf` = 1.90). The flat gantry this file
+  //   used to draw was 0.57 road-widths tall. The kit's is 1.39. So the real
+  //   arch takes more of the frame than the drawn one did at the same distance,
+  //   and standing it where the drawn one stood would put its board at 30% of
+  //   the frame height and leave the numeral a quarter of the picture.
+  //
+  // The value below is the one the round's frames were chosen from; see the
+  // report's table of `gantryFoot` against the numeral's ink and the board's
+  // type height.
+  property real gantryFoot: 0.135
 
-  Canvas {
-    id: layer
+  readonly property real layerGantryFootY: scene.layerHorizonY
+                                           + scene.layerDepth * scene.gantryFoot
+  // The road's width at that depth, in this frame's own pixels, and the world
+  // scale that follows from it. `KitProp` wants screen pixels per world unit
+  // and nothing else: hand it the road's own, and the arch comes out at the
+  // size the race draws it at, because on the track it is the same division.
+  readonly property real gantryRoadPx: scene.frameX(scene.layerEdgeR(scene.layerGantryFootY))
+                                       - scene.frameX(scene.layerEdgeL(scene.layerGantryFootY))
+  readonly property real roadWorldWidth: 3.80
+  readonly property real gantryPxPerUnit: scene.gantryRoadPx
+                                          / Math.max(0.1, scene.roadWorldWidth)
+
+  // WHERE THE SPONSOR PLATE IS ON THE SHEET, measured off `assets/props/
+  // gantry.png` and expressed as fractions of the prop's own opaque box, so it
+  // survives every scale step and every frame size.
+  //
+  // The plate is cell pixels x 405..1058, y 142..241, identical in `C0` and
+  // `C1` -- only the flags move between the two frames -- and the `C0` opaque
+  // box is (104, 50) to (1387, 700). The four fractions below are those two
+  // rectangles divided.
+  //
+  // IT IS THE PLATE AND NOT THE WHOLE HEADER BAND, and the difference is the
+  // whole evidence. The beam's chequers run at the same HEIGHT as the plate, to
+  // its left and its right, and they are cream: over the plate's own rows the
+  // full width of the arch carries 10,482 cream pixels, of which 10,444 are
+  // chequers. The guard that says "no cream of the numeral falls inside the
+  // board" counts cream, so a rect that swallowed the chequers would either be
+  // permanently red or would have to be given a tolerance wide enough to hide
+  // the numeral as well. Inside x 405..1058 the bake carries 0 cream, 5,236
+  // pixels of amber ink in 336 columns and 56,051 of plate.
+  readonly property real boardBoxL: (405 - 104) / 1283
+  readonly property real boardBoxR: (1059 - 104) / 1283
+  readonly property real boardBoxT: (142 - 50) / 650
+  readonly property real boardBoxB: (242 - 50) / 650
+
+  // The board's two colours, as the bake made them: `#f5a524` amber type on the
+  // `#1a1b26` plate. A contrast figure is a claim about a PAIR, so the pair is
+  // named in one place. They are not this file's choice -- they are the kit's,
+  // and the kit is frozen art.
+  //
+  // Neither is cream, and that matters for the same reason it mattered when the
+  // board was painted here: the evidence for "the numeral no longer covers the
+  // board" is a count of CREAM pixels inside the board's rows, and cream type on
+  // the board would make the count meaningless. `#f5a524` and `#1a1b26` are both
+  // far outside the +/- 14 per channel that count allows around `#f2e6c4`.
+  readonly property color boardInk: "#f5a524"
+  readonly property color boardFill: "#1a1b26"
+
+  // The board's rectangle in this item's own coordinates, from the prop's own
+  // drawn box. `KitProp.boxLeft/boxTop/boxWidth/boxHeight` are the opaque box
+  // relative to the contact point, which is where the item is standing.
+  readonly property real boardLeftX: gantry.x + gantry.boxLeft
+                                     + scene.boardBoxL * gantry.boxWidth
+  readonly property real boardRightX: gantry.x + gantry.boxLeft
+                                      + scene.boardBoxR * gantry.boxWidth
+  readonly property real boardTopY: gantry.y + gantry.boxTop
+                                    + scene.boardBoxT * gantry.boxHeight
+  readonly property real boardBottomY: gantry.y + gantry.boxTop
+                                       + scene.boardBoxB * gantry.boxHeight
+  // The whole arch's box, which is what the type above actually has to clear:
+  // the flags stand a little higher than the board and they are art too.
+  readonly property real gantryTopY: gantry.y + gantry.boxTop
+  readonly property real gantryLeftX: gantry.x + gantry.boxLeft
+  readonly property real gantryRightX: gantry.x + gantry.boxLeft + gantry.boxWidth
+
+  // ------------------------------------------------------------- the plane
+  //
+  // Sky and ground, drawn at 480 x 270 and scaled up with nearest-neighbour, so
+  // both share one pixel size with the race's own picture. `layer.enabled` is
+  // the same measurement `ui/TrackView.qml` records: with eight items in here
+  // each scaled up on its own the software renderer pays for eight upscales a
+  // frame; composed once at 480 x 270 and blitted, it pays for one.
+  Item {
+    id: plane
     width: scene.layerW
     height: scene.layerH
-    renderStrategy: Canvas.Immediate
-    renderTarget: Canvas.Image
-    smooth: false
-    antialiasing: false
     transform: Scale {
       xScale: scene.width / Math.max(1, scene.layerW)
       yScale: scene.height / Math.max(1, scene.layerH)
     }
+    layer.enabled: true
+    layer.smooth: false
+    layer.textureSize: Qt.size(scene.layerW, scene.layerH)
 
-    function rgba(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
-    function mix(a, b, t) {
-      return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
-                     a.b + (b.b - a.b) * t, 1)
+    // `SunsetSky`'s gradient dome is 0.56 of `unitH` tall, and this scene's
+    // horizon is at 0.575 of the frame -- three plane rows lower than the dome
+    // reaches. This is the gradient's own top stop filling those three rows, so
+    // the top of the frame is the colour the sky starts at rather than the void
+    // behind the scene. Nothing else is ever visible through it.
+    Rectangle {
+      anchors.fill: parent
+      color: sunset.skyTop
     }
 
-    onPaint: {
-      var ctx = getContext("2d")
-      var W = width
-      var H = height
-      var yH = Math.round(H * scene.horizon)
-      ctx.reset()
-      ctx.clearRect(0, 0, W, H)
+    SunsetSky {
+      id: sunset
+      anchors.fill: parent
+      horizon: scene.horizon
+      unitH: scene.layerH
+      sunX: scene.sunX
+      // Lap 1. The countdown is the second before lap 1 and the hour has not
+      // started passing yet, so this is the golden hour the race opens on and
+      // the same hour the garage door looks out onto.
+      nightfall: 0
+      stars: 0
+      lateral: 0
+      // The clouds drift. It is the only thing in the backdrop that moves, and
+      // it is what stops a four-second screen reading as a photograph. Same
+      // rate the track drives them at.
+      drift: scene.clock * 1.6
+    }
 
-      // ------------------------------------------------------------ sky
-      var sky = ctx.createLinearGradient(0, 0, 0, yH)
-      sky.addColorStop(0.00, scene.skyTop)
-      sky.addColorStop(0.35, scene.skyHigh)
-      sky.addColorStop(0.70, scene.skyMid)
-      sky.addColorStop(1.00, scene.glow)
-      ctx.fillStyle = sky
-      ctx.fillRect(0, 0, W, yH + 1)
+    // ------------------------------------------------------------ the ground
+    // Floor, grid, tarmac, start grid and the kart's long shadow: one canvas,
+    // painted when the geometry changes and never while the countdown runs.
+    Canvas {
+      id: ground
+      x: 0
+      y: scene.layerHorizonY
+      width: scene.layerW
+      height: scene.layerH - scene.layerHorizonY
+      renderStrategy: Canvas.Immediate
+      renderTarget: Canvas.Image
+      smooth: false
+      antialiasing: false
 
-      // Streaky cloud bands: three soft horizontal shapes, each a shade off
-      // the sky behind it, fading out at both ends.
-      var bands = [
-        { y: 0.16, h: 7, x0: 0.05, x1: 0.70, c: scene.skyMid, a: 0.55 },
-        { y: 0.27, h: 5, x0: 0.30, x1: 0.98, c: scene.skyTop, a: 0.35 },
-        { y: 0.40, h: 9, x0: 0.00, x1: 0.62, c: scene.glow, a: 0.45 },
-        { y: 0.47, h: 4, x0: 0.45, x1: 1.00, c: scene.skyHigh, a: 0.50 }
-      ]
-      for (var b = 0; b < bands.length; b++) {
-        var bd = bands[b]
-        var bx0 = W * bd.x0, bx1 = W * bd.x1
-        var bg = ctx.createLinearGradient(bx0, 0, bx1, 0)
-        bg.addColorStop(0, rgba(bd.c, 0))
-        bg.addColorStop(0.35, rgba(bd.c, bd.a))
-        bg.addColorStop(0.75, rgba(bd.c, bd.a))
-        bg.addColorStop(1, rgba(bd.c, 0))
-        ctx.fillStyle = bg
-        var by = Math.round(yH * bd.y)
-        ctx.fillRect(bx0, by, bx1 - bx0, bd.h)
-        ctx.fillRect(bx0 + (bx1 - bx0) * 0.18, by + bd.h + 2, (bx1 - bx0) * 0.6, Math.max(1, bd.h * 0.4))
-      }
+      function rgba(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
 
-      // ------------------------------------------------------------ sun
-      var sx = scene.layerSunX
-      var R = scene.layerSunR
-      var sy = scene.layerSunY
-      var halo = ctx.createRadialGradient(sx, sy, R * 0.6, sx, sy, R * 3.4)
-      halo.addColorStop(0.00, rgba(scene.glow, 0.95))
-      halo.addColorStop(0.30, rgba(scene.glow, 0.55))
-      halo.addColorStop(0.65, rgba(scene.glow, 0.18))
-      halo.addColorStop(1.00, rgba(scene.glow, 0))
-      ctx.fillStyle = halo
-      ctx.fillRect(0, 0, W, H)
+      onPaint: {
+        var ctx = getContext("2d")
+        var W = width
+        var depth = height
+        // The canvas starts AT the horizon, so a row `y` here is
+        // `scene.layerHorizonY + y` in the plane. Everything below works in
+        // plane rows and subtracts the offset once, at the draw.
+        var yH = scene.layerHorizonY
+        function py(y) { return y - yH }
+        ctx.reset()
+        ctx.clearRect(0, 0, W, depth)
 
-      var disc = ctx.createRadialGradient(sx, sy - R * 0.2, R * 0.15, sx, sy, R)
-      disc.addColorStop(0.00, scene.sunCore)
-      disc.addColorStop(0.72, scene.sunCore)
-      disc.addColorStop(1.00, scene.sunEdge)
-      ctx.fillStyle = disc
-      ctx.beginPath()
-      ctx.arc(sx, sy, R, 0, Math.PI * 2)
-      ctx.fill()
+        // ---------------------------------------------------------- floor
+        ctx.fillStyle = scene.floorTone
+        ctx.fillRect(0, 0, W, depth)
 
-      // The genre's signature: cut lines through the disc, thin near the top
-      // and thickening downward, in the colour of the sky they let through.
-      //
-      // The stack is fitted between `layerSunBandTopY` and the skyline, not
-      // laid on a fixed rhythm from the disc's centre -- see the long note by
-      // `layerSkylineY`. Below the skyline it carries on at the rhythm it ends
-      // on, so a column where the ridge happens to be low shows banded sun and
-      // not a flat foot.
-      ctx.save()
-      ctx.beginPath()
-      ctx.arc(sx, sy, R, 0, Math.PI * 2)
-      ctx.clip()
-      ctx.fillStyle = scene.glow
-      var bandTop = scene.layerSunBandTopY
-      var bandSpan = scene.layerSkylineY - 1 - bandTop
-      var stack = scene.sunCutStack
-      for (var i = 0; i < stack.length; i++)
-        ctx.fillRect(sx - R, Math.round(bandTop + bandSpan * stack[i][0]),
-                     R * 2, stack[i][1])
-      var tailY = Math.round(bandTop + bandSpan * stack[stack.length - 1][0])
-                  + stack[stack.length - 1][1]
-      var tailH = 5
-      while (tailY < sy + R) {
-        ctx.fillRect(sx - R, tailY, R * 2, tailH)
-        tailY += tailH + 3
-        tailH += 1
-      }
-      ctx.restore()
+        // The diagnostic grid, neon, converging on the vanishing point.
+        var vx = scene.layerVanishX
+        ctx.strokeStyle = ground.rgba(scene.neon, 0.24)
+        ctx.lineWidth = 1
+        var rows = 13
+        for (var r = 1; r <= rows; r++) {
+          var t = r / rows
+          var gy = Math.round(depth * t * t) + 0.5
+          ctx.beginPath()
+          ctx.moveTo(0, gy)
+          ctx.lineTo(W, gy)
+          ctx.stroke()
+        }
+        for (var gx = -W; gx <= W * 2; gx += 34) {
+          ctx.beginPath()
+          ctx.moveTo(vx + 0.5, 0)
+          ctx.lineTo(gx + 0.5, depth)
+          ctx.stroke()
+        }
 
-      // ---------------------------------------------------------- hills
-      // Three silhouette layers, lighter with distance, heavier on the left
-      // the way the bar's are, all standing on the floor line. The ridge line
-      // is `scene.ridgeTopY`'s -- the same one the sun's bands were fitted to.
-      var ridgeTone = [scene.hillFar, scene.hillMid, scene.hillNear]
-      for (var rr = 0; rr < ridgeTone.length; rr++) {
-        ctx.fillStyle = ridgeTone[rr]
+        // The floor fades up into the horizon glow, and the grid with it. The
+        // tone is the sky's own bottom stop, so the ground meets the sky in one
+        // colour -- which is what `TrackView.fogTone` is bound to for exactly
+        // the same reason.
+        var haze = ctx.createLinearGradient(0, 0, 0, depth * 0.36)
+        haze.addColorStop(0, ground.rgba(scene.skyLow, 0.85))
+        haze.addColorStop(0.45, ground.rgba(scene.skyLow, 0.32))
+        haze.addColorStop(1, ground.rgba(scene.skyLow, 0))
+        ctx.fillStyle = haze
+        ctx.fillRect(0, 0, W, depth * 0.36)
+
+        // ----------------------------------------------------------- road
+        var roadL = scene.layerRoadL
+        var roadR = scene.layerRoadR
+        var H = scene.layerH
+        function edgeL(y) { return scene.layerEdgeL(y) }
+        function edgeR(y) { return scene.layerEdgeR(y) }
+        ctx.fillStyle = scene.tarmac
         ctx.beginPath()
-        ctx.moveTo(0, yH + 1)
-        for (var rx = 0; rx <= W; rx++)
-          ctx.lineTo(rx, yH - scene.ridgeBase[rr] - scene.ridgeWave(rr, rx))
-        ctx.lineTo(W, yH + 1)
+        ctx.moveTo(vx, 0)
+        ctx.lineTo(roadR, depth)
+        ctx.lineTo(roadL, depth)
         ctx.closePath()
         ctx.fill()
-      }
-
-      // ---------------------------------------------------------- floor
-      ctx.fillStyle = scene.floor
-      ctx.fillRect(0, yH, W, H - yH)
-
-      // The diagnostic grid, neon, converging on the vanishing point.
-      var vx = scene.layerVanishX
-      var depth = scene.layerDepth
-      ctx.strokeStyle = rgba(scene.neon, 0.28)
-      ctx.lineWidth = 1
-      var rows = 13
-      for (var r = 1; r <= rows; r++) {
-        var t = r / rows
-        var gy = Math.round(yH + depth * t * t) + 0.5
+        ctx.strokeStyle = ground.rgba(scene.cream, 0.85)
+        ctx.lineWidth = 1.5
         ctx.beginPath()
-        ctx.moveTo(0, gy)
-        ctx.lineTo(W, gy)
+        ctx.moveTo(vx, 2)
+        ctx.lineTo(roadL, depth)
+        ctx.moveTo(vx, 2)
+        ctx.lineTo(roadR, depth)
         ctx.stroke()
-      }
-      for (var gx = -W; gx <= W * 2; gx += 34) {
-        ctx.beginPath()
-        ctx.moveTo(vx + 0.5, yH)
-        ctx.lineTo(gx + 0.5, H)
-        ctx.stroke()
-      }
 
-      // The floor fades up into the horizon glow, and the grid with it.
-      var haze = ctx.createLinearGradient(0, yH, 0, yH + depth * 0.36)
-      haze.addColorStop(0, rgba(scene.glow, 0.80))
-      haze.addColorStop(0.45, rgba(scene.glow, 0.30))
-      haze.addColorStop(1, rgba(scene.glow, 0))
-      ctx.fillStyle = haze
-      ctx.fillRect(0, yH, W, depth * 0.36)
-
-      // ----------------------------------------------------------- road
-      // Dark tarmac from the bottom edge to the vanishing point, with the
-      // cream edge lines the design gives the road.
-      var roadL = scene.layerRoadL
-      var roadR = scene.layerRoadR
-      function edgeL(y) { return scene.layerEdgeL(y) }
-      function edgeR(y) { return scene.layerEdgeR(y) }
-      ctx.fillStyle = scene.tarmac
-      ctx.beginPath()
-      ctx.moveTo(vx, yH)
-      ctx.lineTo(roadR, H)
-      ctx.lineTo(roadL, H)
-      ctx.closePath()
-      ctx.fill()
-      ctx.strokeStyle = rgba(scene.cream, 0.85)
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(vx, yH + 2)
-      ctx.lineTo(roadL, H)
-      ctx.moveTo(vx, yH + 2)
-      ctx.lineTo(roadR, H)
-      ctx.stroke()
-      // Tarmac takes the glow too, or the road is a black wedge cut out of
-      // a sunset.
-      var roadHaze = ctx.createLinearGradient(0, yH, 0, yH + depth * 0.5)
-      roadHaze.addColorStop(0, rgba(scene.glow, 0.55))
-      roadHaze.addColorStop(1, rgba(scene.glow, 0))
-      ctx.fillStyle = roadHaze
-      ctx.beginPath()
-      ctx.moveTo(vx, yH)
-      ctx.lineTo(edgeR(yH + depth * 0.5), yH + depth * 0.5)
-      ctx.lineTo(edgeL(yH + depth * 0.5), yH + depth * 0.5)
-      ctx.closePath()
-      ctx.fill()
-
-      // The start line: two rows of checkers across the road, just ahead of
-      // the kart's nose.
-      var lineY0 = yH + depth * 0.52
-      var lineY1 = yH + depth * 0.60
-      var cols = 10
-      for (var row = 0; row < 2; row++) {
-        var ya = lineY0 + (lineY1 - lineY0) * row / 2
-        var yb = lineY0 + (lineY1 - lineY0) * (row + 1) / 2
-        for (var c = 0; c < cols; c++) {
-          ctx.fillStyle = ((c + row) % 2 === 0) ? scene.cream : scene.signage
+        // The dashed centre line, which is what the race's road carries and
+        // this one did not. Dashes in perspective: each one is a quad between
+        // two depths, so they shorten and narrow toward the vanishing point the
+        // way the road does.
+        ctx.fillStyle = ground.rgba(scene.cream, 0.72)
+        for (var d = 0; d < 9; d++) {
+          var u0 = Math.pow(d / 9, 1.7)
+          var u1 = Math.pow((d + 0.52) / 9, 1.7)
+          var da = yH + scene.layerDepth * u0
+          var db = yH + scene.layerDepth * u1
+          var ha = Math.max(0.4, (edgeR(da) - edgeL(da)) * 0.012)
+          var hb = Math.max(0.4, (edgeR(db) - edgeL(db)) * 0.012)
+          var ca = (edgeL(da) + edgeR(da)) / 2
+          var cb = (edgeL(db) + edgeR(db)) / 2
           ctx.beginPath()
-          ctx.moveTo(edgeL(ya) + (edgeR(ya) - edgeL(ya)) * c / cols, ya)
-          ctx.lineTo(edgeL(ya) + (edgeR(ya) - edgeL(ya)) * (c + 1) / cols, ya)
-          ctx.lineTo(edgeL(yb) + (edgeR(yb) - edgeL(yb)) * (c + 1) / cols, yb)
-          ctx.lineTo(edgeL(yb) + (edgeR(yb) - edgeL(yb)) * c / cols, yb)
+          ctx.moveTo(ca - ha, py(da))
+          ctx.lineTo(ca + ha, py(da))
+          ctx.lineTo(cb + hb, py(db))
+          ctx.lineTo(cb - hb, py(db))
           ctx.closePath()
           ctx.fill()
         }
-      }
 
-      // ---------------------------------------------------------- gantry
-      // A checkered start gantry over the road, between the kart and the sun,
-      // silhouetted with one warm rim on its sun side.
-      // The four numbers below are the scene's published ones, so the board a
-      // child sees is at the line `boardTopY` names.
-      var postW = scene.gantryPostW
-      var postH = scene.gantryPostH
-      var pL = scene.layerBoardLeftX
-      var pR = scene.layerBoardRightX - postW
-      var beamY = scene.layerBeamY
-      ctx.fillStyle = scene.signage
-      ctx.fillRect(pL, beamY, postW, postH)
-      ctx.fillRect(pR, beamY, postW, postH)
-      ctx.fillStyle = scene.rim
-      ctx.fillRect(pL + postW - 1, beamY, 1, postH)
-      ctx.fillRect(pR + postW - 1, beamY, 1, postH)
-      // the beam, checkered
-      var cell = 6
-      var beamH = cell * 2
-      for (var bx = pL; bx < pR + postW; bx += cell) {
-        for (var brow = 0; brow < 2; brow++) {
-          var odd = (Math.floor((bx - pL) / cell) + brow) % 2 === 0
-          ctx.fillStyle = odd ? scene.cream : scene.signage
-          ctx.fillRect(bx, beamY + brow * cell, Math.min(cell, pR + postW - bx), cell)
+        // Tarmac takes the glow too, or the road is a black wedge cut out of
+        // a sunset.
+        var roadHaze = ctx.createLinearGradient(0, 0, 0, depth * 0.5)
+        roadHaze.addColorStop(0, ground.rgba(scene.skyLow, 0.60))
+        roadHaze.addColorStop(1, ground.rgba(scene.skyLow, 0))
+        ctx.fillStyle = roadHaze
+        ctx.beginPath()
+        ctx.moveTo(vx, 0)
+        ctx.lineTo(edgeR(yH + scene.layerDepth * 0.5), depth * 0.5)
+        ctx.lineTo(edgeL(yH + scene.layerDepth * 0.5), depth * 0.5)
+        ctx.closePath()
+        ctx.fill()
+
+        // THE START GRID, AND IT IS THE RACE'S. The road under the gantry in
+        // `ui/TrackView.qml` is a wide chequer of six columns and four rows,
+        // cream against the road's own dark. This drew ten columns and two
+        // rows, which at 1920 x 1080 is a thin band of small squares -- a
+        // different marking on a different road from the one the child is on a
+        // second later.
+        var lineY0 = yH + scene.layerDepth * 0.50
+        var lineY1 = yH + scene.layerDepth * 0.66
+        var cols = 6
+        var gridRows = 4
+        for (var row = 0; row < gridRows; row++) {
+          var ya = lineY0 + (lineY1 - lineY0) * row / gridRows
+          var yb = lineY0 + (lineY1 - lineY0) * (row + 1) / gridRows
+          var la = edgeL(ya), ra = edgeR(ya)
+          var lb = edgeL(yb), rb = edgeR(yb)
+          for (var c = 0; c < cols; c++) {
+            if ((c + row) % 2 !== 0)
+              continue
+            ctx.fillStyle = scene.cream
+            ctx.beginPath()
+            ctx.moveTo(la + (ra - la) * c / cols, py(ya))
+            ctx.lineTo(la + (ra - la) * (c + 1) / cols, py(ya))
+            ctx.lineTo(lb + (rb - lb) * (c + 1) / cols, py(yb))
+            ctx.lineTo(lb + (rb - lb) * c / cols, py(yb))
+            ctx.closePath()
+            ctx.fill()
+          }
         }
-      }
-      // the sponsor board above it: period type, hot pink on near-black, the
-      // way the bar's own `quattro` board is. `boardInk`/`boardFill` name the
-      // pair -- see the note beside them for the 3.62:1 this replaces.
-      var boardH = scene.gantryBoardH
-      ctx.fillStyle = scene.boardFill
-      ctx.fillRect(pL, beamY - boardH, pR + postW - pL, boardH)
-      ctx.fillStyle = scene.rim
-      ctx.fillRect(pL, beamY - boardH, pR + postW - pL, 1)
-      ctx.fillStyle = scene.boardInk
-      ctx.font = "bold 9px monospace"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "middle"
-      ctx.fillText("TURBO TABLES", (pL + pR + postW) / 2, beamY - boardH / 2 + 0.5)
 
-      // ------------------------------------------------ the kart's shadow
-      // Long, toward the camera and a little left, because the sun is ahead
-      // and to the right. It widens as it comes, which is what a shadow on a
-      // floor seen from low down does.
-      var fx = W * scene.kartFootX
-      var fy = H * scene.kartFootY
-      var fw = W * scene.kartFootW
-      var len = Math.min(H - 1 - fy, depth * 0.44)
-      var drift = -fw * 0.95
-      var sh = ctx.createLinearGradient(0, fy, 0, fy + len)
-      sh.addColorStop(0, Qt.rgba(0.06, 0.02, 0.05, 0.72))
-      sh.addColorStop(1, Qt.rgba(0.06, 0.02, 0.05, 0.10))
-      ctx.fillStyle = sh
-      ctx.beginPath()
-      ctx.moveTo(fx - fw * 0.60, fy - 4)
-      ctx.lineTo(fx + fw * 0.40, fy - 4)
-      ctx.lineTo(fx + fw * 0.70 + drift, fy + len)
-      ctx.lineTo(fx - fw * 0.90 + drift, fy + len)
-      ctx.closePath()
-      ctx.fill()
+        // ------------------------------------------------ the kart's shadow
+        // Long, toward the camera and a little left, because the sun is ahead
+        // and to the right. It widens as it comes, which is what a shadow on a
+        // floor seen from low down does.
+        var fx = W * scene.kartFootX
+        var fy = H * scene.kartFootY
+        var fw = W * scene.kartFootW
+        var len = Math.min(H - 1 - fy, scene.layerDepth * 0.44)
+        var drift = -fw * 0.95
+        var sh = ctx.createLinearGradient(0, py(fy), 0, py(fy + len))
+        sh.addColorStop(0, Qt.rgba(0.06, 0.02, 0.05, 0.72))
+        sh.addColorStop(1, Qt.rgba(0.06, 0.02, 0.05, 0.10))
+        ctx.fillStyle = sh
+        ctx.beginPath()
+        ctx.moveTo(fx - fw * 0.60, py(fy - 4))
+        ctx.lineTo(fx + fw * 0.40, py(fy - 4))
+        ctx.lineTo(fx + fw * 0.70 + drift, py(fy + len))
+        ctx.lineTo(fx - fw * 0.90 + drift, py(fy + len))
+        ctx.closePath()
+        ctx.fill()
+      }
     }
   }
 
-  onWidthChanged: layer.requestPaint()
-  onHeightChanged: layer.requestPaint()
-  onKartFootXChanged: layer.requestPaint()
-  onKartFootYChanged: layer.requestPaint()
-  onKartFootWChanged: layer.requestPaint()
+  // ====================================================== THE ARCH, ON TOP
+  //
+  // OUTSIDE THE PLANE, and that is deliberate rather than an oversight. The kit
+  // is baked at FINE = 4 times the karts' pixels per world unit, so a prop
+  // drawn at its projected size is already at or above the frame's resolution;
+  // drawing it into a 480 x 270 plane would throw three quarters of that away
+  // and then upscale the remains four times. `ui/TrackView.qml` draws its whole
+  // roadside outside the plane for the same reason.
+  KitProp {
+    id: gantry
+    kind: "gantry"
+    // Two frames at three a second: `Circuit.frameOf`'s "flag" animation, which
+    // is what the same arch does on the track. Held on frame 0 under reduced
+    // motion, because a two-frame alternation is motion and the design's
+    // accessibility section says what to do about motion.
+    viewIndex: scene.clock > 0 ? (Math.floor(scene.clock * 3) % 2) : 0
+    pxPerUnit: scene.gantryPxPerUnit
+    x: scene.frameX((scene.layerEdgeL(scene.layerGantryFootY)
+                     + scene.layerEdgeR(scene.layerGantryFootY)) / 2)
+    y: scene.frameY(scene.layerGantryFootY)
+    z: 2
+    clarity: 1.0
+    // The hour, on the kit, at lap 1 -- `Circuit.TINT`'s own row for a gantry
+    // (`[0.40, 0.70, 0.54, 0.018]`: wash at lap 1, wash at lap 12, key at lap 1,
+    // reach) with `nightfall` at 0. The numbers are the circuit's because how
+    // much of the sun a steel truss takes is a property of the truss, and this
+    // screen is not the place to hold a second opinion about it.
+    washColor: "#7d1a5e"
+    washAmount: 0.40
+    keyColor: "#f0b07a"
+    keyAmount: 0.54
+    keyReach: 0.018
+  }
+
+  onWidthChanged: ground.requestPaint()
+  onHeightChanged: ground.requestPaint()
+  onKartFootXChanged: ground.requestPaint()
+  onKartFootYChanged: ground.requestPaint()
+  onKartFootWChanged: ground.requestPaint()
 }

@@ -189,6 +189,29 @@ FocusScope {
     kartFootX: countdown.kartFootX
     kartFootY: countdown.kartFootY
     kartFootW: 0.27
+    clock: countdown.sceneClock
+  }
+
+  // THE ONLY CLOCK IN THE BACKDROP, AND IT IS DECLARED HERE SO ONE THING CAN
+  // TURN IT OFF.
+  //
+  // Two things in the scene move: the gantry's flags, which flap at the
+  // circuit's own three a second, and the cloud drift. Both read `scene.clock`
+  // and nothing else, so reduced motion is this animation not running -- there
+  // is no second switch anywhere and no way for one of them to keep going.
+  //
+  // It is a `NumberAnimation` on a plain real rather than a `FrameAnimation`
+  // because the two consumers are a modulo and a translation: neither needs the
+  // frame's own timestamp, and a screen that lives for four seconds should not
+  // own a frame driver. Stopped when the screen is not visible, for the reason
+  // written on the ticker above -- hidden work is work the child never sees.
+  property real sceneClock: 0
+  NumberAnimation on sceneClock {
+    running: countdown.visible && !countdown.reducedMotion
+    loops: Animation.Infinite
+    from: 0
+    to: 600
+    duration: 600000
   }
 
   // PIECE C: the car on the line is a cell of its sheet -- the road camera,
@@ -456,21 +479,71 @@ FocusScope {
                                                 + countdown.beatInk.height
                                                 - countdown.beatInk.box / 2)
                                     * (countdown.beatPulse - 1)
-  readonly property int beatPixelSize: countdown.go
-      ? Math.round(countdown.height * 0.24)
-      : Math.max(8, Math.floor((countdown.typeFloorY - countdown.typeCeilingY
-                                - countdown.beatFootDrop)
-                               / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)))
+  // ==================================== THE GO BEAT NOW FITS RATHER THAN SITS
+  //
+  // Both sizes used to be constants -- 0.24 of the frame for the word, 0.19 for
+  // the fact -- and the two of them plus the gap between them happened to fit
+  // above a board that the flat painted gantry put at 51% of the frame. The
+  // kit's arch is a real one: 5.30 world units tall on a 3.80-unit road against
+  // the drawn gantry's 2.2, so at any distance where its baked board is legible
+  // it stands higher in the frame, and at the distance chosen here the board's
+  // top edge is at 42%. Rendered with the two constants: GO's ink ended at 297
+  // and the fact's began at 291, so the word sat ON the fact -- which is the
+  // same defect as the numeral on the board, one object along.
+  //
+  // So the GO beat's two words are FITTED to the band the arch leaves, in the
+  // order the design ranks them:
+  //
+  //   the fact first, and it is floored, not fitted. "The fact is never smaller
+  //   than a tenth of the screen height" is the design's accessibility rule and
+  //   the only hard number in this paragraph. It is capped at the 0.19 it has
+  //   always had, so nothing about a frame with room to spare changes;
+  //   then GO takes what is left, down to the 0.24 it has always had.
+  //
+  // Written this way round because a screen too short for both must not shrink
+  // the thing a child has to READ. If the band ever cannot hold the pair, GO is
+  // what gives -- and `tests/qml/tst_countdown_board.qml` asserts the fact's
+  // tenth at three sizes, so a band that got too tight fails loudly there.
+  readonly property real goGap: countdown.height * 0.015
+  // Everything in the band that is not ink: the two cast shadows with their
+  // keylines, and the air between the word and the fact.
+  readonly property real goBand: countdown.typeFloorY - countdown.typeCeilingY
+                                 - countdown.beatFootDrop - countdown.factFootDrop
+                                 - countdown.goGap
+  // The fact's em box at the design's floor of a tenth of the frame IN INK.
+  readonly property real factFloorEm: countdown.height * 0.105
+                                      / Math.max(0.2, countdown.factInk.height)
+
+  readonly property int beatPixelSize: {
+    if (!countdown.go)
+      return Math.max(8, Math.floor((countdown.typeFloorY - countdown.typeCeilingY
+                                     - countdown.beatFootDrop)
+                                    / Math.max(0.05, countdown.beatInk.height
+                                                     + countdown.beatSwing)))
+    var left = countdown.goBand - countdown.factPixelSize * countdown.factInk.height
+    var fitted = left / Math.max(0.05, countdown.beatInk.height + countdown.beatSwing)
+    return Math.max(8, Math.min(Math.round(countdown.height * 0.24), Math.floor(fitted)))
+  }
   // Place by the ink: the item's top is as far above the ceiling as the ink is
   // below the item's top.
   readonly property int beatY: Math.round(countdown.typeCeilingY
                                           - countdown.beatInk.top * countdown.beatPixelSize)
 
   // The fact is drawn at the size the race draws it -- "never smaller than a
-  // tenth of the screen height", and this is nearly a fifth -- and hangs from
-  // the same floor the numeral respects, so on GO the fact sits above the board
-  // rather than across it.
-  readonly property int factPixelSize: Math.round(countdown.height * 0.19)
+  // tenth of the screen height" -- and hangs from the same floor the numeral
+  // respects, so on GO the fact sits above the board rather than across it.
+  readonly property int factPixelSize: {
+    if (!countdown.go)
+      return Math.round(countdown.height * 0.19)
+    // What is left of the band once GO has had its share, at the ratio the two
+    // constants always stood in (0.24 to 0.19).
+    var share = countdown.goBand
+                / Math.max(0.2, (0.24 / 0.19) * (countdown.beatInk.height
+                                                 + countdown.beatSwing)
+                                + countdown.factInk.height)
+    return Math.max(8, Math.round(Math.max(countdown.factFloorEm,
+                                           Math.min(countdown.height * 0.19, share))))
+  }
   readonly property int factY: Math.round(countdown.typeFloorY - countdown.factFootDrop
                                           - (countdown.factInk.top + countdown.factInk.height)
                                             * countdown.factPixelSize)
@@ -492,8 +565,19 @@ FocusScope {
   readonly property real sunRadiusX: scene.sunRadiusX
   readonly property real sunRadiusY: scene.sunRadiusY
   readonly property real sunTopY: scene.sunTopY
-  readonly property real sunSkylineY: scene.skylineY
-  readonly property int sunCutsAboveSkyline: scene.sunCutsAboveSkyline
+  // The line the hills stand on. It is NOT the skyline: `SunsetSky`'s ridges
+  // rise above it by their own relief, and how far is the sky part's business.
+  // A test walking the sun's centre column stops at the first HILL TONE, which
+  // is why the three of them are republished rather than a row number -- the
+  // round that computed a skyline in this file from a copy of the ridge
+  // arithmetic is the round this file's second sky came from.
+  readonly property real horizonY: scene.horizonYPx
+  readonly property color hillFarTone: scene.hillFar
+  readonly property color hillMidTone: scene.hillMid
+  readonly property color hillNearTone: scene.hillNear
+  readonly property real gantryTopY: scene.gantryTopY
+  readonly property real gantryLeftX: scene.gantryLeftX
+  readonly property real gantryRightX: scene.gantryRightX
   // The disc is a gradient, not one colour: `sunCoreTone` out to 72% of the
   // radius and `sunEdgeTone` at the rim. BOTH are named here because the type
   // has to clear both -- cream is 1.26:1 on the core and 1.83:1 on the edge,
@@ -543,18 +627,60 @@ FocusScope {
       rimTone: countdown.inkRim
     }
 
-    // One pulse per beat, and nothing at all under reduced motion, which the
-    // design's accessibility section asks for by name.
+    // ONE PULSE PER BEAT, AND NOW IT IS ACTUALLY ON THE BEAT.
+    //
+    // This was an infinite loop -- 260 ms of scale, then a pause of
+    // `beatMs - 260` -- started when the screen became visible and never
+    // referred to the clock again. Two things followed from that, and both are
+    // fixed by driving it from the beat instead of alongside it:
+    //
+    //   the picture: the loop and the `Timer` are two clocks, and nothing kept
+    //   them in step. Any latency between them -- a slow first frame, a screen
+    //   shown a moment before its first tick -- put the surge somewhere in the
+    //   middle of a beat, so the numeral swelled while the number was standing
+    //   still and stood still as it changed. "One pulse per beat" is what the
+    //   comment claimed and what nothing enforced;
+    //
+    //   the evidence: `tests/qml/tst_countdown_board.qml`'s picture cases grab
+    //   a handful of frames a few tens of milliseconds apart, and a free
+    //   running pulse put that window at an arbitrary phase. Its own comment
+    //   records ten consecutive grabs reading 425, 93, 425, 425 ... and one
+    //   zero -- half a resampled band matches no exact tone -- and a case that
+    //   passed on this Mac would have failed on another for no reason but
+    //   phase. A pulse tied to the beat is at rest for the rest of the beat, so
+    //   a case that sets a beat and waits out the surge photographs the same
+    //   frame every time, on every machine.
+    //
+    // Nothing at all under reduced motion, which the design's accessibility
+    // section asks for by name.
     transformOrigin: Item.Center
     scale: 1.0
-    SequentialAnimation on scale {
-      running: countdown.visible && !countdown.reducedMotion
-      loops: Animation.Infinite
-      NumberAnimation {
-        from: countdown.beatPulse; to: 1.0
-        duration: 260; easing.type: Easing.OutCubic
+
+    NumberAnimation {
+      id: beatSurge
+      target: beatGlyph
+      property: "scale"
+      from: countdown.beatPulse
+      to: 1.0
+      duration: 260
+      easing.type: Easing.OutCubic
+    }
+    function surge() {
+      if (countdown.reducedMotion || !countdown.visible) {
+        beatSurge.stop()
+        beatGlyph.scale = 1.0
+        return
       }
-      PauseAnimation { duration: Math.max(0, countdown.beatMs - 260) }
+      beatSurge.restart()
+    }
+    // The three places a beat begins: the first one, every one after it, and
+    // the screen coming back. `restart()` from the top each time, so a beat
+    // that arrives while the last surge is still running does not compound.
+    Component.onCompleted: beatGlyph.surge()
+    Connections {
+      target: countdown
+      function onBeatChanged() { beatGlyph.surge() }
+      function onVisibleChanged() { beatGlyph.surge() }
     }
   }
 
