@@ -108,20 +108,46 @@ jobs:
   # times out of four in five minutes.
   #
   # WHAT IS RUN HERE, AND WHAT IS NOT. The mouse suite and the parity walk on
-  # every screen: 34 cases and seven walks, which is every assertion the piece
-  # rests on. The other nine QML files -- the track-view effects, the countdown
-  # board, the car sprites -- are NOT run here on purpose: forty-four of their
-  # cases compare rendered pixels against numbers tuned on the maintainer's Mac,
-  # and a Linux runner rasterises with llvmpipe. Turning those red on a renderer
-  # difference would teach the next builder to ignore this job, which is the
-  # failure mode that matters more than the coverage. They stay a hand run until
-  # somebody has compared the two renderers deliberately.
+  # every screen and on two states a screen has to be DRIVEN into: 42 cases and
+  # nine walks, which is every assertion the piece rests on. The other nine
+  # QML files -- the track-view effects, the countdown board, the car sprites --
+  # are NOT run here on purpose: forty-four of their cases compare rendered
+  # pixels against numbers tuned on the maintainer's Mac, and a Linux runner
+  # rasterises with llvmpipe. Turning those red on a renderer difference would
+  # teach the next builder to ignore this job, which is the failure mode that
+  # matters more than the coverage. They stay a hand run until somebody has
+  # compared the two renderers deliberately.
   #
-  # THE ONE THING THIS MAC COULD NOT VERIFY is the package list: there is no
-  # GitHub runner here to try it on, and no Linux at all outside the plugin VM.
-  # The modules are the six the tree imports (QtQml, QtQuick, QtQuick.Window,
-  # QtQuick.Shapes, QtQuick.Controls.impl, QtTest) plus the binary. If the first
-  # run fails in `Install Qt 6 QML`, the fix is a package name and nothing else.
+  # ROUND 5 -- AND THE SAME ARGUMENT, APPLIED TO THIS JOB. A critic asked why the
+  # renderer exclusion above was not applied to the mouse suite, which does grab
+  # frames. Because the two are different comparisons. Those nine files compare a
+  # frame against a NUMBER somebody wrote down on this Mac; the four cases in the
+  # mouse suite that rasterise (`test_20`, `test_21`, `test_23`, `test_24`)
+  # compare a frame against ANOTHER FRAME OF THE SAME SCREEN taken on the same
+  # machine seconds apart, with only the pointer moved. A different font, a
+  # different rasteriser and a different anti-aliaser all appear in both halves
+  # and cancel. The one absolute number among them is `test_24`'s "more than 50
+  # pixels differ between a hover ring and a focus ring", which is a ring 4 px
+  # wide around a 400 x 120 box on any renderer.
+  #
+  # ROUND 5 -- THE JOB COULD NOT HAVE RUN, AND NOT FOR THE REASON ROUND 4 GUESSED.
+  # Round 4 wrote: "If the first run fails in `Install Qt 6 QML`, the fix is a
+  # package name and nothing else." A critic checked every package against the
+  # Ubuntu noble file lists and it is wrong twice over. All ten install; the RUN
+  # steps were the problem.
+  #
+  #   * `qt6-declarative-dev-tools` puts `qmltestrunner` at
+  #     `/usr/lib/qt6/bin/qmltestrunner`, NOT on `PATH`. `/usr/bin/qmltestrunner`
+  #     on Ubuntu comes from `qtchooser`, which without a configured Qt 6 conf
+  #     fails with "could not find a Qt installation".
+  #   * That package ships NO `qml` binary at all. The Qt 6 launcher is in
+  #     `qml-qt6`, which was not installed; the `qml` package on noble is Qt 5.
+  #
+  # So: the missing package is added, the directory is put on `PATH`, and every
+  # run step names the binary by its full path anyway. There is still no Linux on
+  # this Mac to try it on, so the step below LOOKS FOR the two binaries first and
+  # fails with the `dpkg -L` listing and the remedy rather than with
+  # "command not found" three steps later.
   qml:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -135,6 +161,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             qt6-declarative-dev-tools \
+            qml-qt6 \
             qml6-module-qtqml \
             qml6-module-qtqml-workerscript \
             qml6-module-qtquick \
@@ -144,6 +171,34 @@ jobs:
             qml6-module-qtquick-controls \
             qml6-module-qttest \
             libgl1 libegl1
+
+      # ROUND 5. FIND THE BINARIES BEFORE ANYTHING NEEDS THEM, and say exactly
+      # what is missing if they are not there. `qmltestrunner` and the Qt 6 `qml`
+      # launcher both live in `/usr/lib/qt6/bin` on Ubuntu and neither is on
+      # `PATH`; a job that discovers that in its third step discovers it as
+      # "command not found", which is what sent round 4 looking at the package
+      # list instead of at the paths.
+      - name: Locate the Qt 6 binaries
+        run: |
+          set -euo pipefail
+          echo "/usr/lib/qt6/bin" >> "$GITHUB_PATH"
+          echo "--- /usr/lib/qt6/bin"
+          ls -1 /usr/lib/qt6/bin || true
+          if [ ! -x /usr/lib/qt6/bin/qmltestrunner ]; then
+            echo "qmltestrunner is not at /usr/lib/qt6/bin/qmltestrunner."
+            echo "It ships in qt6-declarative-dev-tools; that package contains:"
+            dpkg -L qt6-declarative-dev-tools | grep '/bin/' || true
+            exit 1
+          fi
+          if [ ! -x /usr/lib/qt6/bin/qml ]; then
+            echo "The Qt 6 qml launcher is not at /usr/lib/qt6/bin/qml."
+            echo "It ships in qml-qt6, NOT in qt6-declarative-dev-tools and NOT in"
+            echo "the qml package, which on noble is Qt 5. qml-qt6 contains:"
+            dpkg -L qml-qt6 | grep '/bin/' || true
+            exit 1
+          fi
+          /usr/lib/qt6/bin/qmltestrunner -help >/dev/null 2>&1 \
+            || echo "note: qmltestrunner -help returned non-zero; the run steps will say more"
 
       # Headless, and stated rather than assumed: there is no display on a
       # runner, and the maintainer's own rule on his Mac is that a Qt process
@@ -155,7 +210,7 @@ jobs:
           QT_QUICK_BACKEND: software
         run: |
           set -euo pipefail
-          qmltestrunner -platform offscreen -import dev/imports \
+          /usr/lib/qt6/bin/qmltestrunner -platform offscreen -import dev/imports \
             -input tests/qml/tst_mouse_parity.qml
 
       # The parity walk itself, on every screen the game has. It exits non-zero
@@ -171,9 +226,49 @@ jobs:
           set -euo pipefail
           for screen in Game Garage Settings Picker Countdown Race Results; do
             echo "--- $screen"
-            qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+            /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
               --screen "$screen" --print-controls
           done
+
+      # ROUND 5. AND THE TWO STATES A SCREEN HAS TO BE DRIVEN INTO.
+      #
+      # A critic named both as walked by nothing at all, and he was right about
+      # both.
+      #
+      #   `--screen Race` opens with no hand, so CI's Race walk never saw a card,
+      #   an aim chip or the panel's footer -- the most interesting controls on
+      #   the busiest screen in the game were in no table. Measured on this Mac:
+      #   the bare walk finds 7 click targets and the hand walk finds 10, and the
+      #   three it adds are the three cards.
+      #
+      #   `--screen Settings` opens on a readable save file. The screen a PARENT
+      #   meets when the file is corrupt is the one with `START A NEW SAVE FILE`
+      #   live on it, and that is the only way out of a quarantined save. It was
+      #   in the plain walk's table all along -- with `enabled` reading `no` and a
+      #   height of 0. Measured: `--quarantine` turns that row live and takes the
+      #   screen from 8 declared controls and 8 focus stops to 9 and 9.
+      #
+      # The third state the critic named -- a race with a card CHOSEN -- is not
+      # here, and not because it does not matter. `--do click:card 1` cannot
+      # reach it: the deal slides the cards up over 570 ms of the effect clock and
+      # a drive step is one turn of the event loop, so the click lands before the
+      # cards exist ("NO SUCH CLICK TARGET", driven here). It is walked by
+      # `tests/qml/tst_mouse_parity.qml`'s `Picker, card chosen` state, which
+      # deals a hand by answering twelve facts, and by `test_31` and `test_36` in
+      # a real race. Making the harness wait for a deal is the harness's fix and
+      # is written up in the round's report rather than faked here.
+      - name: The parity walk, in the states a screen must be driven into
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          echo "--- Settings, quarantined save file"
+          /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+            --screen Settings --quarantine --print-controls
+          echo "--- Race, a hand dealt"
+          /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+            --screen Race --warmup 11 --inject handDealt --print-controls
 
       - name: Nothing was installed into the checkout
         if: always()
