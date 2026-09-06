@@ -736,6 +736,20 @@ FocusScope {
 
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_1 || event.key === Qt.Key_2 || event.key === Qt.Key_3) {
+      // ROUND 5 -- IT ARMS WHAT THE CHIP ARMS. `1 2 3  CHOOSE A CARD` declares
+      // `handFooter` because choosing a card REPLACES THE FOOTER at the pixel
+      // the child pressed: `⏎  USE IT` and `ESC  BACK` take its place, and the
+      // first of those spends the whole hand. The key did the same thing and
+      // armed nothing, so a key and then a click on the footer inside one
+      // interval spent a hand a click twice could not.
+      //
+      // A critic found this by extending `test_29`'s fingerprint with
+      // `Actions.armed`; the fingerprint carries it now, so this cannot drift
+      // apart again silently. Choosing is still not GUARDED against itself --
+      // three presses choose three times, which is the maintainer's other
+      // standing complaint pointing the right way -- because `handFooter` is
+      // armed by this press and not consulted by it.
+      Actions.arm(["handFooter"], "key")
       picker.choose(event.key - Qt.Key_1)
       // Deliberately NOT accepted: the same press is also the digit 1, 2 or 3,
       // and the screen behind has to see it. In the game the race screen sees
@@ -752,8 +766,19 @@ FocusScope {
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
       // A half-typed answer owns Enter. Only an empty field lets Enter spend a
       // card, which is what stops a submit from costing a hand.
-      if (picker.enterSpends && picker.chosen >= 0)
+      //
+      // ROUND 5. Spending the hand is the `⏎  USE IT` chip's action, and that
+      // chip declares `handFooter`: it replaces itself the instant it acts. The
+      // key that prints on it belongs to the same action, so it takes the same
+      // name -- a click on the chip and then this key inside one interval used
+      // to spend a hand that two clicks could not.
+      if (picker.enterSpends && picker.chosen >= 0) {
+        if (!Actions.take(["handFooter"], "key")) {
+          event.accepted = true
+          return
+        }
         event.accepted = picker.confirm()
+      }
       return
     }
     if (event.key === Qt.Key_Escape) {

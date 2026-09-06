@@ -185,6 +185,26 @@ Item {
     seed: 42
   }
 
+  // ROUND 5 -- THE FLOW ITSELF, WHICH NOTHING HAD EVER CLICKED.
+  //
+  // A critic counted it: `ui/Game.qml` contributes ZERO to every gate in this
+  // file. It is not in `states()`, it was never instantiated here, and its one
+  // own control -- the `S  SETTINGS AND RESETS` chip, which is the ONLY route in
+  // the game to the three save-file resets -- was crossed by nothing. The CI
+  // parity walk sees it statically (it has a key, it is not a mouse-only path)
+  // and no mouse event had ever been posted at it.
+  //
+  // It is not in `states()` on purpose: Game holds its own Garage and loads the
+  // other five screens itself, so putting it in the state list would cross
+  // twenty controls this file already crosses on the screens themselves, for
+  // about nine seconds, and would need `resetScreens()` to learn how to put the
+  // flow back. What is missing is one control, so one case drives that control.
+  Game {
+    id: game
+    anchors.fill: parent
+    visible: root.showing === "game"
+  }
+
   property int raceLeaves: 0
   Connections {
     target: race
@@ -727,6 +747,25 @@ Item {
       var checked = 0
       var stepped = 0
       var gaps = []
+      // ROUND 5 -- A CROSSING THAT PRESSES NOTHING IS NOT A CROSSING.
+      //
+      // A critic instrumented the 63 crossings and found five where the route is
+      // `[]` -- `Race::answer box`, `Garage::Kart body` and `Garage::Kart number`
+      // (all `focusOnly`), `Garage::paint RED` and `Picker,aiming::aim BOLT`
+      // (already selected). `armKeyboard()` puts the keyboard on the target's
+      // stop before BOTH routes, so for these two the "two routes" are one no-op
+      // compared against itself. They passed, and they were counted toward "63
+      // controls, zero gaps".
+      //
+      // They are counted here as what they are. The claim they carry is real but
+      // it is a different one -- the keyboard can stand where the click landed,
+      // which `test_11` drives -- so they are printed, subtracted from the
+      // coverage number below, and the floor is on the crossings that actually
+      // pressed something.
+      var vacuous = []
+      // How many crossings actually compared a guard state. A floor under it, so
+      // this check cannot quietly stop covering anything.
+      var armedChecked = 0
       for (var s = 0; s < list.length; s++) {
         suite.freshState(list[s])
         var count = suite.clickTargetsIn(list[s].item).length
@@ -746,6 +785,15 @@ Item {
             gaps.push(list[s].name + ": \"" + label + "\" -- " + hit.keyGap)
             continue
           }
+          // ROUND 5. READ BEFORE THE PRESSES, because a footer chip is a
+          // `Repeater` delegate over a model the press itself rebuilds: choosing
+          // a card replaces `1 2 3  CHOOSE A CARD` with two other chips, the
+          // delegate is destroyed, and `hit.guards` read afterwards is
+          // `undefined` on an item that no longer exists. Asking the question
+          // after the answer has been thrown away is how a check covers three
+          // controls instead of eight and still reports a number.
+          var namesAGuard = hit.guards !== null && hit.guards !== undefined
+                            && hit.guards.length > 0
           var route = suite.routeFor(hit)
           // A route of NO presses is a real answer and is only ever a declared
           // one: the swatch whose paint is already on, the answer already armed,
@@ -759,10 +807,20 @@ Item {
                  + " Either name a key, or declare `keyGap` with the reason.")
           if (route.length > 1)
             stepped += 1
+          if (route.length === 0)
+            vacuous.push(list[s].name + ": \"" + label + "\"")
           suite.armKeyboard(screen, hit)
           var at = suite.centreOf(hit)
           mouseMove(root, at.x, at.y)
           mouseClick(root, at.x, at.y)
+          // ROUND 5. THE GUARD STATE, READ AT ONCE, BECAUSE IT EXPIRES.
+          //
+          // The fingerprint below cannot carry this: it is read repeatedly until
+          // two reads agree, and `Actions.armed` empties itself 400 ms after the
+          // press, so by the time the screen has settled every state has the
+          // same empty guard and the comparison would be blind by construction.
+          // Read here, one turn after the press, before anything can expire.
+          var armedByClick = suite.armedNames()
           wait(1)
           mouseMove(root, 0, 0)
           suite.settleFrame()
@@ -782,10 +840,47 @@ Item {
                    + route[k] + "\", which this game cannot press")
             keyClick(code)
           }
+          var armedByKey = suite.armedNames()
           mouseMove(root, 0, 0)
           suite.settleFrame()
           var afterKey = suite.settledFingerprint(screen)
           checked += 1
+
+          // ROUND 5 -- AND THE GUARD THEY LEAVE BEHIND IS PART OF "THE SAME
+          // THING".
+          //
+          // A critic instrumented this case with a richer fingerprint and found
+          // three controls the shipped comparison passed and should not have,
+          // all of them on the hand panel: the click armed `handFooter` and the
+          // key armed nothing, or armed `escape` alone. Then he drove the
+          // consequence -- Escape in a race, then a click on the footer 16 ms
+          // later, choosing card 1 -- and it was real. The comparison was
+          // structurally blind to the one thing round four built.
+          //
+          // It is not blind now. Two routes that leave different guards are two
+          // routes that refuse the next press differently, which is a difference
+          // a child meets and no other line of this fingerprint can see.
+          //
+          // ASKED OF THE CONTROLS THAT NAME A GUARD, AND THE REASON IS NOT
+          // CONVENIENCE. A choosing control declares none on purpose -- a child
+          // hammering a card gets three choices, which is the maintainer's other
+          // standing complaint pointing the right way -- and a card and the
+          // footer chip that names the same key are two controls doing one
+          // thing from two pixels: the chip is replaced by `⏎  USE IT` where it
+          // stood and the card is not, so ONE key cannot leave the same guard as
+          // both of them. What the piece claims, and what is asked here, is that
+          // a control which NAMES a guard leaves it in the same state whichever
+          // hand pressed it.
+          if (namesAGuard)
+            armedChecked += 1
+          if (namesAGuard)
+            compare(armedByKey, armedByClick,
+                  list[s].name + ": the click target \"" + label + "\" and the key \""
+                  + keySpec + "\" both act, and they leave different actions armed --"
+                  + " the click armed " + armedByClick + " and the key armed "
+                  + armedByKey + ". The next press inside 400 ms is therefore refused"
+                  + " after one route and taken after the other, which is the defect"
+                  + " with the guard rather than with the action.")
 
           // `verify` rather than `compare`, because a fingerprint is thousands
           // of characters and two of them printed side by side is not a message
@@ -801,8 +896,11 @@ Item {
                   + " green.")
         }
       }
-      verify(checked >= 40, "only " + checked + " controls had their key column crossed"
-             + " over against their click; the walk is not seeing the tree")
+      verify(checked - vacuous.length >= 40,
+             "only " + (checked - vacuous.length) + " controls had their key column"
+             + " crossed over against their click by a press that actually happened ("
+             + checked + " crossings, " + vacuous.length + " of them with an empty key"
+             + " route); the walk is not seeing the tree")
       verify(stepped >= 8, "not one control declared a stepping key route, so the"
              + " swatches and the aim tags -- the controls whose keys step through a"
              + " set a click lands in -- were not really crossed over")
@@ -833,6 +931,11 @@ Item {
              + " round three: every button's key set to Escape, 27 tests green.")
       if (gaps.length > 0)
         console.log("key column, declared gaps:\n  " + gaps.join("\n  "))
+      verify(armedChecked >= 8,
+             "only " + armedChecked + " of the crossings were on a control that names a"
+             + " guard, so the guard-state comparison above covered almost nothing")
+      console.log("key column, crossings that pressed nothing (" + vacuous.length
+                  + " of " + checked + "):\n  " + vacuous.join("\n  "))
     }
 
     /**
@@ -971,6 +1074,21 @@ Item {
      * crew), so the screen's own catcher gets the keyboard and the click does
      * not move it either.
      */
+    /**
+     * The action names armed right now, in a stable order.
+     *
+     * Sorted because `Actions.armed` is a copy of whatever list the control
+     * declared, and two routes that arm the same pair in the other order are the
+     * same guard state and must not read as a difference.
+     */
+    function armedNames() {
+      var out = []
+      for (var i = 0; i < Actions.armed.length; i++)
+        out.push(String(Actions.armed[i]))
+      out.sort()
+      return JSON.stringify(out)
+    }
+
     function armKeyboard(screen, hit) {
       screen.forceActiveFocus()
       if (screen.focusTarget)
@@ -2134,6 +2252,432 @@ Item {
               + " footer redraws as `1 2 3  CHOOSE A CARD` under the pointer between the"
               + " two presses.")
       compare(root.raceLeaves, 0, "the double-click on the chip left the race")
+    }
+
+    // ==================================================================
+    // ROUND 5. THE STATE THE CROSSOVER CANNOT SEED, DRIVEN.
+    // ==================================================================
+    //
+    // `test_29` crosses a click against its key on 63 controls and could not
+    // catch the worst divergence in the game, because the state it lives in
+    // cannot be reached by clicking a label: the REVEAL WINDOW. A second wrong
+    // answer on one fact puts that fact's answer on the screen for 1500 ms, the
+    // engine has already moved the deck on, and the field the child was typing
+    // into is gone -- so every keystroke they make in that window is held in
+    // `revealQueue` and replayed when the field comes back.
+    //
+    // In that window `H` cleared the queue and a click on `H  PIT CREW` did not.
+    // A critic measured it: `revealQueue = []` against `[7, 5]`, and those two
+    // digits were then typed into the NEXT fact for the child. A wrong answer,
+    // on the following question, for clicking the help line instead of pressing
+    // the key that says the same thing.
+    //
+    // The state is seeded by ANSWERING WRONG TWICE, in real key events, which is
+    // the only way a child reaches it either. The two routes are driven on two
+    // consecutive reveal windows of one race, so nothing about the pair is
+    // arranged except which hand made the press.
+    function wrongAnswerOnce() {
+      // Every digit of the right answer, changed. 8 for anything that is not an
+      // 8 and 7 for an 8, so the string can never come out equal to the one it
+      // was built from and the deck cannot make this loop accidentally correct.
+      var correct = String(Engine.factAnswer(race.human.currentFact))
+      for (var i = 0; i < correct.length; i++)
+        keyClick(correct.charAt(i) === "8" ? Qt.Key_7 : Qt.Key_8)
+      keyClick(Qt.Key_Return)
+    }
+
+    function intoRevealWindow() {
+      suite.wrongAnswerOnce()
+      verify(!race.holdsForReveal(),
+             "one wrong answer already opened the reveal window; this race is not the"
+             + " two-strikes mode this case is written against")
+      suite.wrongAnswerOnce()
+      verify(race.holdsForReveal(),
+             "two wrong answers on one fact did not open the reveal window, so the"
+             + " state this case is about was never entered")
+    }
+
+    function test_35_the_pit_crew_drops_the_queued_digits_from_either_hand() {
+      root.showing = "race"
+      race.rivals = null
+      race.forceActiveFocus()
+      suite.settleFrame()
+      verify(race.focusTarget.activeFocus,
+             "the race screen's key catcher lost active focus, so nothing below this"
+             + " line is a statement about anything. Run this spec headless.")
+
+      // ------------------------------------------------------- the key
+      Actions.clear()
+      suite.intoRevealWindow()
+      keyClick(Qt.Key_7)
+      keyClick(Qt.Key_5)
+      compare(race.revealQueue.length, 2,
+              "two digits typed at a revealed answer were not held for the field")
+      var shownBefore = race.state.racers[0].pitCrewCount
+      keyClick(Qt.Key_H)
+      compare(race.state.racers[0].pitCrewCount - shownBefore, 1,
+              "the H key did not show an answer")
+      compare(race.revealQueue.length, 0,
+              "the H key left " + JSON.stringify(race.revealQueue) + " queued")
+      // The pit crew's own 1200 ms reveal, out of the way, so the next two
+      // answers are typed at a field that is back.
+      wait(1300)
+
+      // ------------------------------------------------------- the click
+      Actions.clear()
+      suite.intoRevealWindow()
+      keyClick(Qt.Key_7)
+      keyClick(Qt.Key_5)
+      compare(race.revealQueue.length, 2,
+              "two digits typed at a revealed answer were not held for the field")
+      var pit = suite.targetNamed(race, "Pit crew")
+      verify(pit !== null, "the race prints no pit crew line to click")
+      var pitAt = suite.centreOf(pit)
+      var shownBeforeClick = race.state.racers[0].pitCrewCount
+      mouseMove(root, pitAt.x, pitAt.y)
+      mouseClick(root, pitAt.x, pitAt.y)
+      compare(race.state.racers[0].pitCrewCount - shownBeforeClick, 1,
+              "the click on `H  PIT CREW` did not show an answer")
+      compare(race.revealQueue.length, 0,
+              "a click on `H  PIT CREW` left " + JSON.stringify(race.revealQueue)
+              + " queued while the `H` key drops the same digits. Those digits are"
+              + " replayed into the NEXT fact, so a child who clicks for help gets a"
+              + " wrong answer on the following question and the child who pressed the"
+              + " key does not. The two routes call one function"
+              + " (`race.pitCrewRequested()`) for exactly this reason; the version of"
+              + " this claim that was written as a comment above the click handler was"
+              + " false for a whole round.")
+      mouseMove(root, 0, 0)
+      wait(1300)
+    }
+
+    // ==================================================================
+    // ROUND 5. THE BACK-OUT GESTURE, FROM EITHER HAND, ON THE FOOTER THAT
+    // REDRAWS UNDER THE POINTER.
+    // ==================================================================
+    //
+    // `test_31` walks D1, D2, D3 and D4 and stops one route short. D3 is a
+    // double-click on the hand panel's `ESC  BACK` chip: the first press puts
+    // the card back, the footer redraws as `1 2 3  CHOOSE A CARD` at the same
+    // pixel, and the second press chooses card 1. A critic drove the same defect
+    // with the FIRST press from the keyboard -- Escape, then a click on the
+    // footer 16 ms later -- and it still chose a card, because the key armed
+    // `escape` and the chip that took the pixel is `handFooter`.
+    //
+    // Which hand performed a gesture cannot change which names the gesture
+    // belongs to, so both Escape handlers and both ESC controls read the pair
+    // from `picker.backOutGuards` now. This is that route, driven.
+    function test_36_a_key_that_redraws_the_footer_guards_the_footer() {
+      root.showing = "race"
+      race.rivals = null
+      race.forceActiveFocus()
+      suite.settleFrame()
+      suite.dealRaceHand()
+
+      Actions.clear()
+      mouseMove(root, 0, 0)
+      suite.clickNamed(race.handPanel, "card 1")
+      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
+
+      // Where the chip is NOW, which is where the footer will be after the key.
+      var chip = suite.targetNamed(race.handPanel, "put the card back")
+      verify(chip !== null, "the hand panel prints no `ESC  BACK` chip")
+      var chipAt = suite.centreOf(chip)
+
+      root.raceLeaves = 0
+      keyClick(Qt.Key_Escape)
+      compare(race.handPanel.chosen, -1, "Escape did not put the card back")
+      mouseMove(root, chipAt.x, chipAt.y)
+      mouseClick(root, chipAt.x, chipAt.y)
+      compare(race.handPanel.chosen, -1,
+              "an Escape put the card back and a CLICK on the same pixel 16 ms later"
+              + " chose card " + (race.handPanel.chosen + 1) + ". The footer redraws as"
+              + " `1 2 3  CHOOSE A CARD` where the chip the child was looking at stood,"
+              + " so the pointer's half of one gesture landed on the control that took"
+              + " its place. This is `test_31`'s D3 with the first press from the"
+              + " keyboard.")
+      compare(root.raceLeaves, 0, "the click after the Escape left the race")
+      mouseMove(root, 0, 0)
+    }
+
+    // ==================================================================
+    // ROUND 5. BOTH ORDERS, FOR EVERY GUARDED ACTION IN THE GAME.
+    // ==================================================================
+    //
+    // The cases above and in round four each drive one pair. This one holds the
+    // SET closed: every guard name any control in any state declares has to be
+    // named in the table below, with all four orders accounted for -- and a
+    // guard name added tomorrow fails this case tomorrow until somebody says
+    // where its two cross-route orders are driven and what its key->key pair
+    // does. That is the enumeration idiom this piece is built on, applied to the
+    // thing round four got wrong by writing a rule and testing one instance of
+    // it.
+    //
+    // KEY -> KEY IS "not guarded" ON PURPOSE, in every row. See
+    // `ui/parts/Actions.qml`: three of the four pairs are one gesture producing
+    // two presses; two presses of one key are two presses.
+    readonly property var guardCoverage: ({
+      "escape": {
+        "clickThenKey": "test_28 -- click the race's ESC line, then Escape",
+        "keyThenClick": "test_31 D4 -- Escape, then click the race's ESC line",
+        "clickThenClick": "test_31 D3 -- double-click the hand panel's ESC chip",
+        "keyThenKey": "not guarded; tst_race_keys test_13 asserts the second Escape"
+                      + " leaves the race"
+      },
+      "handFooter": {
+        "clickThenKey": "test_18 -- the footer chip, then the key it prints",
+        "keyThenClick": "test_36 -- Escape, then a click on the redrawn footer",
+        "clickThenClick": "test_31 D3 -- the chip that replaces itself",
+        "keyThenKey": "not guarded; a second Escape is a second deliberate press"
+      },
+      "pitCrew": {
+        "clickThenKey": "test_37 -- click `H  PIT CREW`, then H",
+        "keyThenClick": "test_37 -- H, then click `H  PIT CREW`",
+        "clickThenClick": "test_31 D1 -- three clicks 16 ms apart",
+        "keyThenKey": "not guarded; test_37 shows two deliberate H presses showing"
+                      + " two answers"
+      },
+      "confirmAnswer": {
+        "clickThenKey": "test_38 -- and it CANNOT refuse: answering closes the"
+                        + " question, so the key reaches the screen behind and never"
+                        + " reaches the modal's handler. What test_38 holds is that"
+                        + " both routes arm the same name.",
+        "keyThenClick": "test_38 -- and the click is eaten by the extent's tail"
+                        + " (test_25, test_34), not by this guard",
+        "clickThenClick": "test_25 -- three clicks on the question's own answer line",
+        "keyThenKey": "not guarded; and it re-opens the question, which is measured"
+                      + " and reported rather than guarded -- see test_38"
+      }
+    })
+
+    function test_39_every_guarded_action_has_both_orders_written_down() {
+      var list = suite.states()
+      var found = []
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var targets = suite.clickTargetsIn(list[s].item)
+        for (var i = 0; i < targets.length; i++) {
+          var guards = targets[i].guards
+          for (var g = 0; guards && g < guards.length; g++) {
+            var name = String(guards[g])
+            if (found.indexOf(name) < 0)
+              found.push(name)
+          }
+        }
+      }
+      verify(found.length >= 4, "only " + found.length + " guard names were found"
+             + " across every state; the walk is not seeing the tree")
+      for (var f = 0; f < found.length; f++) {
+        var row = suite.guardCoverage[found[f]]
+        verify(row !== undefined,
+               "the action \"" + found[f] + "\" is guarded somewhere in the game and"
+               + " this file does not say where its four press-pairs are driven. A"
+               + " guard is a rule about two presses; a guard with one order walked is"
+               + " the hole round four shipped, four times over.")
+        verify(String(row.clickThenKey).length > 0 && String(row.keyThenClick).length > 0
+               && String(row.clickThenClick).length > 0 && String(row.keyThenKey).length > 0,
+               "the action \"" + found[f] + "\" names an empty coverage row")
+      }
+      console.log("guarded actions, all four orders accounted for: "
+                  + JSON.stringify(found))
+    }
+
+    // ==================================================================
+    // ROUND 5. THE PIT CREW, BOTH WAYS ROUND, AND TWICE ON PURPOSE.
+    // ==================================================================
+    //
+    // `test_31` D1 drives click -> click on the one control in this game that
+    // spends something and stays exactly where it is. The two cross-route orders
+    // were never driven, and they are the ones a child produces by pressing the
+    // key their hand is already on and then reaching for the line that prints
+    // it. The last third is the round-four revert, on the control where it costs
+    // most: two DELIBERATE H presses show two answers, because a child who
+    // presses H twice asked twice.
+    function test_37_the_pit_crew_is_refused_across_hands_and_not_within_one() {
+      root.showing = "race"
+      race.rivals = null
+      race.forceActiveFocus()
+      suite.settleFrame()
+      var pit = suite.targetNamed(race, "Pit crew")
+      verify(pit !== null, "the race prints no pit crew line to click")
+      var at = suite.centreOf(pit)
+
+      // ------------------------------------------------- click, then the key
+      Actions.clear()
+      mouseMove(root, at.x, at.y)
+      var shown = race.state.racers[0].pitCrewCount
+      mouseClick(root, at.x, at.y)
+      keyClick(Qt.Key_H)
+      compare(race.state.racers[0].pitCrewCount - shown, 1,
+              "a click on `H  PIT CREW` and the H key 16 ms later showed two answers."
+              + " Each one is a question the child does not get back and the results"
+              + " screen prints the total as ANSWERS SHOWN.")
+      mouseMove(root, 0, 0)
+      wait(1300)
+
+      // ------------------------------------------------- the key, then a click
+      Actions.clear()
+      shown = race.state.racers[0].pitCrewCount
+      keyClick(Qt.Key_H)
+      mouseMove(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+      compare(race.state.racers[0].pitCrewCount - shown, 1,
+              "the H key and a click on the line that prints it, 16 ms apart, showed"
+              + " two answers. The key armed nothing in round three and this is the"
+              + " order `test_31` did not walk for this control.")
+      mouseMove(root, 0, 0)
+      wait(1300)
+
+      // ------------------------------------------------- and twice, on purpose
+      //
+      // ROUND 5, AND IT IS THE REVERT. Round four refused this second press.
+      // Two presses of one key are two presses: there is no pixel under the
+      // child that changed, nothing walked under their finger, and a press that
+      // silently does nothing is the maintainer's own standing complaint.
+      Actions.clear()
+      shown = race.state.racers[0].pitCrewCount
+      keyClick(Qt.Key_H)
+      wait(1300)
+      keyClick(Qt.Key_H)
+      compare(race.state.racers[0].pitCrewCount - shown, 2,
+              "two deliberate H presses showed one answer. A child who asks twice"
+              + " asked twice.")
+      wait(1300)
+    }
+
+    // ==================================================================
+    // ROUND 5. THE ONE MODAL: BOTH ROUTES LEAVE THE SAME GUARD STATE.
+    // ==================================================================
+    //
+    // This is the mutation a critic planted and the suite did not kill: delete
+    // `Actions.take(["confirmAnswer"])` from `ui/parts/Confirm.qml`'s key handler
+    // and 275 cases stay green.
+    //
+    // WHAT IS TRUE ABOUT IT, MEASURED RATHER THAN ASSUMED. That line cannot
+    // REFUSE anything, and saying otherwise is how round four's comment above it
+    // got away with being wrong for a round. Both orders were driven on the
+    // shipped build:
+    //
+    //   click the `⏎  ANSWER` line, then Enter 16 ms later
+    //       -> the question is already closed, so the key reaches the SETTINGS
+    //          ROW that focus returned to, and re-opens the question. It never
+    //          reaches this handler at all.
+    //   Enter, then a click 16 ms later
+    //       -> the click is eaten by the question's extent, which goes on
+    //          swallowing for one double-click interval (test_25, test_34).
+    //
+    // So what the line is for is the OTHER half of the piece's claim: a key and
+    // a click that perform one action leave the game in the same state, guard
+    // included. That is exactly the blind spot a critic found in `test_29` --
+    // whose fingerprint recorded text, boxes and signals and not `Actions.armed`
+    // -- and it is what this case asserts.
+    //
+    // THE RE-OPEN IS REAL AND IS NOT FIXED HERE. Answering the question and
+    // pressing Enter again inside 400 ms re-opens it, from a click and from a
+    // key alike, because focus returns to the row that asked. It is not a
+    // `confirmAnswer` repeat -- it is the settings row's own action, arriving at
+    // a control that moved under the keyboard rather than under the pointer --
+    // and guarding the key->key half of it is the round-four rule this round is
+    // reverting. It is written up in the round's report for the maintainer, with
+    // the note that the fix belongs in where focus lands, not in a lockout.
+    function test_38_answering_the_question_arms_the_same_action_from_either_hand() {
+      root.showing = "settings"
+      settings.forceActiveFocus()
+      suite.settleFrame()
+
+      // ------------------------------------------------------- the click
+      suite.clickNamed(settings, "RESET GARAGE RECORDS")
+      suite.settleFrame()
+      verify(settings.confirming, "the reset question did not open")
+      var answer = suite.targetNamed(settings, "Give the armed answer")
+      verify(answer !== null, "the question prints no `⏎  ANSWER` line to click")
+      var at = suite.centreOf(answer)
+      Actions.clear()
+      mouseMove(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+      verify(!settings.confirming, "the click did not answer the question")
+      var armedByClick = JSON.stringify(Actions.armed)
+      compare(armedByClick, "[\"confirmAnswer\"]",
+              "answering the question with the mouse armed " + armedByClick)
+      compare(Actions.armedRoute, "click", "the click did not record its own route")
+
+      mouseMove(root, 0, 0)
+      suite.waitOutTheModalTail()
+      Actions.clear()
+
+      // ------------------------------------------------------- the key
+      suite.clickNamed(settings, "RESET GARAGE RECORDS")
+      suite.settleFrame()
+      verify(settings.confirming, "the reset question did not open a second time")
+      Actions.clear()
+      keyClick(Qt.Key_Return)
+      verify(!settings.confirming, "Enter did not answer the question")
+      var armedByKey = JSON.stringify(Actions.armed)
+      compare(armedByKey, armedByClick,
+              "Enter answered the question and armed " + armedByKey + " where the click"
+              + " on the same question armed " + armedByClick + ". The two routes of one"
+              + " action have to leave the game in the same guard state, or a press"
+              + " arriving from the other hand is refused after one of them and taken"
+              + " after the other. This is the assertion a critic broke by deleting the"
+              + " guard from the modal's key handler, with 275 cases green.")
+      compare(Actions.armedRoute, "key", "the key did not record its own route")
+      suite.waitOutTheModalTail()
+      Actions.clear()
+      // The question is open again on the second Enter this handler does not
+      // guard; put it away so the next case starts on a clean screen.
+      if (settings.confirming)
+        keyClick(Qt.Key_Escape)
+      suite.waitOutTheModalTail()
+    }
+
+    // ==================================================================
+    // ROUND 5. THE ONLY DOOR TO THE THREE RESETS, FROM BOTH HANDS.
+    // ==================================================================
+    //
+    // `ui/Game.qml`'s `S  SETTINGS AND RESETS` chip is the whole route from the
+    // garage to the settings screen and therefore to the three save-file resets
+    // -- the only irreversible things in this plugin. Until this case, no mouse
+    // event had ever been posted at `ui/Game.qml` by anything in the repository.
+    function test_40_the_settings_door_opens_from_both_hands() {
+      root.showing = "game"
+      game.forceActiveFocus()
+      suite.settleFrame()
+      compare(game.screen, "garage", "the flow did not open on the garage")
+
+      var door = suite.targetNamed(game, "settings and resets")
+      verify(door !== null,
+             "the flow prints `S  SETTINGS AND RESETS` on the garage and there is"
+             + " nothing to click on it. It is the only route to the three resets.")
+      var at = suite.centreOf(door)
+      Actions.clear()
+      mouseMove(root, at.x, at.y)
+      verify(door.hovered, "the door does not light under the pointer")
+      mouseClick(root, at.x, at.y)
+      suite.settleFrame()
+      compare(game.screen, "settings",
+              "a click on `S  SETTINGS AND RESETS` did not open the settings screen")
+
+      // Back to the garage, and the same door with the key it prints. The
+      // keyboard goes where the flow says it is: a click on this chip moves no
+      // focus stop (it has none), and the screen it opened is the one that has
+      // to hear the Escape.
+      if (game.focusTarget)
+        game.focusTarget.forceActiveFocus(Qt.TabFocusReason)
+      keyClick(Qt.Key_Escape)
+      suite.settleFrame()
+      compare(game.screen, "garage", "Escape did not come back to the garage")
+      Actions.clear()
+      if (game.focusTarget)
+        game.focusTarget.forceActiveFocus(Qt.TabFocusReason)
+      keyClick(Qt.Key_S)
+      suite.settleFrame()
+      compare(game.screen, "settings",
+              "the S key, which this chip prints as the key that does what clicking it"
+              + " does, did not open the settings screen")
+      keyClick(Qt.Key_Escape)
+      suite.settleFrame()
+      mouseMove(root, 0, 0)
+      root.showing = "garage"
     }
 
     /** The race's own ESC line, as a guarded control that can leave the race. */

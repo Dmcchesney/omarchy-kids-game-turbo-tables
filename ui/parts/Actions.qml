@@ -173,16 +173,34 @@ QtObject {
       actions.refusedRepeats += 1
       return false
     }
-    if (names && names.length > 0) {
-      var copy = []
-      for (var i = 0; i < names.length; i++)
-        copy.push(String(names[i]))
-      actions.armed = copy
-      actions.armedRoute = (String(route) === "key") ? "key" : "click"
-      actions.expiry.restart()
-    }
+    actions.arm(names, route)
     actions.takenCount += 1
     return true
+  }
+
+  /**
+   * ROUND 5. Record that a press MOVED WHAT IS UNDER THE CHILD'S HAND, without
+   * asking permission first.
+   *
+   * A choosing press -- a card, a swatch, `1 2 3  CHOOSE A CARD` -- may never be
+   * refused: a child hammering it means it every time, and that is the
+   * maintainer's other standing complaint. But choosing a card REPLACES THE
+   * FOOTER at the pixel that was pressed, and the chip that takes its place
+   * spends the whole hand, so the press has to arm even though it does not ask.
+   *
+   * `take` is "may I, and then I did"; this is the second half on its own. A
+   * press that ignored `take`'s answer and acted anyway would say the same thing
+   * with a lie in the middle of it.
+   */
+  function arm(names, route) {
+    if (!names || names.length === 0)
+      return
+    var copy = []
+    for (var i = 0; i < names.length; i++)
+      copy.push(String(names[i]))
+    actions.armed = copy
+    actions.armedRoute = (String(route) === "key") ? "key" : "click"
+    actions.expiry.restart()
   }
 
   /**
