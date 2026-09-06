@@ -90,6 +90,10 @@ Item {
 
   readonly property bool hovered: hintHit.hovered
   readonly property int refusedRepeats: hintHit.refusedRepeats
+  // ROUND 3. Is this control still inside the double-click interval of a press
+  // it accepted? A screen's own KEY handler reads this so that the guard is not
+  // one-sided. See the note beside the Escape branch in `ui/Race.qml`.
+  readonly property bool guarding: hintHit.guarding
 
   implicitWidth: line.implicitWidth + hint.padWidth
   implicitHeight: line.implicitHeight + hint.padHeight

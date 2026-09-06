@@ -46,6 +46,16 @@ jobs:
       - name: Boundary, hygiene and manifest
         run: npm run check:boundary
 
+      # PIECE M ROUND 3. No .qml file may print a key hint as a string: a key
+      # printed on a screen is a promise that pressing it does something, and
+      # `ui/parts/KeyHint.qml` is the only thing that may make one. The runtime
+      # oracle in dev/Harness.qml finds hints by asking the component, and this
+      # is what keeps that honest -- a rule about what may be WRITTEN, which is
+      # not a guess about what a string means. It is here because nothing in
+      # this workflow runs qmltestrunner or the parity walk.
+      - name: A printed key is a component, not a string
+        run: npm run check:keyhints
+
       # Fails when engine/engine.mjs is not the current build of src/engine, so
       # a src/engine change cannot land without its rebuilt bundle.
       - name: Committed bundle is not stale

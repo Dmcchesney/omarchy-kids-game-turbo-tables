@@ -1194,6 +1194,28 @@ FocusScope {
       var key = event.key
 
       if (key === Qt.Key_Escape) {
+        // ROUND 3 -- THE GUARD IS NOT ONE-SIDED, ON THE ONE CONTROL WHERE THAT
+        // MATTERS.
+        //
+        // `ui/parts/Clickable.qml` refuses a second PRESS inside a double-click
+        // interval, and a critic pointed out that `guard.running` was consulted
+        // in exactly one place -- the click handler -- so click->click was
+        // guarded and click->key was not. On three of the four screens that is
+        // harmless. Here it is not, and the reason is the note beside
+        // `leaveHint`: this control CHANGES ITS MEANING under the pointer. A
+        // click on `ESC  BACK` while a card is chosen puts the card back and
+        // arms the guard; an Escape 100 ms later found the card already back,
+        // took the other branch, and LEFT THE RACE. That is the identical
+        // walking repeat the guard exists for, one input device over.
+        //
+        // Key->key is deliberately still unguarded: a child pressing Escape
+        // twice on purpose means it twice. What is refused is the tail of a
+        // press the POINTER made, which is the only press no hand meant to
+        // send twice.
+        if (leaveHint.guarding) {
+          event.accepted = true
+          return
+        }
         // One meaning: back out of a card choice if there is one, and otherwise
         // leave the race. Round one had three, and the middle one neither left
         // nor cleared the digit it had caused.

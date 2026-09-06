@@ -5,6 +5,7 @@ import "../../ui"
 import "../../ui/parts"
 import "../../dev"
 import "../../dev/KeyHints.js" as KeyHints
+import "../../engine/engine.mjs" as Engine
 
 // PIECE M. THE MOUSE, WITH REAL MOUSE EVENTS, AND THE PARITY AS A GATE.
 //
@@ -304,6 +305,25 @@ Item {
           return true
       }
       return false
+    }
+
+    /**
+     * Twelve correct answers in a row deals a hand of three, which is the
+     * design's rule and the only way into the state this file needs. Typed, in
+     * real key events, exactly as `tests/qml/tst_race_keys.qml` does it -- the
+     * hand cannot be poked into place without the test stopping being about
+     * what a child can reach.
+     */
+    function dealRaceHand() {
+      var guard = 0
+      while (race.hand.length === 0 && guard < 40) {
+        var answer = String(Engine.factAnswer(race.human.currentFact))
+        for (var i = 0; i < answer.length; i++)
+          keyClick(Qt.Key_0 + Number(answer.charAt(i)))
+        keyClick(Qt.Key_Return)
+        guard += 1
+      }
+      compare(race.hand.length, 3, "a hand of three is held")
     }
 
     function waitOutTheModalTail() {
@@ -1281,6 +1301,80 @@ Item {
       }
       verify(checked >= 3, "only " + checked + " screens with focus stops were asked"
              + " whether they honour Tab; the walk is not seeing them")
+    }
+
+    // ==================================================================
+    // ROUND 3. THE GUARD WAS ONE-SIDED, AND THE RACE IS WHERE THAT BITES.
+    // ==================================================================
+    //
+    // `ui/parts/Clickable.qml` refuses the second press of a double-click on a
+    // destructive control, and a critic pointed out that `guard.running` was
+    // consulted in exactly one place -- the click handler. So click->click was
+    // guarded, click->key was not, and they named the screen where it matters:
+    // `ui/Race.qml`'s `ESC` hint is the one control in this game whose MEANING
+    // changes under the pointer. `BACK` while a card is chosen, `LEAVE`
+    // without. A click puts the card back and arms the guard; an Escape 100 ms
+    // later finds the card already back, takes the other branch, and leaves the
+    // race. There is no undo, and it is a race the child was in the middle of.
+    //
+    // They could not drive it end to end -- the harness cannot get from the
+    // countdown into a live race under an external clock -- and reported it as
+    // a code-level finding. This file can: it holds a real `Race`, it deals a
+    // real hand by answering real facts, and it posts a real click and a real
+    // keystroke.
+    function test_28_a_click_that_puts_a_card_back_does_not_arm_escape_to_leave() {
+      root.showing = "race"
+      race.rivals = null
+      race.forceActiveFocus()
+      suite.settleFrame()
+      verify(race.focusTarget.activeFocus,
+             "the race screen's key catcher lost active focus, so nothing below this"
+             + " line is a statement about anything. Run this spec headless.")
+
+      suite.dealRaceHand()
+      root.raceLeaves = 0
+
+      // Chosen with the MOUSE, put back with the MOUSE, and then the keyboard.
+      suite.clickNamed(race.handPanel, "card 1")
+      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
+
+      // The race and the hand panel BOTH print a control called "put the card
+      // back" while a card is chosen -- the screen's own `ESC` line and the
+      // panel's footer -- and they are not the same control. The one this case
+      // is about is the guarded one: the line that says BACK now and LEAVE the
+      // moment the card is back. (The panel's footer is the other half of this
+      // hazard and is not guarded; see the report.)
+      var escape = null
+      var inRace = suite.clickTargetsIn(race)
+      for (var i = 0; i < inRace.length; i++) {
+        if (String(inRace[i].label).toLowerCase().indexOf("put the card back") >= 0
+            && inRace[i].destructive && suite.usable(inRace[i], race))
+          escape = inRace[i]
+      }
+      verify(escape !== null,
+             "with a card chosen the race's own ESC line is not a guarded control that"
+             + " says it puts the card back")
+      var at = suite.centreOf(escape)
+      mouseMove(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+      compare(race.handPanel.chosen, -1, "the click did not put the card back")
+      compare(root.raceLeaves, 0, "the click that put the card back left the race")
+
+      keyClick(Qt.Key_Escape)
+      compare(root.raceLeaves, 0,
+              "an Escape 16 ms after a CLICK on the same control left the race. The"
+              + " control changed its meaning under the pointer -- it said BACK when it"
+              + " was clicked and LEAVE by the time the key arrived -- and the guard was"
+              + " consulted only by the click handler, so the half of the repeat that"
+              + " came from the other input device was not refused.")
+
+      // And a DELIBERATE Escape still leaves. A guard that stayed up would be
+      // the maintainer's other complaint -- a control that has to be pressed
+      // several times -- pointing the other way.
+      wait(450)
+      keyClick(Qt.Key_Escape)
+      compare(root.raceLeaves, 1,
+              "an Escape after the double-click interval did not leave the race")
     }
 
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {
