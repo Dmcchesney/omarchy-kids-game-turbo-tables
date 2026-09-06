@@ -1082,6 +1082,84 @@ Item {
              + " test was in when a critic deleted the guard and it still passed.")
     }
 
+    // ==================================================================
+    // ROUND 3. THE OTHER CHANGE ROUND 2 MADE THAT NOTHING TESTED.
+    // ==================================================================
+    //
+    // The second survivor a critic found: `ui/Settings.qml`'s page carried
+    // `enabled: !settings.confirming && !settings.justAnswered`, a 400 ms window
+    // after every answered question in which the screen behind took nothing --
+    // and the whole suite passed with that clause deleted, because `init()`
+    // calls `resetScreens()`, which sets `justAnswered` back to false before
+    // every case. The suite stepped around the behaviour it was meant to hold.
+    //
+    // What the clause was for is real and is measurable: the question's own
+    // `⏎  ANSWER` line is a 104 x 26 target that sits ON TOP OF the RIVALS row,
+    // which is 976 x 106 and comes back to life the instant the question
+    // closes. Three clicks 16 ms apart at that one point answered the question
+    // with the first and, with the clause deleted, changed the rival level with
+    // the two nobody meant to send.
+    //
+    // So the rule is stated here as the child meets it, on the observable the
+    // child would see changed, and it does not touch `justAnswered` or any other
+    // implementation of it: a double-click on a modal's control must not reach
+    // the screen behind that modal. `resetScreens()` cannot help this case --
+    // the state it would clear is created inside the case, by the click.
+    function test_25_a_double_click_on_the_question_cannot_reach_the_screen_behind() {
+      root.showing = "settings"
+      settings.forceActiveFocus()
+      suite.settleFrame()
+
+      suite.clickNamed(settings, "RESET GARAGE RECORDS")
+      suite.settleFrame()
+      verify(settings.confirming, "the reset question did not open")
+
+      var answer = suite.targetNamed(settings, "Give the armed answer")
+      verify(answer !== null, "the question prints no `⏎  ANSWER` line to click")
+      verify(answer.destructive, "the line that answers the question is not guarded")
+      var at = suite.centreOf(answer)
+
+      // THE OVERLAP, ASSERTED RATHER THAN ASSUMED. If the question's footer ever
+      // stops standing on a live control, this case is no longer about anything
+      // and has to say so instead of passing.
+      var behind = null
+      var targets = suite.clickTargetsIn(settings)
+      for (var i = 0; i < targets.length; i++) {
+        var t = targets[i]
+        if (t === answer || suite.usable(t, settings))
+          continue
+        var box = suite.boxAround(t, 0)
+        if (at.x >= box.x && at.x <= box.right && at.y >= box.y && at.y <= box.bottom)
+          behind = t
+      }
+      verify(behind !== null,
+             "the question's `⏎  ANSWER` line does not stand on any control of the"
+             + " screen behind it, so this case tests nothing")
+
+      var rivalsBefore = Store.setting("rivalLevel")
+      var soundBefore = Store.setting("sound")
+      var motionBefore = Store.setting("reducedMotion")
+      var scanlinesBefore = Store.setting("scanlines")
+
+      mouseMove(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+      mouseClick(root, at.x, at.y)
+
+      verify(!settings.confirming, "the first click did not answer the question")
+      compare(Store.setting("rivalLevel"), rivalsBefore,
+              "three clicks 16 ms apart on the question's own `⏎  ANSWER` line changed"
+              + " the rival level. The line stands on the \"" + behind.label + "\","
+              + " which comes back to life the moment the question closes, so the half"
+              + " of the double-click nobody meant to send landed on a setting. There"
+              + " is no undo in this game.")
+      compare(Store.setting("sound"), soundBefore, "a setting behind the question changed")
+      compare(Store.setting("reducedMotion"), motionBefore,
+              "a setting behind the question changed")
+      compare(Store.setting("scanlines"), scanlinesBefore,
+              "a setting behind the question changed")
+    }
+
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {
       root.showing = "picker"
       picker.forceActiveFocus()
