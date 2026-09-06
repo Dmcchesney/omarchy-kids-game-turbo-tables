@@ -303,86 +303,20 @@ FocusScope {
   readonly property int inkContour: Math.max(2, countdown.px(6))
   readonly property int inkRimOffset: Math.max(1, Math.round(countdown.inkContour * 0.55))
 
-  // One big word in this light: cast shadow, contour, rim, face. `drop` is the
-  // cast shadow's throw and `contour` the keyline's width, both already in
-  // frame pixels; the caller owns them because the caller is what fits the
-  // word to the board.
-  component LitWord: Item {
-    id: word
-    property string words: ""
-    property int size: 10
-    property int spacing: 0
-    property int drop: 0
-    property int contour: 0
-    property int rimOffset: 0
-    property color faceTone: "#f2e6c4"
-    property color shadowTone: "#000000"
-    property color bodyTone: "#000000"
-    property color rimTone: "#f0b07a"
-
-    width: wordFace.implicitWidth
-    height: wordFace.implicitHeight
-
-    // The cast shadow: long, down and toward the camera, away from the sun.
-    Text {
-      textFormat: Text.PlainText
-      text: word.words
-      color: word.shadowTone
-      font: wordFace.font
-      x: -word.drop
-      y: word.drop
-    }
-    // The body contour: the same word, opaque, offset one keyline out around a
-    // CIRCLE. This is the pair the contrast figure is measured on.
-    //
-    // The circle is the whole point and the first draft did not have it. Eight
-    // copies at the four axes and the four corners is a square dilation: the
-    // diagonal copies land 1.41 keylines out, so every convex corner of a glyph
-    // grows a square step, and on a diagonal stroke -- the `x` of `6 x 12`, at
-    // 1920 x 1080 -- the ring stairsteps visibly against the sky. Sixteen
-    // copies on a circle of one keyline put the diagonals where they belong and
-    // the edge reads as a drawn line instead of a staircase.
-    readonly property var contourRing: {
-      var ring = []
-      for (var i = 0; i < 16; i++) {
-        var a = i * Math.PI / 8
-        ring.push([Math.round(Math.cos(a) * word.contour),
-                   Math.round(Math.sin(a) * word.contour)])
-      }
-      return ring
-    }
-    Repeater {
-      model: word.contourRing
-      Text {
-        required property var modelData
-        textFormat: Text.PlainText
-        text: word.words
-        color: word.bodyTone
-        font: wordFace.font
-        x: modelData[0]
-        y: modelData[1]
-      }
-    }
-    // The warm rim, on the sun side: up and to the right, inside the contour.
-    Text {
-      textFormat: Text.PlainText
-      text: word.words
-      color: word.rimTone
-      font: wordFace.font
-      x: word.rimOffset
-      y: -word.rimOffset
-    }
-    Text {
-      id: wordFace
-      textFormat: Text.PlainText
-      text: word.words
-      color: word.faceTone
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: word.size
-      font.letterSpacing: word.spacing
-    }
-  }
+  // One big word in this light -- cast shadow, keyline, rim, face -- is
+  // `ui/parts/LitWord.qml` now, and it is a file rather than a `component`
+  // here for two reasons the round found together:
+  //
+  //   THE RACE DRAWS THE SAME STRING one second later and drew it as a plain
+  //   cream `Text`. A component private to this screen cannot be what makes two
+  //   screens agree, and the fact is the one object the design says has to
+  //   carry across that cut;
+  //
+  //   THE KEYLINE COST 45% OF THIS SCREEN. Twenty `Text` items per word, forty
+  //   on the GO beat. Measured with `npm run perf` at 1920 x 1080: 5.90 cpu
+  //   ms/frame with the sixteen-copy contour ring, 3.22 with it deleted. The
+  //   part draws the same keyline as one `strokeText` in one `Canvas`, painted
+  //   on a beat rather than on a frame. The file carries the arithmetic.
 
   // ============================================ TYPE THAT CLEARS THE BOARD
   //

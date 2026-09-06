@@ -331,7 +331,66 @@ FocusScope {
     race.smoothProgress = progress.slice()
     track.humanProgress = progress[0]
     track.setProgress(progress)
+    // WHERE A RACE OPENS. It is the start line, and until this line existed it
+    // was a rock quarry: see `startTravel` above.
+    track.travel = race.startTravel
   }
+
+  // ============================================ WHERE A RACE OPENS, AND IT IS
+  // ============================================ THE PLACE THE COUNTDOWN PAINTS
+  //
+  // THE BUG THIS ANSWERS. `ui/TrackView.qml` declares `property real travel:
+  // 120`, `advance()` only ever adds to it, and this file never assigned it --
+  // the word did not appear anywhere in it. 120 is a good REDUCED-MOTION STILL
+  // and the comment at that line says so in as many words: a third of the way
+  // into sector 3's left-hander, "a road in a corner rather than a ruler",
+  // chosen by a round that needed one frame to look at. Nothing then moved it
+  // back for the start of a race.
+  //
+  // So the cut a child actually got was: `GO`, over a start line under a
+  // chequered gantry, and then one frame later a rock quarry -- polygonal walls
+  // both sides, a `200` distance board, three rivals abreast on a curve, no
+  // gantry, no chequer, no crowd -- with the clock reading `TIME 0:00`. It is
+  // not two views of one place; it was two places, and it shipped that way
+  // through six rounds because the harness always passes `--travel` explicitly,
+  // so nobody ever rendered the frame a race actually opens on.
+  //
+  // WHY -6.5 AND NOT 0. `Circuit.PLACEMENTS` stands the start gantry at s = 3.5
+  // and the shader paints the start grid at s = 2..5; the camera carries the
+  // child's kart `TrackView.playerZ` = 3.20 units ahead of itself. Four values
+  // were rendered as this screen's own first frame and measured:
+  //
+  //     travel   the arch's drawn box, 1920 x 1080       what the frame is
+  //     -----    ---------------------------------       -----------------
+  //        0     1920 wide, board clipped off the top     under the arch, no sky
+  //     -3.0     1190 wide, board across the fact         the fact over the sign
+  //     -5.0      910 wide, board still under the fact    the fact over the sign
+  //     -6.5      774 wide, board clear below the fact    the countdown's frame
+  //
+  // At -6.5 the arch is whole and ahead with `TURBO TABLES` legible under the
+  // fact rather than behind it, the chequered grid is a band of road ahead of
+  // the field, the crowd, the tyre walls and the `P1` pit board are along both
+  // sides, and the sun sits to the right of the arch where the countdown's sun
+  // is. The countdown's own gantry is 521 px in the same frame, so the two
+  // screens now differ by half an arch rather than by a rock quarry. The first
+  // thing the child does is cross the line under the sign.
+  //
+  // NEGATIVE IS NOT A SPECIAL CASE. Everything downstream of `travel` wraps the
+  // circuit: `Terrain.sectorBlend` and `sectorMix` fold any real into 0..432,
+  // and `propZ` folds a negative difference back into the loop. -3.0 and 429.0
+  // are the same place by every one of them; the negative is written because
+  // `travel` is monotonic from here and crossing zero IS crossing the line.
+  //
+  // `tests/qml/tst_race_start.qml` renders this screen's own first frame and
+  // asserts what is in it, because every previous round's evidence was a frame
+  // somebody had passed a travel to.
+  readonly property real startTravel: -6.5
+
+  // WHERE THE CAMERA ACTUALLY IS, published so a spec can read it back off the
+  // running screen rather than off this file's own constant. The two are only
+  // equal if `buildRace()` assigned it, which is the whole defect: `startTravel`
+  // could have been right and unassigned and nothing would have noticed.
+  readonly property real trackTravel: track.travel
 
   Component.onCompleted: buildRace()
   onSeedChanged: if (state) buildRace()
