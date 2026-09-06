@@ -10,6 +10,18 @@ import "../"
 Item {
   id: callout
 
+  // PIECE M ROUND 4. A THING THAT SAYS SOMETHING AND THEN STOPS SAYING IT.
+  //
+  // Declared so a comparison of two screen states can leave it out. `test_29` in
+  // `tests/qml/tst_mouse_parity.qml` photographs the screen a click reached and
+  // the screen the key reached and requires them identical, and the two
+  // photographs are taken milliseconds apart -- so a message that fades in over
+  // 180 ms and leaves after 1.6 s is a coin toss rather than a fact about which
+  // key was pressed. What the callout REPORTS is still compared, through the
+  // save file it is reporting about. The duck-type is here rather than a name in
+  // a test, so a second transient added tomorrow is left out tomorrow.
+  readonly property bool isTransient: true
+
   property string text: ""
   property color tone: Theme.amber
   property int holdMs: 1600

@@ -608,7 +608,22 @@ Window {
     var unpressableKey = 0
     var destructive = 0
     var barriers = 0
-    console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey\tkind")
+    var unguardedDestructive = 0
+    var declaredGaps = 0
+    // PIECE M ROUND 4. Two columns are new and both are the evidence for a claim
+    // that used to be made in prose:
+    //
+    //   guard  the ACTION this target's press belongs to. Two controls that do
+    //          the same destructive thing print the same name here, and that is
+    //          what a reader checks rather than taking "they share a guard" on
+    //          trust. `ui/parts/Actions.qml`. `-` is a control a child may press
+    //          as often as they like.
+    //   route  the presses that reach this control's own state from the
+    //          keyboard, where they are not one press of the first key in the
+    //          key column: eight Rights for the eighth swatch. `test_29` in
+    //          `tests/qml/tst_mouse_parity.qml` presses exactly this and then
+    //          demands the same screen the click left.
+    console.log("click\tlabel\tx\ty\tw\th\tenabled\tdoes\tkey\tkind\tguard\troute")
     for (var i = 0; i < clicks.length; i++) {
       var hit = clicks[i]
       var box = hit.mapToItem(harness.contentItem, 0, 0, hit.width, hit.height)
@@ -625,7 +640,7 @@ Window {
         console.log("click\t" + hit.label + "\t" + Math.round(box.x) + "\t"
                     + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
                     + Math.round(box.height) + "\t" + (live ? "yes" : "no")
-                    + "\t" + hit.does + "\t-\tbarrier")
+                    + "\t" + hit.does + "\t-\tbarrier\t-\t-")
         continue
       }
       // A target that is not drawn at all is not a path either way; a DRAWN,
@@ -644,14 +659,29 @@ Window {
         unpressableKey += 1
       if (live && hit.destructive === true)
         destructive += 1
+      // ROUND 4. A DESTRUCTIVE CONTROL WITH NO GUARD IS A GUARD NOBODY SET, and
+      // it is a failing row rather than a quiet one: `H  PIT CREW` spent three
+      // of a child's questions on one gesture because it was neither marked nor
+      // guarded, and a walk that could not say so is a walk that agreed.
+      var guards = (hit.guards === undefined || hit.guards === null) ? [] : hit.guards
+      if (live && hit.destructive === true && guards.length === 0)
+        unguardedDestructive += 1
+      if (live && String(hit.keyGap).length > 0)
+        declaredGaps += 1
+      var route = (hit.keyRoute === undefined || hit.keyRoute === null)
+                  ? "-" : (hit.keyRoute.length === 0 ? "(no press)" : hit.keyRoute.join(" "))
       var kind = (hit.destructive === true ? "destructive" : "")
                  + (focusOnly ? (hit.destructive === true ? "+focusOnly" : "focusOnly") : "")
       console.log("click\t" + hit.label + "\t" + Math.round(box.x) + "\t"
                   + Math.round(box.y) + "\t" + Math.round(box.width) + "\t"
                   + Math.round(box.height) + "\t" + (live ? "yes" : "no")
                   + "\t" + hit.does + "\t"
-                  + (String(hit.key).length > 0 ? hit.key : (focusOnly ? "(focus only)" : "NONE"))
-                  + "\t" + (kind.length > 0 ? kind : "-"))
+                  + (String(hit.key).length > 0
+                     ? (String(hit.keyGap).length > 0 ? hit.key + " (GAP: " + hit.keyGap + ")" : hit.key)
+                     : (focusOnly ? "(focus only)" : "NONE"))
+                  + "\t" + (kind.length > 0 ? kind : "-")
+                  + "\t" + (guards.length > 0 ? guards.join("+") : "-")
+                  + "\t" + route)
     }
 
     // ------------------------------------------- the walk's own premise
@@ -782,8 +812,10 @@ Window {
     console.log("parity\tstopsWithoutClick\t" + stopsWithoutClick)
     console.log("parity\thintsWithoutClick\t" + hintsWithoutClick)
     console.log("parity\tstrayMouseHandlers\t" + strays)
+    console.log("parity\tunguardedDestructive\t" + unguardedDestructive)
+    console.log("parity\tdeclaredKeyGaps\t" + declaredGaps)
     var bad = mouseOnly + keyOnly + stopsWithoutClick + strays
-              + unpressableKey + hintsWithoutClick
+              + unpressableKey + hintsWithoutClick + unguardedDestructive
     console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
     Qt.exit(bad === 0 ? 0 : 1)
   }

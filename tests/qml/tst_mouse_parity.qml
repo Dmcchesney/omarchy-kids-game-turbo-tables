@@ -58,6 +58,21 @@ Item {
     activeFocusOnTab: false
   }
 
+  // ROUND 4 -- ONE PIXEL, AND WHY IT SAVES HALF A MINUTE.
+  //
+  // `settleFrame()` renders synchronously to force a polish pass, because a
+  // click measured on the same turn as a state change goes to where the control
+  // WAS. It did that by grabbing the whole 1920 x 1080 root, which rasterises
+  // two million pixels every time -- and `test_29` needs a settle before every
+  // one of its two hundred and forty drives. The polish pass is what is wanted;
+  // the pixels are not. Grabbing this instead runs the same synchronous render
+  // and hands back four bytes.
+  Item {
+    id: onePixel
+    width: 1
+    height: 1
+  }
+
   // ONE FOCUS RING, IN ITS TWO STATES, OVER THE SAME PIXELS.
   //
   // `test_21` reads hover and focus off a real control, which is the right
@@ -307,18 +322,25 @@ Item {
      * and what is being asked about is the question's own lifetime, not the
      * screen's.
      */
+    property var theBarrier: null
     function modalTailRunning() {
-      var targets = suite.clickTargetsIn(settings)
-      for (var i = 0; i < targets.length; i++) {
-        // The question publishes its own lifetime as `consuming`. Read from
-        // there rather than from the barrier's `visible`, which is QML's
-        // EFFECTIVE visibility and therefore false whenever the settings screen
-        // is not the screen on show -- which, in `init()`, it never is.
-        if (targets[i].barrier === true && targets[i].parent
-            && targets[i].parent.consuming === true)
-          return true
+      // ROUND 4 -- FOUND ONCE, NOT ON EVERY CALL. This runs from `resetScreens`,
+      // which runs from every `enter`, which `test_29` calls twice per control:
+      // a full walk of the settings tree each time was a fifth of that case's
+      // clock. The barrier is one item and it does not move.
+      if (suite.theBarrier === null) {
+        var targets = suite.clickTargetsIn(settings)
+        for (var i = 0; i < targets.length; i++) {
+          if (targets[i].barrier === true)
+            suite.theBarrier = targets[i]
+        }
       }
-      return false
+      // The question publishes its own lifetime as `consuming`. Read from there
+      // rather than from the barrier's `visible`, which is QML's EFFECTIVE
+      // visibility and therefore false whenever the settings screen is not the
+      // screen on show -- which, in `init()`, it never is.
+      return suite.theBarrier !== null && suite.theBarrier.parent
+             && suite.theBarrier.parent.consuming === true
     }
 
     /**
@@ -745,10 +767,6 @@ Item {
           mouseMove(root, 0, 0)
           suite.settleFrame()
           var afterClick = suite.settledFingerprint(screen)
-          if (list[s].name === "Settings, reset asked")
-            console.log("DEBUG click", label, "confirming=" + settings.confirming,
-                        "banner=" + JSON.stringify(settings.bannerText),
-                        "turns=" + suite.settleTurns)
 
           // ------------------------------------------------- the key route
           suite.freshState(list[s])
@@ -767,10 +785,6 @@ Item {
           mouseMove(root, 0, 0)
           suite.settleFrame()
           var afterKey = suite.settledFingerprint(screen)
-          if (list[s].name === "Settings, reset asked")
-            console.log("DEBUG key  ", label, "confirming=" + settings.confirming,
-                        "banner=" + JSON.stringify(settings.bannerText),
-                        "turns=" + suite.settleTurns)
           checked += 1
 
           // `verify` rather than `compare`, because a fingerprint is thousands
@@ -869,15 +883,37 @@ Item {
      * Left from body 4, and reported the key column a liar on the one control
      * where it was telling the truth.
      */
+    property string pristineWorld: ""
+    function storeState() {
+      return JSON.stringify(Store.settings) + "|" + JSON.stringify(Store.records)
+    }
     function freshState(state) {
-      memory.reset()
-      Store.reload()
+      // THE SAVE FILE IS ONLY PUT BACK WHEN A DRIVE MOVED IT. A reload rebinds
+      // every one of the seven screens standing in this file at once, which is a
+      // third of a second the crossover pays two hundred and fifty times over
+      // for the controls that never touch the file -- a printed key hint, a
+      // card, the pit crew.
+      if (suite.storeState() !== suite.pristineWorld) {
+        memory.reset()
+        Store.reload()
+        Store.setSetting("reducedMotion", true)
+        suite.pristineWorld = suite.storeState()
+      }
       // AND THE GUARD COMES DOWN. It is shared, it outlives a screen being
       // rebuilt, and that is the whole point of it -- which is also how it leaks
       // between two runs meant to be comparable: the click half of this pair
       // clicked `ESC  LEAVE` and armed `escape`, and the key half then pressed
       // an Escape that was correctly refused as the tail of it.
       Actions.clear()
+      // AND THE WORLD STOPS MOVING, by the design's own switch. `ui/Countdown.qml`
+      // pulses its numeral on an infinite animation and never stops, so the two
+      // photographs caught the same `3` eight pixels apart and the case failed on
+      // a screen doing exactly what it should. There is no `externalClock` there
+      // to stop; there IS reduced motion, which is the accessibility switch the
+      // design already specifies for "nothing pulses, nothing slides", and it
+      // changes no control, no key, no action and no state -- only whether a
+      // thing arrives over 220 ms or at once. It is part of the pristine world
+      // above, so a settings row that toggles it is put back before the next run.
       root.raceRequests = 0
       root.leaveRequests = 0
       root.againRequests = 0
@@ -983,6 +1019,13 @@ Item {
       var all = suite.itemsUnder(screen)
       for (var i = 0; i < all.length; i++) {
         var item = all[i]
+        // A TRANSIENT IS LEFT OUT, and it says so itself (`ui/parts/Callout.qml`).
+        // The settings banner fades in over 180 ms and leaves after 1.6 s, so
+        // whether it is on the screen when a photograph is taken is a fact about
+        // the shutter and not about the press. What it reports -- that settings
+        // were reset, or were not -- is compared through the save file below.
+        if (suite.underTransient(item, screen))
+          continue
         if (typeof item.text === "string" && item.font !== undefined
             && item.textFormat !== undefined && item.horizontalAlignment !== undefined) {
           if (!suite.drawn(item, screen) || item.text.length === 0)
@@ -1014,6 +1057,17 @@ Item {
                + root.againRequests + "|" + root.garageRequests + "|" + root.cardsUsed
                + "|" + root.countdownAborts + "|" + root.raceLeaves)
       return out.join("\n")
+    }
+
+    /** Is this item inside something that says a thing and then stops saying it? */
+    function underTransient(item, screen) {
+      var node = item
+      while (node && node !== screen.parent) {
+        if (node.isTransient === true)
+          return true
+        node = node.parent
+      }
+      return false
     }
 
     /** The first line the two states disagree on, said in one sentence. */
@@ -1199,7 +1253,7 @@ Item {
      */
     function settleFrame() {
       wait(1)
-      grabImage(root)
+      grabImage(onePixel)
     }
 
     /** The first drawn, enabled click target on `screen` whose label contains
@@ -1782,6 +1836,182 @@ Item {
       keyClick(Qt.Key_Escape)
       compare(root.raceLeaves, 1,
               "an Escape after the double-click interval did not leave the race")
+    }
+
+    // ==================================================================
+    // ROUND 4. A DESTRUCTIVE CONTROL WITH NO GUARD IS A GUARD NOBODY SET.
+    // ==================================================================
+    //
+    // `H  PIT CREW` was destructive in every sense a child meets -- it spends
+    // one of their questions and there is no undo -- and it carried no
+    // `destructive` flag, so `test_19`, which walks that flag, did not merely
+    // fail to test it: the control was outside the test's subject. Three clicks
+    // burned three questions with `refusedRepeats` at zero.
+    //
+    // The flag is still a hand-set boolean and this case cannot make it
+    // otherwise. What it can do is close the other half: now that the guard is a
+    // property of the action, "declared destructive" and "actually guarded" are
+    // two different statements, and a control that makes the first without the
+    // second is the shape of a guard somebody meant to add. Generated from the
+    // tree, so a destructive control added tomorrow is checked tomorrow.
+    function test_30_every_destructive_control_names_the_guard_it_shares() {
+      var list = suite.states()
+      var checked = 0
+      var names = []
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var targets = suite.clickTargetsIn(list[s].item)
+        for (var i = 0; i < targets.length; i++) {
+          var hit = targets[i]
+          if (!hit.destructive || !suite.usable(hit, list[s].item))
+            continue
+          checked += 1
+          verify(hit.guards !== null && hit.guards !== undefined && hit.guards.length > 0,
+                 list[s].name + ": \"" + hit.label + "\" says it does something a child"
+                 + " cannot take back and names no guard, so nothing refuses the second"
+                 + " half of a double-click on it. See ui/parts/Actions.qml.")
+          for (var g = 0; g < hit.guards.length; g++)
+            if (names.indexOf(String(hit.guards[g])) < 0)
+              names.push(String(hit.guards[g]))
+        }
+      }
+      verify(checked >= 5, "only " + checked + " destructive controls were found across"
+             + " every state; the walk is not seeing them")
+      // AND THE GUARDS ARE SHARED, which is the whole change. If every
+      // destructive control invented a name of its own we would be back to a
+      // guard per control under a different spelling, and the four defects that
+      // caused this round would all come back.
+      verify(names.length < checked,
+             "every destructive control names a guard nobody else names ("
+             + JSON.stringify(names) + " across " + checked + " controls), so the guard"
+             + " is a property of the control again and two controls that do the same"
+             + " destructive thing cannot refuse each other's repeat.")
+    }
+
+    // ==================================================================
+    // ROUND 4. THE FOUR ONE-SIDED CASES, DRIVEN.
+    // ==================================================================
+    //
+    // Round three guarded the pointer's half of one hazard and left three more.
+    // A critic measured all four in the running game; each one is a paragraph
+    // below and each one is driven here with real events, on a real race, with a
+    // real hand dealt by answering real facts.
+    //
+    // They are four presses of the same idea: the guard belongs to the ACTION.
+    // What differs is only which route each half of the repeat came by and which
+    // control it landed on.
+    function test_31_a_guarded_action_is_refused_whichever_hand_repeats_it() {
+      root.showing = "race"
+      race.rivals = null
+      race.forceActiveFocus()
+      suite.settleFrame()
+      verify(race.focusTarget.activeFocus,
+             "the race screen's key catcher lost active focus, so nothing below this"
+             + " line is a statement about anything. Run this spec headless.")
+      suite.dealRaceHand()
+
+      // ---------------------------------------------------------------- D1
+      // `H  PIT CREW` stays exactly where it is after it acts, so the second and
+      // third presses of a double-click always arrive at it. Measured by a
+      // critic on the shipped build: answers shown 0 -> 1 -> 3, refused 0.
+      Actions.clear()
+      var pit = suite.targetNamed(race, "Pit crew")
+      verify(pit !== null, "the race prints no pit crew line to click")
+      verify(pit.destructive,
+             "the pit crew spends one of the child's questions and there is no undo,"
+             + " and it does not say it is destructive")
+      var pitAt = suite.centreOf(pit)
+      var shownBefore = race.state.racers[0].pitCrewCount
+      mouseMove(root, pitAt.x, pitAt.y)
+      mouseClick(root, pitAt.x, pitAt.y)
+      mouseClick(root, pitAt.x, pitAt.y)
+      mouseClick(root, pitAt.x, pitAt.y)
+      compare(race.state.racers[0].pitCrewCount - shownBefore, 1,
+              "three clicks on `H  PIT CREW` 16 ms apart showed "
+              + (race.state.racers[0].pitCrewCount - shownBefore) + " answers. Each one"
+              + " is a question the child does not get back, the results screen prints"
+              + " the total as ANSWERS SHOWN, and there is no undo.")
+      verify(pit.refusedRepeats >= 2,
+             "the pit crew was under the pointer for all three presses and refused none"
+             + " of them as repeats; it accepted " + pit.actedCount)
+
+      // ---------------------------------------------------------------- D4
+      // Escape first, then a click on the race's own ESC line 16 ms later. The
+      // key armed nothing at all in round three, because only the click handler
+      // armed, so this left the race.
+      Actions.clear()
+      mouseMove(root, 0, 0)
+      suite.clickNamed(race.handPanel, "card 1")
+      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
+      root.raceLeaves = 0
+      keyClick(Qt.Key_Escape)
+      compare(race.handPanel.chosen, -1, "Escape did not put the card back")
+      var escLine = suite.guardedEscapeLine()
+      verify(escLine !== null,
+             "with the card back the race's own ESC line is not a guarded control")
+      var escAt = suite.centreOf(escLine)
+      mouseMove(root, escAt.x, escAt.y)
+      mouseClick(root, escAt.x, escAt.y)
+      compare(root.raceLeaves, 0,
+              "a CLICK on the race's ESC line 16 ms after an ESCAPE left the race. The"
+              + " key put the card back and armed nothing, so the pointer's half of the"
+              + " repeat found the line meaning LEAVE and took it.")
+
+      // ---------------------------------------------------------------- D2
+      // The hand panel's own `ESC  BACK` chip, clicked, then Escape. Two
+      // controls performing the same back-out gesture; in round three they had
+      // one guard each and the key had none. The chip is the one with the word
+      // ESC printed next to the cards the child is looking at.
+      Actions.clear()
+      mouseMove(root, 0, 0)
+      suite.clickNamed(race.handPanel, "card 1")
+      compare(race.handPanel.chosen, 0)
+      root.raceLeaves = 0
+      suite.clickNamed(race.handPanel, "put the card back")
+      compare(race.handPanel.chosen, -1, "the chip did not put the card back")
+      keyClick(Qt.Key_Escape)
+      compare(root.raceLeaves, 0,
+              "the child clicked the words `ESC  BACK` on the hand panel, the card went"
+              + " back, they pressed the Escape those words had just told them about,"
+              + " and the race ended. Two controls, one gesture, and in round three one"
+              + " guard each.")
+
+      // ---------------------------------------------------------------- D3
+      // The same chip, double-clicked. The first press puts the card back; the
+      // footer instantly redraws as `1 2 3  CHOOSE A CARD` at the same pixel and
+      // the second press CHOSE CARD 1. That is round two's walking-repeat
+      // defect, one control to the left of where round two fixed it, and it is
+      // unguarded precisely because the target that acts second is a different,
+      // non-destructive control -- which is why "the list is generated from the
+      // tree" does not save you and why the guard had to leave the control.
+      Actions.clear()
+      mouseMove(root, 0, 0)
+      suite.clickNamed(race.handPanel, "card 1")
+      compare(race.handPanel.chosen, 0)
+      root.raceLeaves = 0
+      var chip = suite.targetNamed(race.handPanel, "put the card back")
+      verify(chip !== null, "the hand panel prints no `ESC  BACK` chip")
+      var chipAt = suite.centreOf(chip)
+      mouseMove(root, chipAt.x, chipAt.y)
+      mouseClick(root, chipAt.x, chipAt.y)
+      mouseClick(root, chipAt.x, chipAt.y)
+      compare(race.handPanel.chosen, -1,
+              "a double-click on the panel's `ESC  BACK` chip put the card back and then"
+              + " chose card " + (race.handPanel.chosen + 1) + " at the same pixel: the"
+              + " footer redraws as `1 2 3  CHOOSE A CARD` under the pointer between the"
+              + " two presses.")
+      compare(root.raceLeaves, 0, "the double-click on the chip left the race")
+    }
+
+    /** The race's own ESC line, as a guarded control that can leave the race. */
+    function guardedEscapeLine() {
+      var inRace = suite.clickTargetsIn(race)
+      for (var i = 0; i < inRace.length; i++) {
+        if (String(inRace[i].label).toLowerCase().indexOf("leave the race") >= 0
+            && inRace[i].destructive && suite.usable(inRace[i], race))
+          return inRace[i]
+      }
+      return null
     }
 
     function test_16_a_rival_tag_is_aimed_at_by_clicking_it() {

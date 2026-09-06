@@ -708,6 +708,17 @@ FocusScope {
       return
     }
     if (event.key === Qt.Key_Escape) {
+      // ROUND 4 of piece M. The same `escape` guard the footer's `ESC  BACK`
+      // chip and the race's own ESC line take: one back-out gesture, one guard,
+      // whichever hand the press came from. In the game this handler never
+      // fires -- `ui/Race.qml` owns every key of a race -- and the race's own
+      // Escape branch takes the same name; this is the standalone path, and it
+      // has to obey the same rule or the panel means something different in the
+      // harness from what it means in the game.
+      if (!Actions.take(["escape"])) {
+        event.accepted = true
+        return
+      }
       event.accepted = picker.back()
       return
     }
