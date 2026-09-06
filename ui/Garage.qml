@@ -689,7 +689,7 @@ FocusScope {
       // plinth's own deep tone put it back.
       //
       // What puts light BACK is `parts/CarLight.qml` below.
-      washAmount: 0.14
+      washAmount: 0
       washColor: "#3a0f34"
       shadeAmount: 0.92
       shadeColor: "#190616"

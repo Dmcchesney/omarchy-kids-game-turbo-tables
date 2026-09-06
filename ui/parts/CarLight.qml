@@ -52,15 +52,15 @@ Item {
   // above and to the sun side. One warm tone, strongest at the roof and stepped
   // down the body over `keyReach` of the cell's height.
   property color keyColor: "#ffb05a"
-  property real keyStrength: 0.32
+  property real keyStrength: 0.34
   property real keyReach: 0.52
-  property int keySteps: 4
+  property int keySteps: 3
 
   // THE FILL: the room's purple, coming up off the floor into the underside.
   property color fillColor: "#5f255e"
-  property real fillStrength: 0.30
+  property real fillStrength: 0.34
   property real fillReach: 0.34
-  property int fillSteps: 3
+  property int fillSteps: 2
 
   // WHICH HALF OF THE LIGHT THIS INSTANCE IS. "key" is the bands, and it is
   // drawn OVER the car. "rim" is the sun's edge and it is drawn UNDER: a copy
