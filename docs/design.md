@@ -6,7 +6,7 @@ A times-table kart race for children roughly 7 to 11, shipped as an Omarchy shel
 
 This is the second draft. It replaces the sprint-only first draft with the competitive mechanics of the Zipline bellringer race, rebranded, plus AI racers, a pseudo-3D behind-the-kart view, and a minimap. The last section is unchanged in intent: the shape the plugin must take to be listed under Kids on plugins.omarchy.org.
 
-**Status:** v4.1, 2026-09-05: hand keys, the answer line, callouts and the mouse amended after the second play session · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
+**Status:** v4.2, 2026-09-06: the answer is typed and there is no keypad, by the maintainer's decision; v4.1, 2026-09-05: hand keys, the answer line, callouts and the mouse amended after the second play session · **Tier:** 1 (solo, no network, no peer) · **Plugin id:** `io.github.<owner>.turbo-tables-solo` · **Mechanics source:** the Zipline bellringer runtime, read from its Go ruleset and React client on 2026-09-02
 
 ## What changed from draft one, and why
 
@@ -415,7 +415,9 @@ Engine idle in the garage and a pitch that rises with effective speed on the tra
 ## Accessibility
 
 - Every screen operates with the keyboard alone: digits, Enter, Backspace, `H`, Space, arrows, Escape. Digits are only ever the answer.
-- **The mouse works everywhere** (v4.1): every control on every screen is clickable with a hover state, including the garage's steppers and swatches, the settings rows, the results buttons, the picker's cards, and a rival's kart tag as a target. Keyboard first, mouse always; there is never a mouse-only path and never a keyboard-only one.
+- **The mouse works everywhere** (v4.1): every control on every screen is clickable with a hover state, including the garage's steppers and swatches, the settings rows, the results buttons, the picker's cards, and a rival's kart tag as a target. Keyboard first, mouse always; there is never a mouse-only path, and no keyboard-only path except the one named below.
+
+- **Typing the answer is the one keyboard-only act** (v4.2, the maintainer's decision, 2026-09-06): *"I want you to be able to click the power-ups to select them, but we don't need a keypad — they can just use the keyboard for entering the answers."* There is no on-screen keypad and none is to be built. A child races with a hand on the keyboard for the digits and may use the mouse for everything else, the power-up hand included: clicking a card chooses it and clicking the footer's own line spends it. Three review rounds recorded this gap as a defect; it is a decision, and the sentence above is what makes it one.
 - Key hints in the race are drawn as key caps, the way the garage draws them: `[H] PIT CREW · shows the answer`, `[SPACE] FIRE`, `[← →] CARD`.
 - The fact and the field are the largest text on screen; digits at least 48 px tall at 1080p.
 - Every state has shape or text as well as color: lit lamps are filled, the ghost is translucent, rival dots carry numbers.
