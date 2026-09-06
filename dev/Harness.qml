@@ -524,6 +524,87 @@ Window {
   // that should not have applied; the flag is gone, and with it the contradiction
   // a critic found -- `ESC` dead in the title bar and `Esc` clickable in the
   // footer of the same screen, both printed as `hint` rows in the same table.
+  /**
+   * Every string on this screen that promises a key does something, as
+   * `{ item, text }`.
+   *
+   * Two readings, because a hint is drawn two ways in this game. ONE TEXT --
+   * `H  PIT CREW`, `ESC  BACK TO THE GARAGE`, and the critic's `P  PAUSE` --
+   * and TWO TEXTS SIDE BY SIDE, a keycap beside a word, which is how
+   * `ui/Game.qml` draws its settings door and how the critic's `ESC │ QUIT THE
+   * GAME` probe escaped every check in round three: neither string is a hint on
+   * its own, and the pair is one on the screen. So the drawn Text children of a
+   * parent are also read joined, in the order they are laid out, and the child
+   * reading a rail does not know or care how many items it took to draw.
+   */
+  function printedKeyEntries(screen) {
+    var found = []
+    harness.walk(screen, function (node) {
+      if (harness.isText(node) && String(node.text).length > 0
+          && harness.effectiveOpacity(node) > 0.02 && harness.effectiveEnabled(node)
+          && KeyHints.looksLikePrintedKey(node.text))
+        found.push({ "item": node, "text": String(node.text), "joined": false })
+      var kids = node.children
+      // A RAIL, NOT A PANEL. Only a small node is read as one line: two to six
+      // children, and two or three strings under it in all. `ui/Game.qml`'s
+      // settings door is a `Row` of a bordered keycap and a word -- the keycap's
+      // string is one item deeper than the word's, which is exactly how the
+      // critic's `ESC │ QUIT THE GAME` probe escaped a check that read only
+      // direct children -- and the legend's groups are the same shape. A whole
+      // panel is not: three strings is the most a keycap-and-words rail has.
+      if (!kids || kids.length < 2 || kids.length > 6)
+        return
+      var strings = harness.textsUnder(node, 4)
+      if (strings.length < 2 || strings.length > 3)
+        return
+      var line = strings.join("  ")
+      if (KeyHints.looksLikePrintedKey(line))
+        found.push({ "item": node, "text": line, "joined": true })
+    })
+    return found
+  }
+
+  /** The drawn strings under this item, in tree order, up to `cap` of them. */
+  function textsUnder(node, cap) {
+    var out = []
+    function visit(item) {
+      if (out.length > cap || !item)
+        return
+      if (harness.isText(item) && String(item.text).length > 0
+          && harness.effectiveOpacity(item) > 0.02 && harness.effectiveEnabled(item))
+        out.push(String(item.text))
+      var kids = item.children
+      for (var i = 0; kids && i < kids.length; i++)
+        visit(kids[i])
+    }
+    visit(node)
+    return out
+  }
+
+  /** Does every drawn string under this item have a click target over it? */
+  function everyStringIsPressable(node) {
+    var all = true
+    harness.walk(node, function (item) {
+      if (!harness.isText(item) || String(item.text).length === 0
+          || harness.effectiveOpacity(item) <= 0.02)
+        return
+      if (!harness.clickTargetOver(item))
+        all = false
+    })
+    return all
+  }
+
+  /** Is this item inside the one declared key legend -- a caption, not a control? */
+  function underKeyLegend(item) {
+    var node = item
+    while (node && node !== harness.contentItem) {
+      if (node.isKeyLegend === true)
+        return true
+      node = node.parent
+    }
+    return false
+  }
+
   /** Is this item a printed key hint -- a promise that a key does something? */
   function isPrintedKeyHint(item) {
     return item.isKeyHint === true && harness.effectiveOpacity(item) > 0.02
@@ -777,6 +858,57 @@ Window {
                   + (over ? "yes" : "NO"))
     })
 
+    // ------------------------------------------- key -> click, oracle 4
+    // ROUND 4. THE NET UNDER THE STRUCTURAL RULE.
+    //
+    // Oracle 3 above asks the COMPONENT, which is right and is blind to a hint
+    // somebody drew by hand. A critic wrote four printed key hints into a screen
+    // and three were invisible to both gates: one assembled its string at
+    // runtime, one moved its literal into a Repeater's model, one was drawn with
+    // `Canvas.fillText`, and one was bound to a property. By the time they are on
+    // the screen they are words, so this reads the words -- under a grammar that
+    // never reads a bare digit as a key, which is where every false positive of
+    // round two's rule came from. See the long block in `dev/KeyHints.js`.
+    //
+    // The one thing in the game that prints keys and is deliberately not a
+    // control is `ui/parts/KeyLegend.qml`, and it says so. Its groups are printed
+    // here as `legend` rows, so the exemption is on the evidence rather than in
+    // somebody's comment.
+    var legends = 0
+    console.log("legend\ttext\tx\ty\tw\th")
+    harness.walk(screen, function (item) {
+      if (item.isKeyLegend !== true || harness.effectiveOpacity(item) <= 0)
+        return
+      legends += 1
+      var box = item.mapToItem(harness.contentItem, 0, 0, item.width, item.height)
+      console.log("legend\t" + String(item.legendText) + "\t" + Math.round(box.x)
+                  + "\t" + Math.round(box.y) + "\t" + Math.round(box.width)
+                  + "\t" + Math.round(box.height))
+    })
+
+    var deadPrintedKeys = 0
+    console.log("printedKey\ttext\tx\ty\thasClick\tinLegend")
+    var printed = harness.printedKeyEntries(screen)
+    for (var pk = 0; pk < printed.length; pk++) {
+      var inLegend = harness.underKeyLegend(printed[pk].item)
+      var over = harness.clickTargetOver(printed[pk].item)
+      // A JOINED LINE MADE ENTIRELY OF CONTROLS IS NOT A DEAD KEY. The race
+      // stacks `H  PIT CREW` over `ESC  LEAVE` in one Column, and read as one
+      // line that Column is a key hint with nothing pressable over the Column
+      // itself -- while both of the lines under it are controls. What this
+      // oracle is for is a printed key a child cannot press; two printed keys a
+      // child CAN press are not that, however they are stacked.
+      if (!over && !inLegend && printed[pk].joined
+          && harness.everyStringIsPressable(printed[pk].item))
+        over = true
+      if (!over && !inLegend)
+        deadPrintedKeys += 1
+      var at = printed[pk].item.mapToItem(harness.contentItem, 0, 0)
+      console.log("printedKey\t" + printed[pk].text.replace(/\n/g, " | ") + "\t"
+                  + Math.round(at.x) + "\t" + Math.round(at.y) + "\t"
+                  + (over ? "yes" : "NO") + "\t" + (inLegend ? "yes" : "no"))
+    }
+
     // ------------------------------------------------- and what is NOT a path
     // THE SIGNS. Every item that is laid out like a control and is deliberately
     // not one -- the garage's four preset-signal tiles, its four roster seats,
@@ -812,10 +944,13 @@ Window {
     console.log("parity\tstopsWithoutClick\t" + stopsWithoutClick)
     console.log("parity\thintsWithoutClick\t" + hintsWithoutClick)
     console.log("parity\tstrayMouseHandlers\t" + strays)
+    console.log("parity\tkeyLegends\t" + legends)
+    console.log("parity\tdeadPrintedKeys\t" + deadPrintedKeys)
     console.log("parity\tunguardedDestructive\t" + unguardedDestructive)
     console.log("parity\tdeclaredKeyGaps\t" + declaredGaps)
     var bad = mouseOnly + keyOnly + stopsWithoutClick + strays
               + unpressableKey + hintsWithoutClick + unguardedDestructive
+              + deadPrintedKeys
     console.log("parity\tverdict\t" + (bad === 0 ? "PASS" : "FAIL"))
     Qt.exit(bad === 0 ? 0 : 1)
   }

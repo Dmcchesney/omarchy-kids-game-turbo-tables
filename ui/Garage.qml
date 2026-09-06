@@ -370,62 +370,28 @@ FocusScope {
       // An on-screen Tab key would be a second way to do everything and a
       // control a child could press that changes nothing they were looking at.
       //
-      // ROUND 3. Round two had to MARK this rail (`keyLegend: true`) so that an
-      // oracle reading rendered strings would excuse it, and a critic found what
-      // a self-granted exemption buys: on the settings screen `ESC` in the title
-      // bar was printed in the same table as `Esc` in the footer, one of them
-      // dead and one of them clickable, which is a contradiction a child meets.
-      // A hint now declares itself and this rail is not one -- it is a keycap
-      // beside a word, in two items -- so nothing lists it and nothing has to
-      // excuse it. The rule the child can actually learn holds on every screen:
-      // IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU CAN PRESS IT. Nothing in a
-      // legend ever lights.
-      Row {
+      // ROUND 3 took a self-granted exemption (`keyLegend: true`) off this rail
+      // and called the problem solved. ROUND 4 is the rest of that sentence: the
+      // flag went and the CONTRADICTION STAYED ON THE SCREEN. Four keys in
+      // bordered, filled boxes here; `S  SETTINGS AND RESETS` in an identical
+      // bordered, filled box seven hundred pixels to the left on the same band,
+      // lighting under the pointer and opening the settings. The rule a child
+      // can actually learn -- IF IT LIGHTS UP WHEN YOU POINT AT IT, YOU CAN
+      // PRESS IT -- is only useful in the direction they use it if the things
+      // that never light do not look like the things that do. So the rail is a
+      // caption now: no box, no border, no fill, and it declares itself as the
+      // one legend in the game. See ui/parts/KeyLegend.qml.
+      KeyLegend {
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: garage.px(22)
-        spacing: garage.px(20)
-
-        Repeater {
-          model: [ { key: "TAB", what: "MOVE" },
-                   { key: "ARROWS", what: "CHANGE" },
-                   { key: "ENTER", what: "CHOOSE" },
-                   { key: "ESC", what: "LEAVE" } ]
-
-          Row {
-            spacing: garage.px(8)
-
-            Rectangle {
-              anchors.verticalCenter: parent.verticalCenter
-              width: keyText.implicitWidth + garage.px(14)
-              height: garage.px(26)
-              radius: Theme.cornerRadiusSmall
-              color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.07)
-              border.width: 1
-              border.color: Theme.lineStrong
-              Text {
-                id: keyText
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: modelData.key
-                color: Theme.text
-                font.family: Theme.mono
-                font.bold: true
-                font.pixelSize: garage.fs(15)
-                font.letterSpacing: garage.px(1)
-              }
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: modelData.what
-              color: Theme.text
-              font.family: Theme.mono
-              font.pixelSize: garage.fs(15)
-              font.letterSpacing: garage.px(1)
-            }
-          }
-        }
+        gap: garage.px(20)
+        textSize: garage.fs(15)
+        letterSpacing: garage.px(1)
+        groups: [ { key: "TAB", what: "MOVE" },
+                  { key: "ARROWS", what: "CHANGE" },
+                  { key: "ENTER", what: "CHOOSE" },
+                  { key: "ESC", what: "LEAVE" } ]
       }
     }
 

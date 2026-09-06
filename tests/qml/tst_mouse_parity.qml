@@ -1131,6 +1131,139 @@ Item {
              + " state; the walk is not seeing the tree")
     }
 
+    // ==================================================================
+    // ROUND 4. ORACLE FOUR: A HINT SOMEBODY DREW BY HAND.
+    // ==================================================================
+    //
+    // `test_06` above asks the COMPONENT, which is right and is blind to a hint
+    // that is not one. A critic wrote four printed key hints into a screen and
+    // three of them were invisible to every gate in this repository: one
+    // assembled its string at runtime (`keys + "  " + action`), one moved its
+    // literal into a `Repeater`'s model so the source check could not see it, one
+    // was drawn with `Canvas.fillText`, and one was bound to a property. The
+    // fourth was caught only until it was wrapped in a Repeater.
+    //
+    // By the time they are on the screen they are words, so this reads the words
+    // -- under a grammar that never reads a bare digit as a key, which is where
+    // every false positive of round two's rule came from (`3  CORRECT`,
+    // `7  LAPS`, `2  TO GO`). See the long block in `dev/KeyHints.js`.
+    //
+    // Two readings, because this game draws a hint two ways: one Text, and a
+    // keycap beside a word in two items -- which is `ui/Game.qml`'s settings
+    // door, and is exactly the shape the critic's `ESC │ QUIT THE GAME` probe
+    // used to escape everything.
+    //
+    // The one thing in the game that prints keys and is deliberately not a
+    // control declares itself (`ui/parts/KeyLegend.qml`). That is an exemption
+    // written down where a reader can find it, which is the opposite of round
+    // three, where the rails were excused by nothing but the fact that no rule
+    // could see them.
+    function test_33_no_printed_key_on_any_screen_is_dead() {
+      var list = suite.states()
+      var read = 0
+      for (var s = 0; s < list.length; s++) {
+        suite.enter(list[s])
+        var screen = list[s].item
+        var entries = suite.printedKeyEntries(screen)
+        for (var i = 0; i < entries.length; i++) {
+          var item = entries[i].item
+          // A screen switched off behind the one question in the game is not a
+          // screen with a dead key on it: nothing there is pressable, by either
+          // hand, and the child is being told exactly that. `test_06` draws the
+          // same line for the same reason.
+          if (!suite.switchedOn(item, screen))
+            continue
+          read += 1
+          if (suite.underKeyLegend(item, screen))
+            continue
+          if (suite.clickTargetOver(item, screen) !== null)
+            continue
+          // A line made ENTIRELY of controls is not a dead key however it is
+          // stacked: the race puts `H  PIT CREW` over `ESC  LEAVE` in one
+          // Column, and read as one line that Column has nothing pressable over
+          // it while both of the lines under it are controls.
+          if (entries[i].joined && suite.everyStringIsPressable(item, screen))
+            continue
+          verify(false,
+                 list[s].name + ": \"" + entries[i].text.replace(/\n/g, " | ")
+                 + "\" is printed on this screen and a click on it does nothing. A key"
+                 + " printed where a child can read it is a promise that pressing it"
+                 + " does something; a child who finds one of these clickable will"
+                 + " press the next one. Write it as a KeyHint"
+                 + " (ui/parts/KeyHint.qml), or as the one declared legend"
+                 + " (ui/parts/KeyLegend.qml) if it is a caption and nothing else.")
+        }
+      }
+      verify(read >= 10, "only " + read + " printed keys were found on any screen; the"
+             + " oracle is not reading the words")
+    }
+
+    /**
+     * Every string on a screen that promises a key does something, as
+     * `{ item, text, joined }`. The twin of `dev/Harness.qml`'s own; see the note
+     * there for why a line is read both on its own and joined with its siblings.
+     */
+    function printedKeyEntries(screen) {
+      var found = []
+      var all = suite.itemsUnder(screen)
+      for (var i = 0; i < all.length; i++) {
+        var node = all[i]
+        if (suite.isDrawnText(node, screen)
+            && KeyHints.looksLikePrintedKey(node.text))
+          found.push({ "item": node, "text": String(node.text), "joined": false })
+        var kids = node.children
+        if (!kids || kids.length < 2 || kids.length > 6)
+          continue
+        var strings = suite.textsUnder(node, screen, 4)
+        if (strings.length < 2 || strings.length > 3)
+          continue
+        var line = strings.join("  ")
+        if (KeyHints.looksLikePrintedKey(line))
+          found.push({ "item": node, "text": line, "joined": true })
+      }
+      return found
+    }
+
+    function isDrawnText(item, screen) {
+      return typeof item.text === "string" && item.text.length > 0
+             && item.font !== undefined && item.textFormat !== undefined
+             && item.horizontalAlignment !== undefined && suite.drawn(item, screen)
+    }
+
+    function textsUnder(node, screen, cap) {
+      var out = []
+      var stack = [node]
+      while (stack.length > 0 && out.length <= cap) {
+        var item = stack.shift()
+        if (suite.isDrawnText(item, screen))
+          out.push(String(item.text))
+        var kids = item.children
+        for (var i = 0; kids && i < kids.length; i++)
+          stack.push(kids[i])
+      }
+      return out
+    }
+
+    function underKeyLegend(item, screen) {
+      var node = item
+      while (node && node !== screen.parent) {
+        if (node.isKeyLegend === true)
+          return true
+        node = node.parent
+      }
+      return false
+    }
+
+    function everyStringIsPressable(node, screen) {
+      var all = suite.itemsUnder(node)
+      for (var i = 0; i < all.length; i++) {
+        if (suite.isDrawnText(all[i], screen)
+            && suite.clickTargetOver(all[i], screen) === null)
+          return false
+      }
+      return true
+    }
+
     // DIRECTION TWO, ORACLE ONE: nothing is reachable by key and not by click.
     //
     // Every item whose `Accessible.role` says it is a control has a click target

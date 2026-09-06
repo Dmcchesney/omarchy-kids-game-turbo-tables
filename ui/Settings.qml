@@ -414,61 +414,25 @@ FocusScope {
         }
       }
 
-      // A key LEGEND, not a row of controls: see the note on the garage's own
-      // rail. It states the whole screen's keyboard rather than offering an
-      // action where the action happens, nothing in it ever lights under the
-      // pointer, and it is drawn as a keycap beside a word in two items -- so it
-      // is not a `KeyHint` and the parity walk does not list it. Round two
-      // needed a `keyLegend: true` flag here to excuse it from a rule that read
-      // rendered strings; that rule is gone and so is the flag.
-      Row {
+      // A key LEGEND, not a row of controls, and after round 4 it does not look
+      // like one either: no box, no border, no fill, because the four keycaps
+      // that used to be here were drawn exactly like the live `S  SETTINGS AND
+      // RESETS` keycap in the garage's title band. See ui/parts/KeyLegend.qml.
+      KeyLegend {
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
-        spacing: settings.px(18)
-
-        Repeater {
-          // One arrow contract across every screen of the flow: Tab and the up
-          // and down arrows move, left and right change a value where the stop
-          // has one. `ARROWS CHANGE` was true of four rows on this screen and
-          // false of the other four, and it disagreed with the results screen,
-          // where left and right moved.
-          model: [ { key: "TAB  ↑ ↓", what: "MOVE" },
-                   { key: "◀ ▶", what: "CHANGE" },
-                   { key: "ENTER", what: "CHOOSE" },
-                   { key: "ESC", what: "BACK" } ]
-
-          Row {
-            spacing: settings.px(7)
-
-            Rectangle {
-              anchors.verticalCenter: parent.verticalCenter
-              width: keyText.implicitWidth + settings.px(13)
-              height: settings.px(25)
-              radius: Theme.cornerRadiusSmall
-              color: Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.07)
-              border.width: 1
-              border.color: Theme.lineStrong
-              Text {
-                id: keyText
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: modelData.key
-                color: Theme.text
-                font.family: Theme.mono
-                font.bold: true
-                font.pixelSize: settings.fs(14)
-              }
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: modelData.what
-              color: Theme.textLabel
-              font.family: Theme.mono
-              font.pixelSize: settings.fs(14)
-            }
-          }
-        }
+        gap: settings.px(18)
+        textSize: settings.fs(14)
+        letterSpacing: 0
+        // One arrow contract across every screen of the flow: Tab and the up and
+        // down arrows move, left and right change a value where the stop has
+        // one. `ARROWS CHANGE` was true of four rows on this screen and false of
+        // the other four, and it disagreed with the results screen, where left
+        // and right moved.
+        groups: [ { key: "TAB  ↑ ↓", what: "MOVE" },
+                  { key: "◀ ▶", what: "CHANGE" },
+                  { key: "ENTER", what: "CHOOSE" },
+                  { key: "ESC", what: "BACK" } ]
       }
     }
 
