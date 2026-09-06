@@ -1715,7 +1715,25 @@ Item {
       y: inRange ? view.vAt(zed) * view.height + view.shakeY : 0
       width: 0
       height: 0
-      z: 1000 - zed
+      // DEPTH, AND ONLY WHILE IT IS ON THE SCREEN.
+      //
+      // `z: 1000 - zed` on its own is a number that changes on every frame for
+      // every one of the hundred and thirty-three placements, whether or not
+      // the placement is drawn. Qt's own `qt.quick.dirty` log measured what
+      // that costs on the Race screen: 117 ZValue updates and 5.5 child
+      // re-sorts a frame, 28% of every dirty scene-graph node in the whole
+      // picture, plus a recursive `updateChildWindowStackingOrder` walk that
+      // was 2.2% of the main thread in a `sample` profile.
+      //
+      // A hundred of those are for props BEHIND THE CAMERA, and z decides one
+      // thing only: the order siblings are painted in. An item that is not
+      // painted has no order. So an off-screen placement parks at a constant
+      // and stops touching the scene graph at all; the frame a prop becomes
+      // visible, the same binding hands it its true depth, because `visible`
+      // is a dependency of it. The painted order is therefore unchanged --
+      // every drawn prop still carries exactly `1000 - zed` -- and the frames
+      // are byte-identical.
+      z: visible ? 1000 - zed : 1000
       visible: inRange && clarity > 0.004
                && x > -view.width * 0.9 && x < view.width * 1.9
 
