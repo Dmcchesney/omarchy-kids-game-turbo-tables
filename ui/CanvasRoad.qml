@@ -230,6 +230,13 @@ Canvas {
     var fr = fogColor.r, fg = fogColor.g, fb = fogColor.b
     var rdr = roadColor.r, rdg = roadColor.g, rdb = roadColor.b
     var rar = roadAlt.r, rag = roadAlt.g, rab = roadAlt.b
+    // THE BUFFERS, READ ONCE, FOR THE REASON THE PARAGRAPH ABOVE GIVES. They
+    // are QML properties, so `flagsBuf` inside the band loop would be a trip
+    // through the property system a hundred times a repaint -- which is how a
+    // change made to stop allocating can end up costing more than the
+    // allocation did. Everything below takes its buffer as an argument.
+    var mixB = mixBuf, flagsB = flagsBuf, soilB = soilBuf, scrubB = scrubBuf
+    var shoulder = shoulderBuf, duskB = duskNow
     var rur = rumbleColor.r, rug = rumbleColor.g, rub = rumbleColor.b
     var rlr = rumbleAlt.r, rlg = rumbleAlt.g, rlb = rumbleAlt.b
 
@@ -374,7 +381,7 @@ Canvas {
 
       // The terrain and the lake are drawn in their own pass, before this
       // loop -- see `drawTerrain` below and the note on what it costs.
-      var flags = sectorFlags(sMid)
+      var flags = sectorFlags(sMid, mixB, flagsB)
 
       // ------------------------------------------------- the pit's grid
       // The diagnostic floor grid, in three octaves, and ONLY at the pit --
@@ -409,8 +416,7 @@ Canvas {
       // strip is a dirt shoulder in the sector's own soil.
       var cHere = Terrain.curveNormAt(sMid)
       var bend = Terrain.smooth(0.22, 0.72, Math.abs(cHere))
-      var soilRgb = sectorSoil(sMid)
-      var shoulder = shoulderBuf
+      var soilRgb = sectorSoil(sMid, mixB, soilB, duskB)
       shoulder[0] = soilRgb[0] * 0.72
       shoulder[1] = soilRgb[1] * 0.72
       shoulder[2] = soilRgb[2] * 0.72
@@ -427,7 +433,7 @@ Canvas {
         var drift = Math.max(0, Math.min(1,
           (Terrain.blockNoise(0, sMid, 3.0) - 0.34) / 0.40)) * flags[2]
         if (drift > 0.001) {
-          var crest = sectorScrub(sMid)
+          var crest = sectorScrub(sMid, mixB, scrubB, duskB)
           for (var dc = 0; dc < 3; dc++)
             shoulder[dc] += (crest[dc] - shoulder[dc]) * drift
           kerbR *= 1 - 0.70 * drift
@@ -606,6 +612,7 @@ Canvas {
     var dusk = duskNow
     var dmR = dusk[0], dmG = dusk[1], dmB = dusk[2]
     var scratch = [0, 0, 0]
+    var rowCtx = rowBuf
     var z = nearDistance
     var guard = 0
     // A COLOUR IS ALLOCATED ONCE PER TONE, NOT ONCE PER BLOCK.
@@ -652,7 +659,7 @@ Canvas {
       var sMid = mid + uTravel
       var fFloor = Math.max(0, Math.min(1, Math.exp(-uFog * mid * mid * 0.0011)))
       var sx = -shimmerPx(yNear / h)
-      var row = Terrain.rowContextInto(sMid, mid, rowBuf)
+      var row = Terrain.rowContextInto(sMid, mid, rowCtx)
 
       var reach = mid * uAspect / uFocal
       var mid0 = -uCurve * mid * mid
@@ -791,10 +798,9 @@ Canvas {
   // `scrubBuf` are separate arrays precisely because the road loop holds all
   // three at once; `mixBuf` is shared because no caller keeps it past the line
   // that reads it.
-  function sectorFlags(s) {
-    var m = Terrain.sectorMixInto(s, mixBuf)
+  function sectorFlags(s, mix, out) {
+    var m = Terrain.sectorMixInto(s, mix)
     var a = Terrain.FLAGS[m[0]], b = Terrain.FLAGS[m[1]], t = m[2]
-    var out = flagsBuf
     out[0] = a[0] + (b[0] - a[0]) * t
     out[1] = a[1] + (b[1] - a[1]) * t
     out[2] = a[2] + (b[2] - a[2]) * t
@@ -804,10 +810,9 @@ Canvas {
   // The grid's own backing tone. Dusked with the same triple the terrain takes,
   // so the pit's floor under the neon dims with everything else rather than
   // staying at noon under a lap-12 sky.
-  function sectorSoil(s) {
-    var m = Terrain.sectorMixInto(s, mixBuf)
-    var out = Terrain.mix3Into(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2], soilBuf)
-    var d = duskNow
+  function sectorSoil(s, mix, out, d) {
+    var m = Terrain.sectorMixInto(s, mix)
+    Terrain.mix3Into(Terrain.SOIL[m[0]], Terrain.SOIL[m[1]], m[2], out)
     out[0] *= d[0]
     out[1] *= d[1]
     out[2] *= d[2]
@@ -817,10 +822,9 @@ Canvas {
   // The sector's crest tone, dusked: what the dunes' sand drifts over the
   // shoulder are made of. road.frag has `scrub` as a local at that point;
   // this renderer has to go and get it.
-  function sectorScrub(s) {
-    var m = Terrain.sectorMixInto(s, mixBuf)
-    var out = Terrain.mix3Into(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2], scrubBuf)
-    var d = duskNow
+  function sectorScrub(s, mix, out, d) {
+    var m = Terrain.sectorMixInto(s, mix)
+    Terrain.mix3Into(Terrain.SCRUB[m[0]], Terrain.SCRUB[m[1]], m[2], out)
     out[0] *= d[0]
     out[1] *= d[1]
     out[2] *= d[2]
@@ -835,7 +839,7 @@ Canvas {
   // exactly as bright as a line. Drawing translucent lines stacked alpha at
   // every crossing and the floor read as strings of beads.
   function drawGrid(ctx, w, h, zFar, zNear, yFar, yNear, fFloor, sx, amount) {
-    var groundHere = sectorSoil(zFar + travel)
+    var groundHere = sectorSoil(zFar + travel, mixBuf, soilBuf, duskNow)
     var base = Qt.rgba(groundHere[0], groundHere[1], groundHere[2], 1)
     var octaves = [
       { "period": gridScale * 0.0625, "alpha": fadeIn(zFar, 4.6, 2.2) * 0.55 * gridAlpha * amount, "coarse": 16 },
