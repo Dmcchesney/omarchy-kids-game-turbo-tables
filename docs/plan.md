@@ -83,7 +83,7 @@ omarchy-kids-game-turbo-tables/
 │   ├── design.md  plan.md  environment.md  open-questions.md
 │   ├── golden-hour-reference.png   THE BAR for every scene: Omarchy Quattro's wallpaper at 1920x1080
 │   ├── golden-hour-car.png         THE BAR for the cars: the wallpaper's car, cropped
-│   └── garage-room-mock.png        v1's mock; history, not a bar
+│   └── handoff/                    before-and-after frames for HANDOFF.md
 ├── LICENSE  NOTICE  README.md  HANDOFF.md
 └── package.json  tsconfig.json  esbuild.config.mjs  .github/workflows/ci.yml
 ```

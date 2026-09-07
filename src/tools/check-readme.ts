@@ -442,8 +442,10 @@ for (const invariant of INVARIANTS) {
 // The exculpatory words are the ones that make a mention not a claim about
 // today: a negation, or an explicit reference to the future.
 //
-// The canonical description of the design mock is three exact sentences owned by
-// this file. Round 3 broke the previous version of this exemption: it matched a
+// The canonical description of the root preview image is two exact sentences
+// owned by this file (until 2026-09-07 the same mechanism described a design
+// mock that has since been deleted). Round 3 broke the previous version of this
+// exemption: it matched a
 // 60-character *prefix* against a whole unit and then deleted that unit from the
 // claim scan and the contradiction scan alike, so a clause appended to the
 // sentence -- a leaderboard sync, a stored full name and birthday with an ISO
@@ -456,24 +458,20 @@ for (const invariant of INVARIANTS) {
 //   * nothing is ever removed from the contradiction scan. It runs over every
 //     unit of the README, unconditionally, including these three.
 
-const MOCK_IMAGE = "docs/garage-room-mock.png";
-const MOCK_DESCRIPTION = [
-  "`docs/garage-room-mock.png` is a design mock of the future multiplayer lobby: an invite code, four"
-  + " named children, ready toggles and APPROVED FRIEND / DEVICE VERIFIED badges, none of which exists"
-  + " in this plugin, which is solo and offline.",
-  "Only the kart stall on its left, the body, paint and number pickers, is the reference the solo garage"
-  + " will be built against.",
-  "It is not a screenshot of this plugin and must never be used as its preview.",
+const PREVIEW_IMAGE = "preview.png";
+const PREVIEW_DESCRIPTION = [
+  "`preview.png` is the garage as this plugin draws it, captured through the repository's own headless harness (`dev/Harness.qml --screen Garage --shot`) at 1920 by 1080 with the frame-rate overlay off and no control focused.",
+  "It is a rendering of the plugin's own screen, not a photograph of a child's machine, and it is retaken whenever the garage changes.",
 ];
 
 const EXCULPATORY = /\b(?:no|not|never|nothing|none|nor|without|neither|future|will|would|planned|design mock)\b/i;
 
 const flatten = (text: string) => text.replace(/\s+/g, " ").trim();
-const CANONICAL_MOCK_UNITS = new Set(MOCK_DESCRIPTION.map(flatten));
+const CANONICAL_UNITS = new Set(PREVIEW_DESCRIPTION.map(flatten));
 
 /** True only when the unit *is* one of this file's own sentences, in full. */
-function isCanonicalMockSentence(text: string): boolean {
-  return CANONICAL_MOCK_UNITS.has(flatten(text));
+function isCanonicalSentence(text: string): boolean {
+  return CANONICAL_UNITS.has(flatten(text));
 }
 
 for (const unit of units) {
@@ -1031,7 +1029,7 @@ for (const row of ROWS) {
 // they are not read as claims about the plugin. That is the only thing the
 // exemption buys, and it buys it only for a unit that equals one of them exactly:
 // the contradiction scan above already ran over them like everything else.
-const claims = units.filter((unit) => !isCanonicalMockSentence(unit.text) && isClaim(unit));
+const claims = units.filter((unit) => !isCanonicalSentence(unit.text) && isClaim(unit));
 const classified = new Set<Unit>();
 
 for (const row of ROWS) {
@@ -1057,7 +1055,7 @@ for (const row of ROWS) {
   // rule §4a already applies to keys.
   if (row.ground)
     for (const unit of units) {
-      if (isCanonicalMockSentence(unit.text)) continue;
+      if (isCanonicalSentence(unit.text)) continue;
       if (NEGATOR.test(unit.text) || FUTURE.test(unit.text)) continue;
       for (const problem of row.ground(unit)) fail(`capability "${row.name}"`, problem);
     }
@@ -1199,24 +1197,30 @@ for (const match of readme.matchAll(/!\[([^\]]*)\]\(([^)\s]+)\)/g)) {
   const line = readme.slice(0, match.index).split("\n").length;
   fail(
     "embedded image",
-    `README.md:${line} embeds \`${match[2]}\`. This repository ships no picture of the running plugin, so an embedded image reads as a screenshot of one. Remove the embed, or add the file to this rule deliberately.`,
+    `README.md:${line} embeds \`${match[2]}\`. The one picture of the running plugin is the root preview.png, which the marketplace publishes on its own; an image embedded here would be presented as a second one. Remove the embed, or add the file to this rule deliberately.`,
   );
 }
 
-// The marketplace reads `preview.png` from the repository root. Round 3 found one
-// tracked at HEAD, byte-identical to `docs/garage-room-mock.png` -- the multiplayer
-// lobby this README says must never be used as its preview -- under precisely that
-// filename. Nothing in this gate had a rule about it. Until M6 produces a real one
-// from a recording of the finished game, a root preview.png is a failure. Delete
-// this rule in the same commit that adds the real image, deliberately.
-if (tree.paths.has("preview.png"))
-  fail(
-    "preview image",
-    "preview.png exists at the repository root. This repository ships no picture of the running plugin, and the marketplace"
-    + " publishes this exact filename as the plugin's preview, so whatever it holds is presented to a parent as a screenshot"
-    + " of the game. The real one is made at M6 from a recording of the finished game; until then there is none.",
-  );
-else audited.push("preview image: no preview.png at the repository root, as NOTICE says");
+// The marketplace reads `preview.png` from the repository root and publishes it
+// to parents as the picture of the plugin. Round 3 found one tracked at HEAD that
+// was byte-identical to a design mock of a multiplayer lobby, and this rule then
+// forbade the file outright until a real one existed. Since 2026-09-07 the real
+// one exists -- the garage, rendered by the plugin's own harness -- so the rule is
+// now the opposite: the file must be there, must be a PNG of at least 1280 by
+// 720, and must be described by the two canonical sentences in README.md and in
+// NOTICE, so that what a parent sees on the marketplace is what the README says
+// it is.
+if (!tree.paths.has(PREVIEW_IMAGE)) {
+  fail("preview image", `${PREVIEW_IMAGE} is missing from the repository root; the marketplace publishes that file as the plugin's picture and this README describes it`);
+} else {
+  const bytes = await readFile(join(root, PREVIEW_IMAGE));
+  const isPng = bytes.length > 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const width = isPng ? bytes.readUInt32BE(16) : 0;
+  const height = isPng ? bytes.readUInt32BE(20) : 0;
+  if (!isPng) fail("preview image", `${PREVIEW_IMAGE} does not begin with the PNG signature`);
+  else if (width < 1280 || height < 720) fail("preview image", `${PREVIEW_IMAGE} is ${width}x${height}; the marketplace card wants at least 1280x720`);
+  else audited.push(`preview image: ${PREVIEW_IMAGE} at the repository root is a ${width}x${height} PNG`);
+}
 
 const SCREENSHOT_CLAIM =
   /\b(?:screenshot of (?:this|the) (?:plugin|game)|as the game draws it|what the game looks like|pictured above|shown above|the screenshot above|screen recording of)\b/i;
@@ -1229,30 +1233,26 @@ for (const unit of units) {
   );
 }
 
-// The mock image is described in two files. Round 2 found three different
-// descriptions of it, one of which hid the invite code. Every paragraph that
-// names the file, in either document, must carry the same words.
+// The preview image is described in two files. Round 2 found three different
+// descriptions of the image this rule then covered, one of which hid what the
+// picture showed. Both documents must carry the same two sentences, verbatim.
 {
   const noticePath = join(root, "NOTICE");
   const notice = await readFile(noticePath, "utf8");
   for (const [name, text] of [["README.md", readme], ["NOTICE", notice]] as const) {
-    const paragraphs = text.split(/\n\s*\n/);
-    const mentioning = paragraphs.filter((paragraph) => paragraph.includes(MOCK_IMAGE));
-    if (!mentioning.length) {
-      fail("mock image", `${name} never mentions ${MOCK_IMAGE}; both documents must describe it, identically`);
+    const flat = text.replace(/\s+/g, " ");
+    if (!flat.includes(PREVIEW_IMAGE)) {
+      fail("preview image", `${name} never mentions ${PREVIEW_IMAGE}; both documents must describe it, identically`);
       continue;
     }
-    for (const paragraph of mentioning)
-      for (const piece of MOCK_DESCRIPTION) {
-        const flat = paragraph.replace(/\s+/g, " ");
-        if (!flat.includes(piece.replace(/\s+/g, " ")))
-          fail(
-            "mock image",
-            `${name} describes ${MOCK_IMAGE} without the required words. Every paragraph naming that file, in README.md and in NOTICE, must contain, verbatim:\n    "${piece}"`,
-          );
-      }
+    for (const piece of PREVIEW_DESCRIPTION)
+      if (!flat.includes(piece.replace(/\s+/g, " ")))
+        fail(
+          "preview image",
+          `${name} does not carry the canonical description of ${PREVIEW_IMAGE}. README.md and NOTICE must both contain, verbatim:\n    "${piece}"`,
+        );
   }
-  audited.push(`mock image: ${MOCK_IMAGE} described identically in README.md and NOTICE`);
+  audited.push(`preview image: ${PREVIEW_IMAGE} described identically in README.md and NOTICE`);
 }
 
 // ---------------------------------------------------------------------------

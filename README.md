@@ -14,15 +14,19 @@ Maintained by Don McChesney (`Dmcchesney`) as a games spoke of the
 | Category | Kids |
 | License | MIT |
 
-**Status: in development.** The overlay opens, takes the keyboard, and closes, and the rules engine
-behind it is written and covered by tests. The overlay hosts the flow a child plays through: the
+**Status: playable, in play test.** The whole game is built and every gate in this repository is
+green; what it waits on is people playing it. Two things are known to be unfinished and are said
+here so nobody discovers them: the sound is a first pass that nobody has listened to, and no frame
+rate has yet been measured on a machine with a GPU (the software-rendered development VM runs the
+race at about 35 frames a second). The overlay opens, takes the keyboard, and closes, and the rules
+engine behind it is written and covered by tests. The overlay hosts the flow a child plays through: the
 garage, the countdown, the race, the results and the settings screen, one at a time, each reached
 from the one before it with the keyboard alone, and `Escape` meaning back one everywhere in it. The
 kart, paint, number and race settings a child chooses are written to one file the game owns and are
 still there next time, because the file the engine defines is the file the shell reads and writes.
 When that file cannot be read, the game leaves it exactly as it is and says so on screen for the rest
 of the session instead of quietly starting over. Each power-up, each hit taken, each block and each
-hand dealt plays its own short recorded cue through Qt Multimedia, and the settings screen switches
+hand dealt plays its own short synthesised cue through Qt Multimedia, and the settings screen switches
 all of it off. Nobody involved in building this has heard those cues; they are checked for format,
 length and routing, and they wait on an ear. The settled design and the
 build plan are in
@@ -114,13 +118,14 @@ omarchy plugin disable io.github.dmcchesney.turbo-tables-solo
 
 clears it.
 
-**How strong that evidence is.** The `omarchy plugin remove [id] [--yes]` form, the `omarchy plugin rm`
-alias, `omarchy plugin disable` and the two-entry `shell.json` caveat above were all **read from source
-rather than executed**: from `omarchy plugin remove --help` and from Omarchy 4's own plugin scripts on a
-development VM. A full add-then-remove cycle has deliberately not been run against this checkout,
-because the removal deletes the plugin folder and this checkout is the working tree. One real cycle on a
-throwaway clone is a task for M7, before submission. Nothing in this repository verifies any of it:
-`npm run check:readme` checks the shape of these commands, never their behaviour.
+**How strong that evidence is.** One full cycle was executed on 2026-09-07 on an Omarchy 4 development
+VM against a throwaway clone of this repository carrying a different plugin id: `omarchy plugin add`
+cloned it, validated it and enabled both kinds; the overlay opened from the toggle command and a race
+ran; `omarchy plugin remove` deleted the folder and unloaded the plugin, and left the second kind's
+`shell.json` entry behind exactly as described above, which `omarchy plugin disable` then cleared. The
+`omarchy plugin rm` alias and the `--yes` flag were read from `--help` rather than executed. Nothing in
+this repository verifies any of it: `npm run check:readme` checks the shape of these commands, never
+their behaviour.
 
 The garage writes one file it owns, and deleting it is all that is left to do. It holds the settings
 and records described under Permissions and privacy, and nothing else:
@@ -212,21 +217,17 @@ listed here so a reviewer can see they were decided rather than overlooked:
 - `.claude/skills/gauntlet-loop/` — 8 KB describing the development workflow this repository is built
   with, required in-tree by prerequisite 4. The shell never loads it and it is not part of the running
   plugin; its licence and provenance are recorded in [NOTICE](NOTICE).
-- the design mock under `docs/` — 1.78 MB, required by prerequisite 3, and described in its own
-  paragraph below because that description is a fixed string in `src/tools/check-readme.ts` rather
-  than prose anybody may reword.
+- `preview.png` at the root — the marketplace publishes this exact file as the plugin's picture, so
+  its description is a fixed string in `src/tools/check-readme.ts` rather than prose anybody may
+  reword.
 
-`docs/garage-room-mock.png` is a design mock of the future multiplayer lobby: an invite code, four
-named children, ready toggles and APPROVED FRIEND / DEVICE VERIFIED badges, none of which exists
-in this plugin, which is solo and offline. Only the kart stall on its left, the body, paint and number
-pickers, is the reference the solo garage will be built against. It is not a screenshot of this plugin
-and must never be used as its preview.
+`preview.png` is the garage as this plugin draws it, captured through the repository's own headless harness (`dev/Harness.qml --screen Garage --shot`) at 1920 by 1080 with the frame-rate overlay off and no control focused.
+It is a rendering of the plugin's own screen, not a photograph of a child's machine, and it is retaken whenever the garage changes.
 
-Those three sentences are owned by the gate, not by this document: [NOTICE](NOTICE) carries them
-verbatim, `npm run check:readme` fails if the two documents ever differ, and the exemption that keeps
-the gate from reading them as claims about the plugin applies to each sentence exactly, in full, and to
-nothing else. Both files are reconsidered at M6, when the submission commit is tagged and the real
-preview image is made.
+Those two sentences are owned by the gate, not by this document: [NOTICE](NOTICE) carries them
+verbatim, `npm run check:readme` fails if either document drops them or if the file is missing, is
+not a PNG, or is smaller than 1280 by 720, and the exemption that keeps the gate from reading them as
+claims about the plugin applies to each sentence exactly, in full, and to nothing else.
 
 The directories the build plan has still to fill carry a `.gitkeep`, so the shape of the finished
 plugin is visible and reviewable before the files land.
@@ -327,10 +328,10 @@ reproduce.
   *not* check is the rest of the file. A genuine PNG with a payload appended to it passes.
 - Nothing here runs Omarchy. The install, open and remove commands are checked for shape rather than
   executed; the Remove section says which of its claims were read from source rather than executed.
-- It does not look at images. The wording used for the one image under `docs/` is checked against
-  [NOTICE](NOTICE); the pixels are not. What it does check is that no `preview.png` exists at the
-  repository root at all, because the marketplace publishes that exact filename to parents as a
-  picture of the game.
+- It does not look at pixels. The root preview image is checked for existence, for the PNG signature
+  and for a size of at least 1280 by 720, and its two-sentence description is checked against
+  [NOTICE](NOTICE); whether the picture is what those sentences say is a matter for the reader and
+  the harness command they name.
 - It reads the working tree, not the index. A file deleted from the tree but still staged for commit
   would be invisible to it; `npm run scan` refuses to report at all while an unstaged deletion exists,
   which is the only guard against that.
