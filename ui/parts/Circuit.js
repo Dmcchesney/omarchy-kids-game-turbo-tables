@@ -572,3 +572,46 @@ function tagged(tag) {
       out.push(i)
   return out
 }
+
+// ======================================================= WHERE A RACE OPENS
+//
+// PIECE 5, ROUND 3. Two screens stand at the start line -- the countdown and
+// the race's own first frame -- and until this constant existed the number was
+// written in `ui/Race.qml` and the place was PAINTED AGAIN in
+// `ui/parts/CountdownScene.qml` from a second set of numbers. That is how the
+// two came to be one second apart with the horizon at 57.4% on one and 40.3%
+// on the other. The place is the circuit's, so the circuit says where it is,
+// once, and both screens read it.
+//
+// WHY -6.5 AND NOT 0. `PLACEMENTS` stands the start gantry at s = 3.5 and the
+// road's own shader paints the start grid at s = 2..5; the camera carries the
+// child's kart `TrackView.playerZ` = 3.20 units ahead of itself. Four values
+// were rendered and measured as the screen's own first frame (the arch's drawn
+// box at 1920 x 1080):
+//
+//     travel   the arch's box                       what the frame is
+//     -----    ------------------------------       -----------------
+//        0     2209 wide, box top at y = -199        under the arch, no sky
+//     -3.0     1190 wide, board across the fact      the fact over the sign
+//     -5.0      910 wide, board still under it       the fact over the sign
+//     -6.5      773 wide, board clear below it       the frame both screens use
+//
+// NEGATIVE IS NOT A SPECIAL CASE. `Terrain.sectorBlend`, `sectorMix` and
+// `TrackView.propZ` all fold any real into the 432-unit loop, so -6.5 and 425.5
+// are the same place by every one of them. The negative is written because
+// `travel` is monotonic from here and crossing zero IS crossing the line.
+var START_TRAVEL = -6.5
+
+// WHICH PLACEMENT THE START ARCH IS, so a screen standing still at the line can
+// hang something on the arch -- the countdown's beat lamps, the band its
+// numeral may not cross -- without re-deriving where the arch is from a copy of
+// the projection. It is the first `gantry` in the table, which is the one at
+// s = 3.5; the other is the finish gantry at s = 420. Computed here rather than
+// written as an index so that inserting a placement above it cannot silently
+// point it at the crowd.
+var START_ARCH = (function () {
+  for (var i = 0; i < PLACEMENTS.length; i++)
+    if (PLACEMENTS[i].kind === "gantry")
+      return i
+  return -1
+})()

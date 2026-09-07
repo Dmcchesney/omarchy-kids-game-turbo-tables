@@ -299,6 +299,28 @@ QtObject {
   readonly property var rivalNames: ["BOLT", "PISTON", "GASKET"]
   readonly property var rivalPaints: [2, 4, 3]
   readonly property var rivalNumbers: [21, 34, 55]
+
+  // WHICH CAR A SEAT IS, IN ONE PLACE.
+  //
+  // PIECE 5, ROUND 3. Two screens now stand a field on the start grid -- the
+  // race and the countdown one second before it -- and the three tables above
+  // are only half of what "which car is BOLT" means: the other half is the
+  // `(seat - 1)` indexing and the `(seat + 1) % 6` body, which `ui/Race.qml`
+  // held privately. A second screen copying those two expressions is how the
+  // countdown's field would come to be a different field from the race's, in
+  // the same way its ground came to be a different ground. So the seat answers
+  // for itself, here, beside the tables it reads.
+  //
+  // Seat 0 is the child, whose car is the save file's and not this file's.
+  function rivalFace(seat) {
+    var i = Math.max(0, seat - 1) % rivalNames.length
+    return { "name": rivalNames[i],
+             "paint": paint(rivalPaints[i]),
+             "number": rivalNumbers[i],
+             // The six bodies, in seat order, skipping the coupe the child's
+             // own car defaults to.
+             "body": (seat + 1) % 6 }
+  }
   readonly property var levelNames: ["ROOKIE", "PRO", "CHAMPION"]
 
   // --------------------------------------------------------------- derived

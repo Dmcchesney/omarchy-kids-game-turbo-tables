@@ -44,6 +44,23 @@ Item {
     seed: 42
   }
 
+  // The screen the child is looking at one second earlier. It is here so that
+  // the two cameras can be compared as two RUNNING SCREENS rather than as two
+  // source constants: `test_04` reads `travel` and `horizon` off both.
+  // BEHIND THE RACE RATHER THAN HIDDEN, and the difference is the whole case.
+  // `visible: false` stops the item tree rendering, and a `TrackView` that is
+  // not rendering has no props on the screen -- `startArchBox` is empty and the
+  // arch comparison below reads 0. The race fills the window opaquely and is
+  // declared after this, so a countdown at `z: -1` is invisible in exactly the
+  // way that matters and its camera is a live camera.
+  Countdown {
+    id: countdown
+    anchors.fill: parent
+    z: -1
+    seed: 42
+    mode: "grandPrix"
+  }
+
   TestCase {
     id: tc
     name: "RaceOpensAtTheStartLine"
@@ -207,6 +224,53 @@ Item {
              + " camera. The design's sector-1 landmark row is 'gantry, tyre"
              + " walls, pit boards, the grid floor, a silhouetted crowd with"
              + " flags', and a race opens on it")
+    }
+
+    // ================================ THE CUT MOVES THE HUD AND NOTHING ELSE
+    //
+    // PIECE 5, ROUND 3. `ui/parts/CountdownScene.qml` used to paint a start
+    // line of its own -- its own horizon at 57.5% of the frame, its own
+    // vanishing point, its own floor, the kit's arch stood on it by its own
+    // arithmetic -- and `ui/TrackView.qml` renders the same place a second
+    // later with its horizon at 40.3%. The cut moved the horizon 184 px and the
+    // sun 132 px, and every round that narrowed the gap narrowed it by tuning
+    // two files toward each other.
+    //
+    // There is one renderer for the place now, as there is one renderer for the
+    // car. This case is the guard on that, and it deliberately asks the two
+    // RUNNING SCREENS rather than reading `Circuit.START_TRAVEL` twice: a
+    // constant shared by two files proves nothing if one of them stops using
+    // it, which is exactly how `travel: 120` survived six rounds.
+    function test_04_the_countdown_and_the_race_stand_in_the_same_place() {
+      var sizes = [[1920, 1080], [1366, 768], [1024, 600]]
+      for (var i = 0; i < sizes.length; i++) {
+        tc.sizeTo(sizes[i][0], sizes[i][1])
+        // `travel` is monotonic and the road is already running by the time a
+        // case looks, so the race is rebuilt here for the same reason `test_00`
+        // rebuilds it: the only honest moment to compare two cameras is the
+        // frame `buildRace()` returns on. Nothing waits between here and the
+        // comparisons, so no frame runs and nothing advances.
+        race.seed = (i % 2 === 0) ? 4242 : 42
+        var label = sizes[i][0] + "x" + sizes[i][1]
+        compare(countdown.cameraTravel, race.trackTravel,
+                label + ": the countdown's camera is at "
+                + countdown.cameraTravel + " and the race opens at "
+                + race.trackTravel)
+        compare(countdown.cameraHorizon, race.trackHorizon,
+                label + ": the countdown's horizon is "
+                + countdown.cameraHorizon.toFixed(4) + " of the frame and the"
+                + " race's is " + race.trackHorizon.toFixed(4)
+                + ". They were 0.575 and 0.403.")
+        // And the arch is in the same place in both frames, which is the
+        // horizon and the projection together rather than either alone.
+        verify(countdown.gantryRightX - countdown.gantryLeftX > 40,
+               label + ": the countdown has the start arch on screen, "
+               + Math.round(countdown.gantryRightX - countdown.gantryLeftX) + " px across")
+        verify(Math.abs(countdown.gantryLeftX - race.archLeftX) < 1.0,
+               label + ": the arch's left edge is at "
+               + countdown.gantryLeftX.toFixed(2) + " on the countdown and "
+               + race.archLeftX.toFixed(2) + " on the race's first frame")
+      }
     }
   }
 }

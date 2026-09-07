@@ -1,5 +1,6 @@
 import QtQuick
 import "parts"
+import "parts/Circuit.js" as Circuit
 import "../engine/engine.mjs" as Engine
 
 // The race.
@@ -215,24 +216,27 @@ FocusScope {
       return "YOU"
     for (var i = 0; i < state.racers.length; i++)
       if (state.racers[i].id === racerId)
-        return Theme.rivalNames[Math.max(0, state.racers[i].seat - 1) % Theme.rivalNames.length]
+        return Theme.rivalFace(state.racers[i].seat).name
     return ""
   }
 
+  // WHICH CAR A RIVAL IS: `Theme.rivalFace`, because the countdown stands the
+  // same field on the same grid one second earlier and two copies of these
+  // three expressions is how two screens come to hold different races.
   function paintOf(racer) {
     if (racer.kind === "human")
       return Theme.paint(Store.setting("kartPaint"))
-    return Theme.paint(Theme.rivalPaints[(racer.seat - 1) % Theme.rivalPaints.length])
+    return Theme.rivalFace(racer.seat).paint
   }
   function numberOf(racer) {
     if (racer.kind === "human")
       return Store.setting("kartNumber")
-    return Theme.rivalNumbers[(racer.seat - 1) % Theme.rivalNumbers.length]
+    return Theme.rivalFace(racer.seat).number
   }
   function bodyOf(racer) {
     if (racer.kind === "human")
       return Store.setting("kartBody")
-    return (racer.seat + 1) % 6
+    return Theme.rivalFace(racer.seat).body
   }
 
   // ------------------------------------------------------------ the build
@@ -384,13 +388,28 @@ FocusScope {
   // `tests/qml/tst_race_start.qml` renders this screen's own first frame and
   // asserts what is in it, because every previous round's evidence was a frame
   // somebody had passed a travel to.
-  readonly property real startTravel: -6.5
+  //
+  // ROUND 3 MOVED THE NUMBER TO THE CIRCUIT. The countdown stands at this exact
+  // camera for the second before this screen exists, so -6.5 written here and
+  // -6.5 written there is two screens agreeing by coincidence. It is
+  // `Circuit.START_TRAVEL` now -- the circuit says where a race opens on it,
+  // once -- and the table of rendered arch boxes that chose the value moved
+  // with it.
+  readonly property real startTravel: Circuit.START_TRAVEL
 
   // WHERE THE CAMERA ACTUALLY IS, published so a spec can read it back off the
   // running screen rather than off this file's own constant. The two are only
   // equal if `buildRace()` assigned it, which is the whole defect: `startTravel`
   // could have been right and unassigned and nothing would have noticed.
   readonly property real trackTravel: track.travel
+  // The other two numbers a cut is measured by. `ui/Countdown.qml` stands at
+  // this camera for the second before this screen exists, and
+  // `tests/qml/tst_race_start.qml` compares the pair off the two RUNNING
+  // screens rather than off a shared constant -- a constant proves nothing if
+  // one of the two files stops reading it, which is exactly how `travel: 120`
+  // survived six rounds.
+  readonly property real trackHorizon: track.horizon
+  readonly property real archLeftX: track.startArchBox.x
 
   Component.onCompleted: buildRace()
   onSeedChanged: if (state) buildRace()

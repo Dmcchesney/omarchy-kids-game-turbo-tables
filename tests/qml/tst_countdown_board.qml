@@ -12,6 +12,27 @@ import "../../engine/engine.mjs" as Engine
 // instant of the pulse. This file guards it at three sizes, on all four beats,
 // and at the top of the pulse as well as at rest.
 //
+// ================================================== ROUND 3: ONE RENDERER
+//
+// The countdown is `ui/TrackView.qml` held still at `Circuit.START_TRAVEL`
+// now -- the camera the race opens on -- so the sky, the ground, the road, the
+// roadside and the arch are the race's own and not a second painting of them.
+// Three things follow for this file, and each is written beside the case it
+// changed:
+//
+//   * clearing the board is HORIZONTAL. That camera's horizon is 40.3% of the
+//     frame and an arch stands on the road, so no travel puts the board low
+//     enough for a huge numeral to hang above it; the numeral stands in the sky
+//     to the left of the arch instead, and `test_01` measures the gap;
+//   * the sun-banding case is gone. It was a sky test on a screen that painted
+//     its own sky, and the sky belongs to `SunsetSky` and `TrackView` now. What
+//     stands in its place is the claim only this screen can make -- that the
+//     place it shows is the place the race opens on -- measured by
+//     `tst_race_start.qml`'s own chequer reading, run against this frame;
+//   * the fact does not stand on the sun any more. It stands where
+//     `ui/Race.qml` draws it, on the arch's crossbar, with the race's own
+//     `factGround` plate under it, and `test_08` reads that off the picture.
+//
 // WHAT IS SET UP AND WHAT IS PLAYED. `beat` is the countdown's own clock and is
 // set directly in the geometry and picture cases, because a case that waited
 // three real seconds for `3` to become `1` would be measuring a `Timer`; the
@@ -112,30 +133,74 @@ Item {
       compare(countdown.beatWords[3], "GO")
     }
 
-    // The defect, guarded. The numeral's ink -- not its line box, which is
-    // mostly air -- plus the drop shadow under it, must finish above the top
-    // edge of the gantry's sponsor board, at the widest moment of the pulse.
-    function test_01_the_numeral_never_crosses_the_board() {
+    // THE DEFECT, GUARDED -- AND ROUND 3 CHANGED WHAT CLEARING IT MEANS.
+    //
+    // The countdown is `ui/TrackView.qml` held still at `Circuit.START_TRAVEL`
+    // now, which is the camera the race opens on, and that camera decides where
+    // the arch can be: its horizon is 40.3% of the frame and an arch stands on
+    // the road, so the board can never be lower in the frame than the horizon.
+    // At the start line the board's top edge is at 25.1% of the frame; a numeral
+    // hung between a 4.5% ceiling and a 3% clearance above it can be at most
+    // 20.1% of the frame in ink, which is smaller than the GO word already was.
+    //
+    // So the numeral does not clear the board VERTICALLY any more. It stands in
+    // the sky to the LEFT of the whole arch, and the clearance this case asserts
+    // is horizontal and is the width of the arch rather than three per cent of
+    // the frame. The arch's own drawn box is what bounds it -- flags included,
+    // because the flags are art too -- so it is bounded by the picture and not
+    // by a fraction somebody chose.
+    //
+    // Measured on the shipped frames, the gap from the numeral's rightmost cream
+    // pixel to the arch's opaque box -- which is the flags' own edge and not the
+    // transparent margin of the cell they are baked in:
+    //
+    //                  `3`     `1`      GO
+    //   1024 x  600   112 px  100 px   42 px
+    //   1366 x  768   156 px  141 px   57 px
+    //   1920 x 1080   225 px  204 px   86 px
+    //
+    // GO is the tight one at every size because it is two glyphs wide, and it is
+    // the one fitted by the column's width rather than by the sky's height.
+    function test_01_the_numeral_never_crosses_the_arch() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
         for (var b = 0; b < 4; b++) {
           countdown.beat = b
           var label = tc.sizes[s].w + "x" + tc.sizes[s].h + " beat " + countdown.beatWord
-          var floor = countdown.gantryBoardTopY
-          verify(countdown.beatInkBottomAtPulse + countdown.beatShadowDrop <= floor,
-                 label + ": the numeral's ink and its shadow end at "
-                 + Math.round(countdown.beatInkBottomAtPulse + countdown.beatShadowDrop)
-                 + " and the gantry board starts at " + Math.round(floor))
+          verify(countdown.gantryRightX - countdown.gantryLeftX > 40,
+                 label + ": the arch is on the screen and is "
+                 + Math.round(countdown.gantryRightX - countdown.gantryLeftX)
+                 + " px across, so a clearance measured against it means something")
+          verify(countdown.beatInkRightX <= countdown.gantryLeftX,
+                 label + ": the numeral's widest cream, at the top of its pulse,"
+                 + " ends at " + Math.round(countdown.beatInkRightX)
+                 + " and the arch's box begins at "
+                 + Math.round(countdown.gantryLeftX))
+          verify(countdown.beatInkLeftX >= 0,
+                 label + ": the numeral is not clipped by the left of the frame,"
+                 + " ink left " + Math.round(countdown.beatInkLeftX))
           verify(countdown.beatInkTopY >= 0,
                  label + ": the numeral is not clipped by the top of the frame, ink top "
                  + Math.round(countdown.beatInkTopY))
+          // The plan's line is "the number huge in cream over the SKY", and the
+          // horizon is where the sky stops. Below it the numeral would be
+          // standing on the crowd and the tyre walls.
+          verify(countdown.beatInkBottomAtPulse + countdown.beatShadowDrop
+                 <= countdown.horizonY,
+                 label + ": the numeral's ink and its shadow end at "
+                 + Math.round(countdown.beatInkBottomAtPulse + countdown.beatShadowDrop)
+                 + " and the camera's horizon is at "
+                 + Math.round(countdown.horizonY))
         }
       }
       countdown.beat = 0
     }
 
     // Design, Race format: "the first fact readable behind GO". Readable means
-    // clear of the only other words in the picture.
+    // clear of the only other words in the picture -- and the fact is now drawn
+    // where `ui/Race.qml` draws it, so this is also the guard on the claim that
+    // the fact does not move across the cut: it clears the board's top edge
+    // there for the same reason and by the same arithmetic.
     function test_02_the_first_fact_never_crosses_the_board() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
@@ -146,8 +211,12 @@ Item {
                label + ": the fact's ink and shadow end at "
                + Math.round(countdown.factInkBottomY + countdown.factShadowDrop)
                + ", the board starts at " + Math.round(countdown.gantryBoardTopY))
-        verify(countdown.factInkTopY > countdown.beatInkBottomY,
-               label + ": GO sits above the fact and does not touch it")
+        // The two words on the GO beat stand in two different parts of the
+        // frame now -- GO in the sky column, the fact in the middle -- so what
+        // has to hold is that they do not overlap each other.
+        verify(countdown.beatInkRightX <= countdown.factInkRect.x,
+               label + ": GO's cream ends at " + Math.round(countdown.beatInkRightX)
+               + " and the fact's ink begins at " + Math.round(countdown.factInkRect.x))
       }
       countdown.beat = 0
     }
@@ -157,48 +226,72 @@ Item {
     // calls the number "huge", and the design's accessibility section fixes the
     // fact at "never smaller than a tenth of the screen height".
     //
-    // THE NUMERAL'S FLOOR MOVED IN THE ROUND THAT TOOK THE KIT'S GANTRY, AND
-    // THAT IS A COST, NOT A ROUNDING. It stood at 0.38 of the frame against a
-    // shipped 39.5%, and both numbers were about a gantry this screen drew
-    // itself: a flat board on two posts, 2.2 world units tall over a 3.8-unit
-    // road. The kit's arch is 5.30 tall over the same road -- it is a real
-    // steel truss with flags and a lit header board -- so at the distance where
-    // its baked board is legible it stands higher in the frame and the sky
-    // above it is smaller. Measured on the shipped frames: 33.8% of the frame
-    // in ink at every one of 1366 x 768, 1920 x 1080 and 2560 x 1440, against
-    // 39.5% before. The numeral is still by a wide margin the largest thing in
-    // the picture -- 365 px of ink on a 1080 frame -- and it is still the only
-    // thing in the upper half of it. The floor below is 0.29, which is under
-    // the measurement by a twentieth of the frame and well over anything that
-    // would read as the number having stopped being the subject.
+    // THE NUMERAL'S FLOOR MOVED AGAIN IN ROUND 3, AND IT IS THE CAMERA THAT
+    // MOVED IT. Lowering a guard is the cheapest way to make a suite lie, so
+    // what moved it is written here rather than in a commit message.
     //
-    // The rest of the band, on the same frames: GO is 15.2% of the frame in ink
-    // and the fact 12.0 to 12.1%, with 29 to 53 px of clear air between them.
-    // The design's floor for the fact is a tenth of the frame.
+    // The floor was 0.29 against a shipped 33.6%, on a screen whose own horizon
+    // was at 57.4% of the frame -- 57.4% of sky to hang a numeral in. The
+    // countdown is the race's own view now, and that camera's horizon is 40.3%.
+    // A numeral standing in the sky can therefore be at most about 0.36 of the
+    // frame before its shadow crosses the skyline, and it is fitted to the
+    // narrower of that band and the sky column left of the arch.
+    //
+    // Measured on the shipped frames, the numeral's cream, above the horizon and
+    // left of the arch:
+    //
+    //                  `3`      `2`      `1`      GO
+    //   1024 x  600   26.7 %   28.2 %   29.5 %   26.8 %
+    //   1366 x  768   26.8 %   28.3 %   29.6 %   28.9 %
+    //   1920 x 1080   26.7 %   28.3 %   29.4 %   28.8 %
+    //
+    // Two things in that table are the point of the round. The build is intact
+    // -- each counted beat is larger than the one before it -- and GO IS NO
+    // LONGER THE QUIETEST FRAME OF THE FOUR: it was 15.1% of the frame in ink
+    // before round 2 and 21.7% after it, and it is 28.8% here, within half a
+    // point of the `1` that precedes it, because the fact no longer has to fit
+    // underneath it.
+    //
+    // TWO FLOORS, AND THE SECOND ONE IS ABOUT THE FACE. The counted beats are
+    // one glyph and are fitted by the SKY's height; GO is two and is fitted by
+    // the COLUMN's width, so how wide the shell's face lays `GO` out decides how
+    // tall it can be. The table above is Menlo, which is what this Mac hands
+    // down and what the shipped frames are shot in. This runner gets the
+    // fallback family (`Theme.fontFamily` is "monospace", which this Mac does
+    // not have), which lays the same two letters out wider: GO measures 22.9% of
+    // the frame here at 1366 x 768 against 28.9% on the shipped frame. Both are
+    // over round 2's 21.7%, which is the number this had to keep. So the counted
+    // beats are floored at 0.25 and GO at 0.20, and the gap between the two
+    // floors is a face, not a slack.
     function test_03_the_type_is_still_the_size_the_documents_ask_for() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
         var label = tc.sizes[s].w + "x" + tc.sizes[s].h
-        for (var b = 0; b < 3; b++) {
+        var last = 0
+        for (var b = 0; b < 4; b++) {
           countdown.beat = b
           var ink = countdown.beatInkBottomY - countdown.beatInkTopY
-          verify(ink >= root.height * 0.29,
+          var floor = (b === 3) ? 0.20 : 0.25
+          verify(ink >= root.height * floor,
                  label + " beat " + countdown.beatWord + ": the numeral's ink is "
                  + Math.round(ink) + " px, which is "
-                 + (100 * ink / root.height).toFixed(1) + "% of the frame")
+                 + (100 * ink / root.height).toFixed(1) + "% of the frame, and the"
+                 + " floor is " + (100 * floor).toFixed(0) + "%")
+          // The beats build. `1` is the tallest of the three counted beats and
+          // each one before it is smaller, which is the thing that made three
+          // seconds of one frozen picture into three different ones.
+          if (b > 0 && b < 3)
+            verify(ink > last,
+                   label + " beat " + countdown.beatWord + ": " + Math.round(ink)
+                   + " px of ink against " + Math.round(last) + " on the beat before"
+                   + " it -- a countdown builds")
+          last = ink
         }
         countdown.beat = 3
         var factInk = countdown.factInkBottomY - countdown.factInkTopY
         verify(factInk >= root.height * 0.10,
                label + ": the fact's ink is " + Math.round(factInk) + " px, and a tenth"
                + " of the frame is " + Math.round(root.height * 0.10))
-        // And GO still sits above the fact rather than on it, which is the
-        // thing the GO beat's two constants stopped doing the moment the arch
-        // moved the floor: rendered with them, GO's ink ended at 297 and the
-        // fact's began at 291.
-        verify(countdown.factInkTopY - countdown.beatInkBottomY >= root.height * 0.010,
-               label + ": GO's ink ends at " + Math.round(countdown.beatInkBottomY)
-               + " and the fact's begins at " + Math.round(countdown.factInkTopY))
       }
       countdown.beat = 0
     }
@@ -206,23 +299,6 @@ Item {
     // ============================================================ THE PICTURE
     //
     // Everything from here to the keyboard section reads the rendered frame.
-
-    // Wait until the sky's ridge canvases have landed under the sun, so a walk
-    // down the disc has a skyline to stop at. Bounded: it gives up after about
-    // half a second and lets the case fail on the picture it can see.
-    function waitForPaintedHills(x, top, bottom) {
-      var hills = [countdown.hillFarTone, countdown.hillMidTone,
-                   countdown.hillNearTone]
-      for (var tries = 0; tries < 20; tries++) {
-        var img = grabImage(countdown)
-        for (var y = top; y < bottom; y++)
-          for (var t = 0; t < hills.length; t++)
-            if (tc.isTone(img, x, y, hills[t], 6))
-              return true
-        tc.wait(25)
-      }
-      return false
-    }
 
     // Is the pixel at (x, y) this colour, within `tol` per channel on 0..255?
     function isTone(img, x, y, c, tol) {
@@ -295,18 +371,36 @@ Item {
           hist[k] = (hist[k] || 0) + 1
         }
       }
-      var best = -1, second = -1, bn = 0, sn = 0
-      for (var key in hist) {
-        var n = hist[key]
-        if (n > bn) { second = best; sn = bn; best = parseInt(key, 10); bn = n }
-        else if (n > sn) { second = parseInt(key, 10); sn = n }
-      }
+      // The bucket's CENTRE, not its floor: a five-bit bucket spans eight
+      // values, so the floor can be seven away from every pixel in it and a
+      // count taken at a tolerance of six then finds none of them. That is
+      // exactly what happened to `test_05` when the arch came closer and the
+      // board's plate spread across more buckets: it reported "fill 0" of a
+      // plate that fills two thirds of the board.
       function unpack(k) {
-        return Qt.rgba(((k >> 10) & 31) * 8 / 255, ((k >> 5) & 31) * 8 / 255,
-                       (k & 31) * 8 / 255, 1)
+        return Qt.rgba((((k >> 10) & 31) * 8 + 4) / 255, ((((k >> 5) & 31) * 8) + 4) / 255,
+                       (((k & 31) * 8) + 4) / 255, 1)
       }
-      return { "fill": unpack(best), "fillCount": bn,
-               "ink": unpack(second), "inkCount": sn }
+      var best = -1, bn = 0
+      for (var key in hist) {
+        if (hist[key] > bn) { best = parseInt(key, 10); bn = hist[key] }
+      }
+      // THE INK IS THE COMMONEST TONE THAT IS A DIFFERENT COLOUR FROM THE
+      // PLATE, and not simply the second commonest. The board is drawn much
+      // larger now that the arch stands where the race stands -- 394 x 63 px at
+      // 1920 x 1080 against 189 x 30 before -- so the plate's own dither spills
+      // into neighbouring buckets and the second commonest bucket was another
+      // shade of plate. A contrast claim is a claim about two DIFFERENT
+      // colours, so that is what is picked.
+      var fill = unpack(best)
+      var second = -1, sn = 0
+      for (var k2 in hist) {
+        var c = unpack(parseInt(k2, 10))
+        var apart = Math.abs(c.r - fill.r) + Math.abs(c.g - fill.g) + Math.abs(c.b - fill.b)
+        if (apart > 0.35 && hist[k2] > sn) { second = parseInt(k2, 10); sn = hist[k2] }
+      }
+      return { "fill": fill, "fillCount": bn,
+               "ink": second >= 0 ? unpack(second) : fill, "inkCount": sn }
     }
 
     function test_04_the_board_carries_the_words_it_is_cleared_for() {
@@ -431,9 +525,24 @@ Item {
     // the ticker stopped (`done`) and `beatMs` short, the pulse animation loops
     // every 260 ms with no pause, so a dozen grabs across a third of a second
     // land all over it, top included.
+    //
+    // THE WINDOW IS THE BOARD AND NOT THE BOARD'S ROWS, and round 3 had to move
+    // it. It used to run the full width of the frame at the board's rows, which
+    // was sound while nothing else in the picture was up there: the countdown
+    // painted its own thin gantry on an empty plain. The countdown is the
+    // race's own frame now, and the board's rows cross the arch's BEAM, whose
+    // chequers are cream by the bake -- 4,160 of them at 1366 x 768. Counting
+    // those would be counting the frozen art and calling it the type.
+    //
+    // So the window is the plate itself, which is where the claim lives: inside
+    // cell x 405..1058 the bake carries zero cream, 5,236 pixels of amber ink in
+    // 336 columns and 56,051 of plate (`ui/Countdown.qml`, `boardBox*`). Any
+    // cream in there is the type over the board, which is the defect.
     function creamInsideTheBoard(img) {
-      return tc.countTone(img, 0, Math.round(countdown.gantryBoardTopY),
-                          root.width, Math.round(countdown.gantryBoardBottomY),
+      return tc.countTone(img, Math.round(countdown.gantryBoardLeftX),
+                          Math.round(countdown.gantryBoardTopY),
+                          Math.round(countdown.gantryBoardRightX),
+                          Math.round(countdown.gantryBoardBottomY),
                           Theme.cream, 14).count
     }
 
@@ -474,293 +583,129 @@ Item {
       compare(worst, 0, "across " + frames + " frames of the beat pulse the worst"
               + " cream count inside the board was " + worst)
     }
+    // THE PICTURE. THE COUNTDOWN IS STANDING ON THE CIRCUIT'S START GRID.
+    //
+    // What this replaces, and why. The case that stood here walked down the
+    // sun's centre column counting the cut lines that band the disc. It was a
+    // sky test on a screen that painted its own sky, and it was already half
+    // obsolete when round 2 gave the two screens one `SunsetSky`. Round 3
+    // finishes that: the sky, the ground, the road and the roadside are all
+    // `ui/TrackView.qml`'s now, and `tests/qml/tst_trackview_road.qml` and
+    // `tests/qml/tst_race_start.qml` are where the picture that renderer draws
+    // is guarded. Keeping a copy of it here would be this file holding a second
+    // opinion about somebody else's frame, which is the shape of the defect the
+    // whole round is about.
+    //
+    // What belongs here instead is the claim this screen makes and no other
+    // file can check: THAT THE PLACE THE COUNTDOWN SHOWS IS THE PLACE THE RACE
+    // OPENS ON. The measurement is `tst_race_start.qml`'s own, run against this
+    // screen's frame -- the fraction of the road ahead of the field that is
+    // cream, and how many times a scanline crosses it. The start grid is six
+    // columns by four rows of chequer and fills the road; the rock quarry a
+    // race used to open in measures 2.3% of the same band and alternates twice.
+    // If this screen were painting a road of its own again, or standing
+    // anywhere but the line, this is the case that would die.
+    function isLight(img, x, y) {
+      // The chequer's cream squares as the hour's tint leaves them at lap 1,
+      // and nothing else on this road: the tarmac reads about (26, 11, 22) and
+      // the floor's grid about (60, 18, 40).
+      return img.red(x, y) > 150 && img.green(x, y) > 130 && img.blue(x, y) > 95
+    }
 
-    // THE PICTURE. The genre's signature, and the reference's defining feature:
-    // the sun is cut by horizontal bands.
-    //
-    // WHERE THE SKYLINE COMES FROM NOW. It used to come from
-    // `countdown.sunCutsAboveSkyline` and `sunSkylineY` -- two properties of a
-    // sun this screen painted itself, in a second sky that had drifted from the
-    // race's. There is one sky now, `ui/parts/SunsetSky.qml`, and its ridge line
-    // is its own business; re-deriving it in this file would be the copied
-    // number that made two skies in the first place. So the walk stops at the
-    // first HILL TONE it meets going down the disc's centre column, which is
-    // reading the picture and not re-deriving it.
-    //
-    // AND THE COUNT DROPPED, WHICH IS A COST OF SHARING THE SKY. This screen's
-    // own sun fitted seven cut lines between the disc's upper third and the
-    // skyline, so all seven cleared the hills; `SunsetSky` lays its seven on a
-    // fixed rhythm from the disc's centre and the hills take the lower ones.
-    // Measured down the centre column on the shipped frames: 4 visible cuts at
-    // every one of the three sizes, over arcs of 178, 251 and 335 rows with the
-    // longest unbroken run of flat sun at 19% of the arc -- and the race's own
-    // frame at travel 0 measures 4 cuts over 188 rows, longest flat 26%. So the
-    // countdown's sun is now the race's sun, cut for cut. The recipe for
-    // fitting the stack to the skyline is in this file's history; `SunsetSky`
-    // belongs to piece T and the report says so.
-    //
-    // THE COUNT IS FLOORED AT 3 AND NOT AT 4, AND THE REASON IS NOT SLACK. The
-    // thinnest of `SunsetSky`'s cuts is ONE plane pixel, and the plane is drawn
-    // at 480 x 270 and scaled up with nearest-neighbour sampling: at 1366 x 768
-    // that is 2.846 times, and a one-pixel row can fall between samples. This
-    // case reads 4 at 1366 x 768 from a fresh window and 3 when it follows one
-    // that left the window at 2560 x 1440. That is a property of the shared sky
-    // and of every screen drawn through the plane, this one and the race alike,
-    // and it belongs in a report rather than in a tolerance nobody explains.
-    // What holds the real claim -- that the disc is not a flat dome -- is the
-    // longest-flat-run check below: 19% of the arc against a ceiling of 45%.
-    function test_07_the_sun_is_banded_where_the_hills_leave_it() {
+    function test_07_the_countdown_stands_on_the_circuits_start_grid() {
       tc.holdTheBeat(0)
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
+        tc.wait(40)
         var label = tc.sizes[s].w + "x" + tc.sizes[s].h
-        var x = Math.round(countdown.sunCentreX)
-        var top = Math.round(countdown.sunTopY)
-        // THE SKY IS SIX CANVASES AND THEY REPAINT ASYNCHRONOUSLY. A resize
-        // asks the dome, the two cloud layers and the three ridges to repaint,
-        // and a grab taken before the ridges land sees a disc with no hills in
-        // front of it -- which moves the floor of the walk below and read 3
-        // cuts instead of 4 at 1366 x 768, but only when this case ran after
-        // one that had left the window at 2560 x 1440. So the wait is for the
-        // PICTURE and not for a duration.
-        tc.waitForPaintedHills(x, top,
-                               Math.round(countdown.sunCentreY + countdown.sunRadiusY))
         var img = grabImage(countdown)
-        // Down to the first hill pixel, or the disc's own foot, whichever comes
-        // first. The three hill tones are the sky's own, republished.
-        var hills = [countdown.hillFarTone, countdown.hillMidTone,
-                     countdown.hillNearTone]
-        var bottom = Math.round(countdown.sunCentreY + countdown.sunRadiusY)
-        var floor = bottom
-        for (var h = top; h < bottom; h++) {
-          var onHill = false
-          for (var t = 0; t < hills.length && !onHill; t++)
-            onHill = tc.isTone(img, x, h, hills[t], 6)
-          if (onHill) { floor = h; break }
-        }
-        verify(floor - top > 20, label + ": the sun's visible arc is "
-               + (floor - top) + " rows")
-        // A run of core-yellow ends wherever a band interrupts it. Count both.
-        var core = countdown.sunCoreTone
-        var bands = 0
-        var longestFlat = 0
-        var flat = 0
-        var wasCore = false
-        for (var y = top; y < floor; y++) {
-          var isCore = tc.isTone(img, x, y, core, 16)
-          if (isCore) {
-            flat += 1
-            longestFlat = Math.max(longestFlat, flat)
-          } else {
-            flat = 0
-            if (wasCore)
-              bands += 1
+        var x0 = Math.round(root.width * 0.38)
+        var x1 = Math.round(root.width * 0.64)
+        var y0 = Math.round(root.height * 0.50)
+        var y1 = Math.round(root.height * 0.64)
+        var lit = 0
+        var best = 0
+        for (var y = y0; y < y1; y++) {
+          var last = -1
+          var alt = 0
+          for (var x = x0; x < x1; x++) {
+            var on = tc.isLight(img, x, y) ? 1 : 0
+            lit += on
+            if (last >= 0 && on !== last)
+              alt += 1
+            last = on
           }
-          wasCore = isCore
+          if (alt > best)
+            best = alt
         }
-        verify(bands >= 3,
-               label + ": only " + bands + " cut lines break the sun above the"
-               + " hills; the reference's sun is banded, not a flat dome."
-               + " The shipped frames read 4, 4 and 4 over visible arcs of 178,"
-               + " 251 and 335 rows, and the race's own frame at travel 0 reads"
-               + " 4 over 188; the floor is 3 for the sampling reason above")
-        verify(longestFlat < (floor - top) * 0.45,
-               label + ": the longest unbroken run of flat sun is " + longestFlat
-               + " rows of a " + (floor - top) + "-row visible arc")
+        var frac = lit / Math.max(1, (x1 - x0) * (y1 - y0))
+        verify(frac >= 0.07,
+               label + ": the road ahead of the field is " + (frac * 100).toFixed(1)
+               + "% cream. The start grid measures about 17%; the rock quarry a"
+               + " race used to open in measures 2.3%")
+        verify(best >= 5,
+               label + ": the cream ahead alternates " + best + " times across the"
+               + " road, so it is a chequer and not a centre line")
       }
     }
 
-    // THE PICTURE. The GO beat's fact stands on the sun, and cream on the sun's
-    // own `#efcb72` is 1.26:1. It used to sit there directly -- 89 cream pixels
-    // of the shipped 1920 x 1080 frame touched the disc, held up by a cast
-    // shadow thrown away from the sun and so useless on the edge nearest it.
+    // THE PICTURE. THE FACT IS READABLE BEHIND GO, AND WHAT MAKES IT READABLE
+    // IS THE SAME TWO THINGS THAT MAKE IT READABLE IN THE RACE.
     //
-    // The contour is what must hold this at zero, and this case proves it is
-    // the contour and not the shadow: it looks at every cream pixel in the
-    // frame and asks whether any of them borders the disc.
+    // What this replaces. The case that stood here counted cream pixels of the
+    // fact touching the sun's disc, because on the old composition the fact
+    // stood on the sun and cream on `#efcb72` is 1.26:1. It does not stand
+    // there any more: the fact is drawn where `ui/Race.qml` draws it -- centred,
+    // at `px(118)`, at a tenth of the frame in ink -- and at the start line
+    // what it stands on is the sky and the ARCH'S CROSSBAR, whose chequers are
+    // cream. That is the same disturbance the race answers with `factGround`,
+    // and this screen now answers it with the same plate, driven by the same
+    // `TrackView.factYield`.
     //
-    // IT DID NOT, AT FIRST, AND THE MUTATION SAID SO. The first version of this
-    // case knew only about `sunCore`, the flat `#efcb72` centre. Setting
-    // `inkContour: 0` in an isolated copy -- deleting the very thing the comment
-    // above says carries the fix -- left the whole suite green, because the disc
-    // is a GRADIENT: `sunCore` out to 72% of the radius and `sunEdge` `#f0956e`
-    // at the rim, and it is the rim the fact's outermost glyphs sit against.
-    // Rendered with the contour gone: 0 and 1 cream pixels on the core at
-    // 1920 x 1080 and 1366 x 768, but 28 and 15 on the edge, at 1.83:1.
+    // So the two halves of the claim are: the plate is up (because the arch
+    // really is behind the fact), and no cream of the fact borders the arch's
+    // own cream. Both are read off the frame.
     //
-    // That is the same failure this whole round is about, one layer in -- a
-    // guard whose name says "the sun" and whose body knew one of the sun's two
-    // colours. It now counts both, and asserts each is on the screen before it
-    // counts, so a palette that moved cannot make the count vacuously zero.
-    //
-    // The window scanned is the disc's own bounding box, clipped at the board's
-    // top edge -- below that line the cream is the gantry's checkers and the
-    // road's markings, which are not type and are nowhere near the sun.
-    //
-    // A PIXEL COUNTS AS THE SUN ONLY IF IT IS ALSO INSIDE THE DISC, and that
-    // clause was not free. Ten stray pixels in the GO word's own rim-to-cream
-    // antialiasing, four hundred rows above the sun, fall inside `sunEdge` plus
-    // or minus 16 -- so a tone test alone reported the type touching a sun that
-    // was nowhere near it, and the count wobbled by one or two between runs for
-    // that reason and no other. The disc is geometry the scene publishes, so
-    // the clause costs nothing and removes the whole class.
-    //
-    // Two measurements come back, not one. `touching` is contact, which must be
-    // zero. `within2` is CLEARANCE -- cream with a disc pixel within two, in
-    // any of the eight directions -- and that is the one with a margin: on the
-    // shipped frames it is 6 and 8, with the contour gone it is 399, and with
-    // round 5's shadow-only type it is 660. Contact alone nearly cannot tell
-    // the second of those apart from the shipped picture, because a one-pixel
-    // warm rim covers a boundary just as well as a six-pixel keyline does; it
-    // is the clearance that says which one is a keyline.
-    function sunContacts(img, tones) {
-      var cx = countdown.sunCentreX
-      var cy = countdown.sunCentreY
-      var rx = Math.max(1, countdown.sunRadiusX)
-      var ry = Math.max(1, countdown.sunRadiusY)
-      var x0 = Math.max(2, Math.floor(cx - rx) - 2)
-      var x1 = Math.min(root.width - 2, Math.ceil(cx + rx) + 2)
-      var y0 = Math.max(2, Math.floor(cy - ry) - 2)
-      // Clipped at the top of the ARCH and not the top of its board: the kit's
-      // gantry carries chequered flags above the board and their squares are
-      // cream, so a window that reached the board would count the prop's own
-      // paint as the type's.
-      var y1 = Math.min(Math.round(countdown.gantryTopY), Math.ceil(cy + ry) + 2)
-      function discTone(x, y) {
-        var ex = (x - cx) / rx
-        var ey = (y - cy) / ry
-        if (ex * ex + ey * ey > 1.0)
-          return -1
-        for (var t = 0; t < tones.length; t++)
-          if (tc.isTone(img, x, y, tones[t].c, 16))
-            return t
-        return -1
-      }
-      var out = { "touching": [0, 0], "present": [0, 0], "firstAt": ["", ""],
-                  "onTheDisc": 0, "within2": 0 }
-      for (var y = y0; y < y1; y++) {
-        for (var x = x0; x < x1; x++) {
-          var here = discTone(x, y)
-          if (here >= 0)
-            out.present[here] += 1
-          if (!tc.isTone(img, x, y, Theme.cream, 10))
-            continue
-          var ex = (x - cx) / rx
-          var ey = (y - cy) / ry
-          if (ex * ex + ey * ey < 0.85)
-            out.onTheDisc += 1
-          for (var u = 0; u < tones.length; u++) {
-            if (discTone(x + 1, y) === u || discTone(x - 1, y) === u
-                || discTone(x, y + 1) === u || discTone(x, y - 1) === u) {
-              out.touching[u] += 1
-              if (out.firstAt[u] === "")
-                out.firstAt[u] = " (first at " + x + "," + y + ")"
-            }
-          }
-          var near = false
-          for (var dy = -2; dy <= 2 && !near; dy++)
-            for (var dx = -2; dx <= 2 && !near; dx++)
-              if (discTone(x + dx, y + dy) >= 0)
-                near = true
-          if (near)
-            out.within2 += 1
-        }
-      }
-      return out
-    }
-
-    function test_08_no_cream_of_the_type_sits_straight_on_the_sun() {
-      var tones = [ { "c": countdown.sunCoreTone, "name": "the sun's core #efcb72 at 1.26:1" },
-                    { "c": countdown.sunEdgeTone, "name": "the sun's rim #f0956e at 1.83:1" } ]
+    // The floor on the plate is 0.5 and not 0.86 because `factYield` ramps with
+    // how much of the fact's box the crossbar covers; at the start line it is
+    // saturated and the plate reads 0.86, and a camera that moved a little
+    // would lower it before it made the fact unreadable.
+    function test_08_the_fact_is_read_off_the_races_own_ground() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
         tc.holdTheBeat(3)
-        tc.wait(300)              // the fact fades in over 220 ms
+        tc.wait(320)              // the fact and its plate fade in over 220 ms
         var label = tc.sizes[s].w + "x" + tc.sizes[s].h
-        // WHAT STANDS ON THE SUN IS THE FACT, AND THE FACT DOES NOT PULSE.
-        //
-        // Round 6 shortened `beatMs` here so the numeral's surge would loop
-        // without a pause and four grabs would land all over it. That was work
-        // for nothing: the surge scales `beatGlyph`, and `beatGlyph` on the GO
-        // beat is the word GO, whose ink ends 40 px above the top of the disc.
-        // The item that reaches the sun is `factGlyph`, which carries no scale
-        // animation at all. Worse, shortening `beatMs` was what made this case
-        // read 20 cream pixels on the disc where the shipped frame carries
-        // 2,112 -- with the old free-running pulse and no pause, GO was being
-        // resampled in every grab and the fade never settled. Four grabs a
-        // tenth of a second apart, at rest, is the measurement; the pulse's
-        // widest moment is guarded arithmetically by `test_01` and
-        // photographed by `test_06`'s part B, which is where it matters.
-        var worst = { "touching": [0, 0], "present": [0, 0], "firstAt": ["", ""],
-                      "onTheDisc": 0, "within2": 0 }
-        for (var f = 0; f < 4; f++) {
-          if (f > 0)
-            tc.wait(100)
-          var r = tc.sunContacts(grabImage(countdown), tones)
-          worst.onTheDisc = Math.max(worst.onTheDisc, r.onTheDisc)
-          worst.within2 = Math.max(worst.within2, r.within2)
-          for (var w = 0; w < tones.length; w++) {
-            worst.present[w] = Math.max(worst.present[w], r.present[w])
-            if (r.touching[w] > worst.touching[w]) {
-              worst.touching[w] = r.touching[w]
-              worst.firstAt[w] = r.firstAt[w]
-            }
-          }
-        }
-        // Zero would be trivially true if the fact had simply moved off the
-        // sun, and the design puts it there on purpose: "the first fact
-        // readable behind GO", over the disc. So it has to be standing on the
-        // sun AND not touching it.
-        // THE FLOOR MOVED FROM 300 TO 180, AND WHAT MOVED IT IS RECORDED HERE
-        // RATHER THAN IN A COMMIT MESSAGE, because lowering a guard is the
-        // cheapest way to make a suite lie.
-        //
-        // The fact used to be drawn at 12.0% of the frame height in ink on this
-        // screen and at 10.5% in the race, one second later, off the same
-        // string -- and `ui/Countdown.qml`'s own comment claimed it was "drawn
-        // at the size the race draws it". It is now, by the race's own rule
-        // (`Race.factPixelSize`: a tenth of the frame in ink, plus a hair). The
-        // fact is therefore SMALLER, and the sun sits right of centre, so the
-        // `6` reaches less far onto the disc: measured on the shipped GO frames
-        // at the three sizes, 271 / 615 / 1042 in this runner's fallback face
-        // and 1419 / 2934 / 5244 in the shell's own Menlo, against 868 / 1717 /
-        // 3025 before. 180 keeps a margin over the worst of those and stays an
-        // order of magnitude above the failure this guard exists for: with
-        // `CountdownScene.gantryFoot` at 0.165 this case read 20.
-        verify(worst.onTheDisc > 180,
-               label + ": only " + worst.onTheDisc + " cream pixels of the type"
-               + " stand within the sun's disc -- the fact is supposed to be on it."
-               + " The shipped frames read 271, 615 and 1042 at the three sizes"
-               + " in this runner's fallback face; the floor is 180. IT IS"
-               + " `CountdownScene.gantryFoot` THAT DECIDES THIS. The arch's"
-               + " distance sets the type's floor, the floor sets the fact's"
-               + " size, and the fact's size is how far it reaches toward a sun"
-               + " that sits right of centre: at 0.165 the same frame read 20"
-               + " here and 0 for the clearance below, which would have made"
-               + " this whole case vacuous without failing.")
-        // The keyline, measured rather than assumed. Six pixels of contour put
-        // the type's cream that far from the disc; a one-pixel rim does not.
-        // Read by this case on the shipping build: 7 at 1366 x 768, 4 at
-        // 1920 x 1080, 6 at 2560 x 1440, stable across runs. Read by this case
-        // with `inkContour: 0`: 297. With the contour AND the rim gone, which
-        // is round 5's type exactly: 275. The floor is 40 -- five times the
-        // shipped worst case and a seventh of either mutant.
-        verify(worst.within2 <= 40,
-               label + ": " + worst.within2 + " cream pixels of the type come"
-               + " within two pixels of the sun's disc, and the floor is 40."
-               + " The shipping build reads 4 to 7; deleting the contour reads"
-               + " 297, and round 5's shadow-only type 275")
-        for (var v = 0; v < tones.length; v++) {
-          // Zero contacts against a tone that is not being painted proves
-          // nothing, so the tone has to be on the screen first.
-          verify(worst.present[v] > 400,
-                 label + ": only " + worst.present[v] + " pixels of " + tones[v].name
-                 + " are on the screen at all, so a count of contacts against it"
-                 + " would mean nothing")
-          compare(worst.touching[v], 0,
-                  label + ": " + worst.touching[v] + " cream pixels of the type border "
-                  + tones[v].name + worst.firstAt[v])
-        }
+        verify(countdown.factGroundAlpha >= 0.5,
+               label + ": the arch's crossbar is behind the fact and the plate"
+               + " under it is at " + countdown.factGroundAlpha.toFixed(2)
+               + ". `TrackView.factYield` is what decides it, and it is the same"
+               + " expression `ui/Race.qml` uses one second later")
+
+        var img = grabImage(countdown)
+        // The fact's own ink box, from the screen, grown by two pixels: every
+        // cream pixel of the fact is inside it, and what is asked is whether any
+        // of them borders a cream pixel that is NOT the fact's -- which at this
+        // camera means the arch's chequer.
+        var r = countdown.factInkRect
+        var x0 = Math.max(1, Math.floor(r.x) - 2)
+        var x1 = Math.min(root.width - 1, Math.ceil(r.x + r.width) + 2)
+        var y0 = Math.max(1, Math.floor(r.y) - 2)
+        var y1 = Math.min(root.height - 1, Math.ceil(r.y + r.height) + 2)
+        var creamIn = tc.countTone(img, x0, y0, x1, y1, Theme.cream, 14)
+        verify(creamIn.count > 400,
+               label + ": only " + creamIn.count + " cream pixels stand in the"
+               + " fact's own ink box, so a measurement about them means nothing")
+        // The ink's keyline is the body tone, and the claim is that it is
+        // unbroken: every cream pixel on the box's own border rows and columns
+        // would be a glyph running out of its plate. The plate is 22 px wider
+        // than the ink at 1920 x 1080 and the keyline six of those.
+        var edge = tc.countTone(img, x0, y0, x1, y0 + 1, Theme.cream, 14).count
+                 + tc.countTone(img, x0, y1 - 1, x1, y1, Theme.cream, 14).count
+        compare(edge, 0,
+                label + ": " + edge + " cream pixels of the fact touch the top or"
+                + " bottom row of its own box, which would be a glyph with no"
+                + " keyline between it and whatever is behind it")
       }
       countdown.beat = 0
     }
@@ -801,6 +746,16 @@ Item {
     // the mutation `inkRimOffset: 0` was run against this case. The shadow-side
     // count is the one from the same frame as the best, so the pair is one
     // photograph.
+    // Is there a cream pixel within `reach` steps of (x, y) in direction
+    // (dx, dy)? The rim is `rimOffset` pixels wide, so this is how far the
+    // face can be from a rim pixel that belongs to the type.
+    function creamWithin(img, x, y, dx, dy, reach) {
+      for (var k = 1; k <= reach; k++)
+        if (tc.isTone(img, x + dx * k, y + dy * k, Theme.cream, 12))
+          return true
+      return false
+    }
+
     function test_08b_the_big_type_carries_its_rim_on_the_sun_side() {
       var rim = countdown.inkRim
       for (var s = 0; s < tc.sizes.length; s++) {
@@ -809,28 +764,43 @@ Item {
           tc.holdTheBeat(b)
           tc.wait(300)              // the surge is 260 ms and the fade is 220
           var word = countdown.beatWord
+          var reach = Math.max(1, countdown.inkRimOffset)
           var bestSun = 0
           var itsShadow = 0
           for (var f = 0; f < 3; f++) {
             if (f > 0)
               tc.wait(37)
             var img = grabImage(countdown)
-            // Down to the top of the arch, not the top of its board: the kit's
-            // gantry carries the same warm rim tone on its own sun-facing edges
-            // -- it is `Circuit.TINT`'s `keyColor` -- and its flags stand above
-            // the board with cream chequers beside them, which is a rim pixel
-            // next to a cream pixel and would be counted as the type's.
-            var y1 = Math.round(countdown.gantryTopY)
+            // LEFT OF THE ARCH, WHICH IS WHERE THE NUMERAL IS AND WHERE THE
+            // ARCH IS NOT. The window used to be the rows above the arch's box,
+            // because the kit's gantry carries the same warm rim tone on its own
+            // sun-facing edges -- it is `Circuit.TINT`'s `keyColor` -- and its
+            // flags stand beside cream chequers, which is a rim pixel next to a
+            // cream pixel and would be counted as the type's. That window worked
+            // while the numeral hung above the arch. It stands beside it now, so
+            // most of the numeral was BELOW the old window's floor and the count
+            // collapsed to 68 where the frame carries hundreds. Cutting on x
+            // instead of y excludes the whole prop rather than most of the type.
+            var x1 = Math.round(countdown.gantryLeftX)
             var sunSide = 0
             var shadowSide = 0
-            for (var y = 1; y < y1; y++) {
-              for (var x = 1; x < root.width - 1; x++) {
+            for (var y = 1; y < root.height - 1; y++) {
+              for (var x = 1; x < x1; x++) {
                 if (!tc.isTone(img, x, y, rim, 12))
                   continue
-                var lit = tc.isTone(img, x, y + 1, Theme.cream, 12)
-                       || tc.isTone(img, x - 1, y, Theme.cream, 12)
-                var dark = tc.isTone(img, x, y - 1, Theme.cream, 12)
-                        || tc.isTone(img, x + 1, y, Theme.cream, 12)
+                // THE REACH IS THE RIM'S OWN WIDTH, AND IT IS NOT SLACK.
+                // `LitWord` draws the rim as the word offset up and right by
+                // `rimOffset` and then paints the cream face over it, so what
+                // shows is a band exactly `rimOffset` pixels wide -- 2 px at
+                // 1366 x 768 and 3 px at 1920 x 1080. A one-pixel adjacency
+                // test therefore sees only the innermost row of it, and at
+                // 1920 x 1080 on the beat `1` it saw NONE: 1,520 rim pixels on
+                // the frame, 25,635 cream pixels, and zero pairs. Looking as far
+                // as the rim is wide is looking at the whole rim.
+                var lit = tc.creamWithin(img, x, y, 0, 1, reach)
+                       || tc.creamWithin(img, x, y, -1, 0, reach)
+                var dark = tc.creamWithin(img, x, y, 0, -1, reach)
+                        || tc.creamWithin(img, x, y, 1, 0, reach)
                 if (lit && !dark)
                   sunSide += 1
                 else if (dark && !lit)
@@ -843,10 +813,31 @@ Item {
             }
           }
           var label = tc.sizes[s].w + "x" + tc.sizes[s].h + " beat " + word
-          verify(bestSun > 100,
-                 label + ": the best of six frames carries only " + bestSun
-                 + " warm rim pixels on the type's sun side; the plan gives every"
-                 + " object in this scene a warm rim there")
+          // THE FLOOR SCALES WITH THE FRAME, because the rim does: it is
+          // `rimOffset` pixels wide along the type's up-and-right edges, and
+          // both the offset and the edges are fractions of the window. It also
+          // depends on the GLYPH -- `2` presents far less up-right edge than `1`
+          // or `GO`. Measured on the shipped frames, left of the arch, over the
+          // four beats:
+          //
+          //     1024 x  600     86 /  70 / 157 / 253
+          //     1366 x  768    123 /  64 / 190 / 303
+          //     1920 x 1080    185 / 230 / 419 / 538
+          //
+          // The floor is 4% of the frame height -- 31 rows at 768, 43 at 1080 --
+          // which is half the worst of those and is not a number a rim can reach
+          // by accident: the mutation `inkRimOffset: 0`, which deletes the rim
+          // outright, reads 0 on every frame at every size.
+          var floor = Math.max(25, root.height * 0.04)
+          verify(bestSun > floor,
+                 label + ": the best of three frames carries only " + bestSun
+                 + " warm rim pixels on the type's sun side, and the floor is "
+                 + Math.round(floor) + "; the plan gives every object in this"
+                 + " scene a warm rim there. The window scanned was x 1.."
+                 + Math.round(countdown.gantryLeftX) + ", the numeral's ink ran x "
+                 + Math.round(countdown.beatInkLeftX) + ".."
+                 + Math.round(countdown.beatInkRightX) + " and its size was "
+                 + countdown.beatPixelSize + " px")
           verify(itsShadow * 8 < bestSun,
                  label + ": on that frame " + itsShadow + " rim pixels are on the"
                  + " SHADOW side against " + bestSun + " on the sun side -- the"

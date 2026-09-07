@@ -355,6 +355,13 @@ FocusScope {
     sourceComponent: Component {
       Countdown {
         seed: game.seed
+        // PIECE 5, ROUND 3. The countdown stands the race's own field on the
+        // start grid, so it has to know whether there is a field: a Grand Prix
+        // has three rivals beside the child and the solo modes have none. It
+        // was not handed down before because the screen drew one car of its own;
+        // a countdown that guessed would add or remove three cars across the cut
+        // into the race.
+        mode: game.mode
         onFinished: game.raceIsOn()
         onAbortRequested: game.backToGarage(-1)
       }

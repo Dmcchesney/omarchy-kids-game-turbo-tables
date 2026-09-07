@@ -48,6 +48,15 @@ Item {
 
   // 0 = stopped, 1 = a good pace. Race.qml drives it from progress rate.
   property real speed: 0.55
+  // A CAR HELD ON THE BRAKES, WHICH IS A THING ONLY THE COUNTDOWN NEEDS.
+  //
+  // PIECE 5, ROUND 3. The child's kart is standing on the grid with the revs
+  // coming up and a foot hard on the pedal, and the beat before GO is the
+  // brightest that pedal ever is. It is added to the human kart's own tail-lamp
+  // term rather than replacing it, so a race -- which never writes this -- gets
+  // `+ 0` and the identical number it had before: see `lampGlow` on the kart
+  // delegate. Nothing but `ui/Countdown.qml` ever sets it.
+  property real brakeHold: 0
   // The child's smoothed effective progress, in questions. Every other kart
   // is placed relative to it.
   property real humanProgress: 0
@@ -1476,6 +1485,27 @@ Item {
     "overpass": [0.01, 0.37]
   }
 
+  // ================================ THE START ARCH'S OWN BOX, PUBLISHED
+  //
+  // PIECE 5, ROUND 3. The countdown is this view held still at
+  // `Circuit.START_TRAVEL`, and two things it draws have to be attached to the
+  // arch rather than laid over the frame: the six beat lamps, which sit in the
+  // housings the kit baked into the beam, and the band the numeral may not
+  // cross, which is the top of the board `TURBO TABLES` is printed on.
+  //
+  // IT IS THE DELEGATE'S OWN BOX AND NOT A SECOND CALCULATION OF IT.
+  // `KitProp.boxLeft/boxTop/boxWidth/boxHeight` is the opaque box of the cell
+  // actually drawn -- after the sheet step, the fractional upscale and the
+  // per-view bounds -- and re-deriving that here from `PropMeta` would be the
+  // copied-arithmetic mistake this whole round is a correction of. So the
+  // placement that IS the start arch writes its box out, and every other
+  // placement builds nothing: the `Loader` reads an index that never changes,
+  // exactly as the fact billboards' and the pit board's do.
+  //
+  // Empty until that placement is on the screen, and empty for every screen
+  // that is not standing at the start line, which is all of them but one.
+  property rect startArchBox: Qt.rect(0, 0, 0, 0)
+
   // Which placements span the road. Computed once: this is read every frame.
   readonly property var archProps: {
     var out = []
@@ -1965,6 +1995,14 @@ Item {
         sourceComponent: propLamps
       }
 
+      // The start arch writes its own drawn box out; see `startArchBox`. One of
+      // the hundred and thirty-eight delegates builds this and the rest evaluate
+      // nothing, ever, because `index` never changes for the life of a delegate.
+      Loader {
+        active: index === Circuit.START_ARCH
+        sourceComponent: archBoxOut
+      }
+
       // ------------------------------------------------- THE FACT BILLBOARDS
       //
       // Design v4, sector 11: "a row of boards that show the last three facts
@@ -2113,6 +2151,24 @@ Item {
           x: kitCell.boxLeft + kitCell.boxWidth * 0.14
           y: kitCell.boxTop + kitCell.boxHeight * 0.21
           width: kitCell.boxWidth * 0.72
+        }
+      }
+
+      // The start arch's opaque box, in this view's own coordinates, handed up
+      // to `view.startArchBox`. `roadside.x/y` is the contact point the
+      // projection put on the road and `kitCell.box*` is the drawn cell's
+      // opaque box relative to it, so the sum is the rectangle a caller can
+      // measure against -- the same rectangle `--dump-rects` prints.
+      Component {
+        id: archBoxOut
+
+        Binding {
+          target: view
+          property: "startArchBox"
+          value: roadside.visible
+                 ? Qt.rect(roadside.x + kitCell.boxLeft, roadside.y + kitCell.boxTop,
+                           kitCell.boxWidth, kitCell.boxHeight)
+                 : Qt.rect(0, 0, 0, 0)
         }
       }
     }
@@ -2554,7 +2610,7 @@ Item {
         // did: at lap 12 the field ahead of the child is a string of red
         // lights on a dark road, which is what a sunset race looks like.
         lampGlow: isGhost ? 0
-                          : Math.min(1, (isHuman ? view.pullback * 1.4 : 0)
+                          : Math.min(1, (isHuman ? view.pullback * 1.4 + view.brakeHold : 0)
                                         + Math.abs(view.curve) / view.curveAmplitude * 0.30
                                         + view.nightfall * 0.45)
         // THE HOUR, ON THE KART. See `kartWashAmount`: the props were in the
