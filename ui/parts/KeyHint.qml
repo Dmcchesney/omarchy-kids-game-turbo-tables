@@ -64,9 +64,26 @@ Item {
   property string keys: ""
   // What they do, in the words already on the screen: "LEAVE", "USE IT".
   property string action: ""
+  // PIECE F ROUND 7 -- A KEY CAP, THE WAY THE GARAGE DRAWS ONE.
+  //
+  // Design v4.1, Accessibility: "Key hints in the race are drawn as key caps,
+  // the way the garage draws them: `[H] PIT CREW · shows the answer`". The
+  // garage's `S  SETTINGS AND RESETS` door (`ui/Game.qml`) is a bordered,
+  // filled cap with the key in it beside the word in the label tone; with
+  // `cap` on, this component draws the same construction, so the race's two
+  // hints and the hand panel's footer are the garage's idiom and not a second
+  // one. The words, the hover, the role and the click target are unchanged:
+  // a cap is how the line is DRAWN, and `text` still reads `H  PIT CREW`.
+  //
+  // `sub` is the quiet clause after the mid-dot -- `shows the answer` -- and it
+  // is part of the printed line, so `text` carries it for the walk.
+  property bool cap: false
+  property string sub: ""
+
   // The whole printed line. Two spaces between the keys and the action is the
   // game's own hint grammar and it is what the harness's oracle reads.
   readonly property string text: hint.keys + "  " + hint.action
+                                 + (hint.sub.length > 0 ? "  ·  " + hint.sub : "")
 
   property int textSize: 17
   property real letterSpacing: 2
@@ -103,8 +120,8 @@ Item {
   // one-sided. See the note beside the Escape branch in `ui/Race.qml`.
   readonly property bool guarding: hintHit.guarding
 
-  implicitWidth: line.implicitWidth + hint.padWidth
-  implicitHeight: line.implicitHeight + hint.padHeight
+  implicitWidth: (hint.cap ? capRow.implicitWidth : line.implicitWidth) + hint.padWidth
+  implicitHeight: (hint.cap ? capRow.implicitHeight : line.implicitHeight) + hint.padHeight
   width: implicitWidth
   height: implicitHeight
 
@@ -140,6 +157,7 @@ Item {
   Text {
     id: line
     anchors.centerIn: parent
+    visible: !hint.cap
     textFormat: Text.PlainText
     text: hint.text
     color: hintHit.hovered ? hint.liveColor : hint.idleColor
@@ -147,6 +165,64 @@ Item {
     font.bold: hint.bold
     font.pixelSize: hint.textSize
     font.letterSpacing: hint.letterSpacing
+  }
+
+  // The cap: the keys in a bordered box, the action beside it, the clause after
+  // a mid-dot in the quieter tone. The same fill, border and brightening the
+  // garage door uses, so one rule -- if it lights up when you point at it, you
+  // can press it -- is drawn one way across the game.
+  Row {
+    id: capRow
+    anchors.centerIn: parent
+    visible: hint.cap
+    spacing: Math.max(6, Math.round(hint.textSize * 0.5))
+
+    Rectangle {
+      anchors.verticalCenter: parent.verticalCenter
+      width: capKeys.implicitWidth + Math.max(10, Math.round(hint.textSize * 0.8))
+      height: Math.max(20, Math.round(hint.textSize * 1.55))
+      radius: Theme.cornerRadiusSmall
+      color: hintHit.hovered
+             ? Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.18)
+             : Qt.rgba(Theme.menuBorder.r, Theme.menuBorder.g, Theme.menuBorder.b, 0.07)
+      border.width: 1
+      border.color: hintHit.hovered ? Theme.hoverRing : Theme.lineStrong
+
+      Text {
+        id: capKeys
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: hint.keys
+        color: hintHit.hovered ? Theme.textBright : Theme.text
+        font.family: Theme.mono
+        font.bold: true
+        font.pixelSize: hint.textSize
+        font.letterSpacing: hint.letterSpacing
+      }
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: hint.action
+      color: hintHit.hovered ? hint.liveColor : hint.idleColor
+      font.family: Theme.mono
+      font.bold: hint.bold
+      font.pixelSize: hint.textSize
+      font.letterSpacing: hint.letterSpacing
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: hint.sub.length > 0
+      textFormat: Text.PlainText
+      text: "·  " + hint.sub
+      color: hintHit.hovered ? hint.liveColor : Theme.textLabel
+      font.family: Theme.mono
+      font.bold: false
+      font.pixelSize: hint.textSize
+      font.letterSpacing: hint.letterSpacing
+    }
   }
 
   Clickable {

@@ -89,9 +89,11 @@ import "KeyHints.js" as KeyHints
 //                         --inject swap               a Tow Hook, played
 //                         --inject handDealt          answer the twelfth in a
 //                                                     row (needs --warmup 11)
-//                         --inject chooseCard:1       press 1 then Enter, which
-//                                                     is the hand's slam beat
-//                                                     (a key press, not an event)
+//                         --inject fireCard:2         Right until card 2 is
+//                                                     highlighted, then Space,
+//                                                     which is the hand's slam
+//                                                     beat (key presses, not
+//                                                     an event)
 //
 //                       The card names are the engine's own keys: nitro,
 //                       oilSlick, wrench, pothole, rollCage, pileUp, turbo,

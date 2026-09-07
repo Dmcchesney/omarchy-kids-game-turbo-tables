@@ -45,6 +45,20 @@ import QtQuick
 //                 it is the round-two walking-repeat defect one control to the
 //                 left of where round two fixed it.
 //
+// PIECE F ROUND 7. Design v4.1 took the back-out gesture away -- Escape only
+// ever leaves, and there is no `ESC  BACK` chip -- so the two names now mean:
+//
+//   "escape"      leaving the race, from the Escape key or the race's own
+//                 `ESC  LEAVE` line.
+//   "handFooter"  firing the highlighted card, from the space bar or the hand
+//                 panel's `SPACE  USE IT` line. The panel goes with the hand it
+//                 spent, so the second half of a double-click lands on whatever
+//                 the race draws there next; the name is what refuses it.
+//
+// The history above is kept because the routes it describes -- click then
+// key, key then click, click then click -- are still the three the guard is
+// for, and `tests/qml/tst_mouse_parity.qml` still drives all three per name.
+//
 // WHAT IS DELIBERATELY NOT GUARDED, because the maintainer's other standing
 // complaint is a power-up that had to be pressed several times. A control that
 // merely CHOOSES -- a card, a paint swatch, a stepper arrow, the footer's

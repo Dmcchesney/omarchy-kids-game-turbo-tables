@@ -11,44 +11,29 @@ import "../../engine/engine.mjs" as Engine
 // here would be a second copy of a number that has to match, and the one that
 // drifts is always the copy.
 //
+// PIECE F ROUND 7 -- THE KEYCAP IS GONE, BECAUSE THE KEY IS GONE.
+//
+// The band across the head of this card used to carry a keycap with `1`, `2`
+// or `3` on it: the digit that chose the card. Design v4.1 takes the digits
+// away from the hand entirely -- "digits never touch the hand; they are always
+// the answer" -- so a `1` printed on a card would now be a promise about a
+// key that does something else. What chooses a card is the highlight, moved
+// by Left and Right and landed by a click, and what a highlighted card looks
+// like is `selected`: the accent ring, the lifted face, the brighter band.
+//
 // The card is not a focus stop. The whole picker is one keyboard surface: the
-// digit keys 1, 2 and 3 choose, which is what the design asks for, and a Tab
-// chain through three cards would be a second way to do the same thing that a
-// child would have to discover. `selected` is what a chosen card looks like.
+// arrows move a highlight across three cards, and a Tab chain through them
+// would be a second way to do the same thing that a child would have to
+// discover. It IS a click target: design v4.1 names "the picker's cards" among
+// the things that must be clickable, and this is the one moment of choice in
+// the whole game. The card OWNS the target rather than the picker placing one
+// over it, so the hover paint and the press are the same fact: `hovered` below
+// is read off the very MouseArea that fires `tapped`.
 //
-// PIECE M. IT IS STILL NOT A FOCUS STOP, AND IT IS NOW A CLICK TARGET.
-//
-// Those two are not in tension: `stop` is null on the target below, because the
-// key that reaches this card is `1`, `2` or `3` and not Tab, and the parity
-// table prints that key rather than pretending there is a Tab stop here. Design
-// v4.1 names "the picker's cards" among the things that must be clickable, and
-// this is the one moment of choice in the whole game -- a child looking at
-// three cards laid out in playing-card proportions, drawn to be pressed.
-//
-// The card OWNS the target rather than the picker placing one over it, so the
-// hover paint and the press are the same fact: `hovered` below is read off the
-// very MouseArea that fires `tapped`, and a card cannot light without being
-// pressable or be pressable without lighting.
-//
-// ---------------------------------------------------------------- ROUND 3
-//
-// IT IS A CARD NOW, AND IT WAS A ROW IN A LIST.
-//
-// A blind critic, on both builds: "The 'hand' is a dark list panel:
-// `1 Pothole / ADD 8 TO ONE RIVAL / RARE` in ~12 px grey caps. These are not
-// cards; nothing bursts from the twelve segments; the charge bar does not drain
-// into anything." Design v4's whole paragraph on the hand is written in the
-// language of cards -- they are dealt, they slide up, the chosen one slams
-// down, the other two flip face down and fly off -- and none of that means
-// anything to a six-year-old about three lines of a settings menu. This is the
-// one moment of choice in the whole game.
-//
-// So: portrait, three across, each with the tier's own colour band along the
-// top carrying the key to press and the rarity pips, the card's NAME in the
-// largest type the picker owns, what it does underneath it in the middle of the
-// face, and the rarity spelled out along the bottom. The chrome exemption in
-// the plan covers the picker's panel; the cards inside it are the game layer
-// and the design calls them cards, so they are drawn as cards.
+// IT IS A CARD, AND IT WAS A ROW IN A LIST. Portrait, three across, each with
+// the tier's own colour band along the top carrying the rarity pips, the
+// card's NAME in the largest type the picker owns, what it does underneath it
+// in the middle of the face, and the rarity spelled out along the bottom.
 Item {
   id: card
 
@@ -56,7 +41,8 @@ Item {
 
   // A key of the engine's CARDS table: "nitro", "oilSlick", and so on.
   property string cardId: ""
-  // What the child presses. 1, 2 or 3.
+  // Which of the three this is, 1 to 3. Named to a screen reader and in the
+  // click table; never printed as a key, because it is not one.
   property int index: 1
   property bool selected: false
   property int labelSize: 22
@@ -68,10 +54,13 @@ Item {
   // nothing on the card ever changes what it says.
   property real breathe: 0
 
-  // PIECE M. A click on the card. The picker wires it to `choose(index)` and to
-  // `confirm()` for a card that is already chosen, which are the same two
-  // functions its `1 2 3` and Enter branches call.
+  // PIECE M. A click on the card. The picker wires it to `highlight(index)`,
+  // which is the same function its Left and Right branches land on.
   signal tapped()
+  // The presses that put the highlight on this card from where it is now, set
+  // by the picker: none when it is already here, otherwise Right as many times
+  // as this card is round the hand. The parity crossover presses exactly this.
+  property var keyRoute: null
   readonly property bool hovered: cardHit.hovered
 
   function px(v) { return Math.round(v * card.scaleUnit) }
@@ -127,15 +116,14 @@ Item {
   // so here too, or it is invisible to the very check that would catch it.
   Accessible.role: Accessible.Button
   Accessible.name: "Card " + card.index + ", " + card.cardLabel + ", " + card.effect
-                   + ", " + card.tier + (card.selected ? ", chosen" : "")
-  // PIECE M ROUND 2. Pressing a chosen card again does NOT use it, and this no
-  // longer says it does. Using a card spends all three and cannot be undone, so
-  // it belongs on a control of its own with the cost printed on it -- the
-  // footer's `⏎  USE IT` -- and not on the second press of the control that
-  // merely chose it. See `ui/Picker.qml`, `tapCard`.
+                   + ", " + card.tier + (card.selected ? ", highlighted" : "")
+  // Pressing a highlighted card again does NOT use it. Using a card spends all
+  // three and cannot be undone, so it belongs on a control of its own with the
+  // cost printed on it -- the footer's `SPACE  USE IT` -- and not on the second
+  // press of the control that merely highlighted it. See `ui/Picker.qml`.
   Accessible.description: card.selected
-                          ? "Chosen. Use it with the USE button below, or Enter."
-                          : "Press it, or the " + card.index + " key, to choose it."
+                          ? "Highlighted. Use it with the USE button below, or the space bar."
+                          : "Press it, or the left and right arrows, to highlight it."
   Accessible.onPressAction: card.tapped()
 
   Rectangle {
@@ -173,9 +161,11 @@ Item {
   }
 
   // ------------------------------------------------------------ the top band
-  // The rarity's own colour across the head of the card, carrying the key to
-  // press at one end and the pips at the other. This is the part that makes
-  // three cards in a row read as three DIFFERENT cards from across a room.
+  // The rarity's own colour across the head of the card, carrying the pips.
+  // This is the part that makes three cards in a row read as three DIFFERENT
+  // cards from across a room. It brightens with the highlight, so the card
+  // Space would fire is told from the other two by the band as well as by the
+  // ring.
   Rectangle {
     id: band
     x: face.border.width
@@ -195,29 +185,18 @@ Item {
       color: parent.color
     }
 
-    // The keycap. It is the whole interface of this card, so it is drawn as a
-    // key and not as an ornament.
-    Rectangle {
-      id: keycap
-      x: card.px(7)
+    // The highlight's own mark, in the band: the arrow the aim tiles use, so
+    // "this is the one" is a shape and not only a colour. Design,
+    // Accessibility: every state has shape or text as well as colour.
+    Text {
+      x: card.px(9)
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.round(card.labelSize * 1.15)
-      height: width
-      radius: Theme.cornerRadiusSmall
-      color: card.selected ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.42)
-                           : Qt.rgba(0, 0, 0, 0.34)
-      border.width: 1
-      border.color: card.selected ? Theme.focusRing : Theme.lineStrong
-
-      Text {
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        text: String(card.index)
-        color: Theme.textBright
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: Math.round(card.labelSize * 0.82)
-      }
+      textFormat: Text.PlainText
+      text: card.selected ? "▸" : ""
+      color: Theme.textBright
+      font.family: Theme.mono
+      font.bold: true
+      font.pixelSize: Math.round(card.labelSize * 0.82)
     }
 
     Row {
@@ -310,16 +289,15 @@ Item {
   Clickable {
     id: cardHit
     objectName: "clickHandCard"
-    // Null on purpose: the key that reaches a card is its own number, not Tab.
-    // See the note at the top of this file.
+    // Null on purpose: the keys that reach a card are the arrows, not Tab. See
+    // the note at the top of this file.
     stop: null
     label: "card " + card.index + " " + card.cardLabel
-    // ROUND 2: one meaning, in both columns. The click chooses, the digit
-    // chooses, and neither of them spends the hand -- so the key column is the
-    // digit alone, and it is no longer a two-press claim with `Enter` in it
-    // that only one of the two routes actually honoured.
-    does: "choose " + card.cardLabel
-    key: String(card.index)
+    // One meaning, in both columns. The click highlights, the arrows
+    // highlight, and neither of them spends the hand.
+    does: "highlight " + card.cardLabel
+    key: "Left, Right"
+    keyRoute: card.keyRoute
     onActed: card.tapped()
   }
 }

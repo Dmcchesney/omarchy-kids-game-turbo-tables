@@ -312,16 +312,10 @@ Item {
      * control on that screen unclickable for the next.
      */
     function resetScreens() {
-      picker.clearChoice()
+      // PIECE F ROUND 7: the highlight goes back to the first card and the aim
+      // to the nearest rival, which is where a fresh hand starts.
+      picker.reset()
       picker.slamBorn = -1e9
-      // ROUND 4, and the same class again. `clearChoice()` raises the one-beat
-      // line that says a card went back -- `CARD PUT BACK · ALL THREE STILL
-      // YOURS` -- and a wall-clock Timer takes it down. In the game that beat
-      // belongs to the child's own press; in a state list it is a leftover of
-      // the reset, and a comparison of two states photographed milliseconds
-      // apart cannot be about a line that is on its way out. Put down here,
-      // after the clear that raised it, rather than excluded from the reading.
-      picker.letGoShowing = false
       settings.pending = ""
       // ROUND 3, and it is the same class of leak as the two above. The one
       // question in the game goes on swallowing POINTER presses over its own
@@ -1645,28 +1639,31 @@ Item {
     function test_15_a_card_is_chosen_by_clicking_it_and_clicking_it_again_cannot_spend_it() {
       root.showing = "picker"
       picker.forceActiveFocus()
-      compare(picker.chosen, -1)
+      // PIECE F ROUND 7: the first card is highlighted by default (design v4.1),
+      // so the click below lands on a card that is already the one.
+      compare(picker.highlighted, 0)
 
-      // Card 1 of the first hand is Nitro, which needs no target.
-      suite.clickNamed(picker, "card 1")
-      compare(picker.chosen, 0, "clicking a card did not choose it")
+      // Card 2 of the first hand is the Oil Slick, which needs no target.
+      suite.clickNamed(picker, "card 2")
+      compare(picker.highlighted, 1, "clicking a card did not highlight it")
       compare(root.cardsUsed, 0, "one click spent the hand")
 
       // The gesture that spent the hand in round one, five times over, as fast
       // as the test framework can post it.
       for (var i = 0; i < 5; i++)
-        suite.clickNamed(picker, "card 1")
+        suite.clickNamed(picker, "card 2")
       compare(root.cardsUsed, 0,
-              "clicking a chosen card spent the hand -- a double-click on a card"
+              "clicking a highlighted card spent the hand -- a double-click on a card"
               + " must never be able to")
-      compare(picker.chosen, 0, "and the card is still the one that was chosen")
+      compare(picker.highlighted, 1, "and the card is still the one that was highlighted")
 
-      // The keyboard's own repeat, for the comparison the critic drew: `1`,
-      // `1` leaves the card chosen and spends nothing. So does the mouse now.
-      keyClick(Qt.Key_1)
-      keyClick(Qt.Key_1)
+      // The keyboard's own repeat, for the comparison the critic drew: Right
+      // then Left leaves the same card highlighted and spends nothing. So does
+      // the mouse.
+      keyClick(Qt.Key_Right)
+      keyClick(Qt.Key_Left)
       compare(root.cardsUsed, 0)
-      compare(picker.chosen, 0)
+      compare(picker.highlighted, 1)
     }
 
     // The control that CAN spend a hand, and what a second press on it does.
@@ -1675,14 +1672,14 @@ Item {
       picker.forceActiveFocus()
 
       suite.clickNamed(picker, "card 1")
-      compare(picker.chosen, 0)
+      compare(picker.highlighted, 0)
       // The panel prints the key that spends it, and the printed line is a
       // control: this is the same string `footerText` publishes.
-      verify(picker.footerText.indexOf("⏎  USE IT") >= 0,
+      verify(picker.footerText.indexOf("SPACE  USE IT") >= 0,
              "the panel does not print the key that spends the hand: "
              + JSON.stringify(picker.footerText))
       var use = suite.targetNamed(picker, "use the card")
-      verify(use !== null, "the printed `⏎  USE IT` is not a click target")
+      verify(use !== null, "the printed `SPACE  USE IT` is not a click target")
       verify(use.destructive, "the control that spends a hand is not marked destructive")
 
       suite.clickNamed(picker, "use the card")
@@ -2034,7 +2031,12 @@ Item {
     // a code-level finding. This file can: it holds a real `Race`, it deals a
     // real hand by answering real facts, and it posts a real click and a real
     // keystroke.
-    function test_28_a_click_that_puts_a_card_back_does_not_arm_escape_to_leave() {
+    // PIECE F ROUND 7. Escape only ever leaves (design v4.1), so the line no
+    // longer changes its meaning under the pointer -- and the guard is still
+    // needed, because the same gesture from two hands is still two presses on
+    // one action: a click on `ESC  LEAVE` followed by an Escape 16 ms later is
+    // one leave, and a deliberate Escape after the interval is another.
+    function test_28_a_click_on_the_esc_line_and_an_escape_inside_one_interval_leave_once() {
       root.showing = "race"
       race.rivals = null
       race.forceActiveFocus()
@@ -2046,46 +2048,31 @@ Item {
       suite.dealRaceHand()
       root.raceLeaves = 0
 
-      // Chosen with the MOUSE, put back with the MOUSE, and then the keyboard.
-      suite.clickNamed(race.handPanel, "card 1")
-      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
-
-      // The race and the hand panel BOTH print a control called "put the card
-      // back" while a card is chosen -- the screen's own `ESC` line and the
-      // panel's footer -- and they are not the same control. The one this case
-      // is about is the guarded one: the line that says BACK now and LEAVE the
-      // moment the card is back. (The panel's footer is the other half of this
-      // hazard and is not guarded; see the report.)
-      var escape = null
-      var inRace = suite.clickTargetsIn(race)
-      for (var i = 0; i < inRace.length; i++) {
-        if (String(inRace[i].label).toLowerCase().indexOf("put the card back") >= 0
-            && inRace[i].destructive && suite.usable(inRace[i], race))
-          escape = inRace[i]
-      }
+      // With a hand held the line still says LEAVE: there is no card to put
+      // back, because a highlight is a look and not a choice.
+      var escape = suite.guardedEscapeLine()
       verify(escape !== null,
-             "with a card chosen the race's own ESC line is not a guarded control that"
-             + " says it puts the card back")
+             "the race's own ESC line is not a guarded control that says it leaves")
+      compare(String(escape.does), "go back to the garage",
+              "with a hand held the ESC line still only leaves")
       var at = suite.centreOf(escape)
       mouseMove(root, at.x, at.y)
       mouseClick(root, at.x, at.y)
-      compare(race.handPanel.chosen, -1, "the click did not put the card back")
-      compare(root.raceLeaves, 0, "the click that put the card back left the race")
+      compare(root.raceLeaves, 1, "the click did not leave the race")
+      compare(race.hand.length, 3, "and the hand was not touched by it")
 
       keyClick(Qt.Key_Escape)
-      compare(root.raceLeaves, 0,
-              "an Escape 16 ms after a CLICK on the same control left the race. The"
-              + " control changed its meaning under the pointer -- it said BACK when it"
-              + " was clicked and LEAVE by the time the key arrived -- and the guard was"
-              + " consulted only by the click handler, so the half of the repeat that"
-              + " came from the other input device was not refused.")
+      compare(root.raceLeaves, 1,
+              "an Escape 16 ms after a CLICK on the same control left the race a second"
+              + " time. The guard belongs to the action, and the key's half of one"
+              + " gesture has to be refused by the click's press.")
 
       // And a DELIBERATE Escape still leaves. A guard that stayed up would be
       // the maintainer's other complaint -- a control that has to be pressed
       // several times -- pointing the other way.
       wait(450)
       keyClick(Qt.Key_Escape)
-      compare(root.raceLeaves, 1,
+      compare(root.raceLeaves, 2,
               "an Escape after the double-click interval did not leave the race")
     }
 
@@ -2189,69 +2176,64 @@ Item {
       // ---------------------------------------------------------------- D4
       // Escape first, then a click on the race's own ESC line 16 ms later. The
       // key armed nothing at all in round three, because only the click handler
-      // armed, so this left the race.
+      // armed, so this left the race twice.
       Actions.clear()
       mouseMove(root, 0, 0)
-      suite.clickNamed(race.handPanel, "card 1")
-      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
       root.raceLeaves = 0
       keyClick(Qt.Key_Escape)
-      compare(race.handPanel.chosen, -1, "Escape did not put the card back")
+      compare(root.raceLeaves, 1, "Escape did not leave the race")
       var escLine = suite.guardedEscapeLine()
-      verify(escLine !== null,
-             "with the card back the race's own ESC line is not a guarded control")
+      verify(escLine !== null, "the race's own ESC line is not a guarded control")
       var escAt = suite.centreOf(escLine)
       mouseMove(root, escAt.x, escAt.y)
       mouseClick(root, escAt.x, escAt.y)
-      compare(root.raceLeaves, 0,
-              "a CLICK on the race's ESC line 16 ms after an ESCAPE left the race. The"
-              + " key put the card back and armed nothing, so the pointer's half of the"
-              + " repeat found the line meaning LEAVE and took it.")
+      compare(root.raceLeaves, 1,
+              "a CLICK on the race's ESC line 16 ms after an ESCAPE left the race a"
+              + " second time. The key armed nothing, so the pointer's half of the"
+              + " repeat was taken.")
 
       // ---------------------------------------------------------------- D2
-      // The hand panel's own `ESC  BACK` chip, clicked, then Escape. Two
-      // controls performing the same back-out gesture; in round three they had
-      // one guard each and the key had none. The chip is the one with the word
-      // ESC printed next to the cards the child is looking at.
+      // PIECE F ROUND 7. The hand's one destructive control is `SPACE  USE IT`,
+      // and it declares `handFooter`. Clicked, then the space bar 16 ms later:
+      // one gesture from two hands, one fire. Driven on the panel standing
+      // alone, because in the race the hand is gone after the first press and
+      // the second finds nothing to refuse; here the hand stays, so the guard
+      // is the only thing between the second press and a second fire.
+      root.showing = "picker"
+      picker.forceActiveFocus()
+      suite.resetScreens()
       Actions.clear()
+      root.cardsUsed = 0
       mouseMove(root, 0, 0)
-      suite.clickNamed(race.handPanel, "card 1")
-      compare(race.handPanel.chosen, 0)
-      root.raceLeaves = 0
-      suite.clickNamed(race.handPanel, "put the card back")
-      compare(race.handPanel.chosen, -1, "the chip did not put the card back")
-      keyClick(Qt.Key_Escape)
-      compare(root.raceLeaves, 0,
-              "the child clicked the words `ESC  BACK` on the hand panel, the card went"
-              + " back, they pressed the Escape those words had just told them about,"
-              + " and the race ended. Two controls, one gesture, and in round three one"
-              + " guard each.")
+      suite.clickNamed(picker, "use the card")
+      compare(root.cardsUsed, 1, "clicking `SPACE  USE IT` did not use the card")
+      // The slam that the click started is what `footerAct` refuses on; put it
+      // down so the guard, and only the guard, answers the next press.
+      picker.slamBorn = -1e9
+      var refusedBefore = Actions.refusedRepeats
+      keyClick(Qt.Key_Space)
+      compare(root.cardsUsed, 1,
+              "the child clicked `SPACE  USE IT` and pressed the space bar those words"
+              + " had just told them about, 16 ms later, and the hand was spent twice.")
+      compare(Actions.refusedRepeats, refusedBefore + 1,
+              "and the refusal was the guard's, not an accident of state")
 
       // ---------------------------------------------------------------- D3
-      // The same chip, double-clicked. The first press puts the card back; the
-      // footer instantly redraws as `1 2 3  CHOOSE A CARD` at the same pixel and
-      // the second press CHOSE CARD 1. That is round two's walking-repeat
-      // defect, one control to the left of where round two fixed it, and it is
-      // unguarded precisely because the target that acts second is a different,
-      // non-destructive control -- which is why "the list is generated from the
-      // tree" does not save you and why the guard had to leave the control.
+      // The same chip, double-clicked. The first press fires; the second, at
+      // the same pixel, is refused by the same name.
+      suite.resetScreens()
       Actions.clear()
-      mouseMove(root, 0, 0)
-      suite.clickNamed(race.handPanel, "card 1")
-      compare(race.handPanel.chosen, 0)
-      root.raceLeaves = 0
-      var chip = suite.targetNamed(race.handPanel, "put the card back")
-      verify(chip !== null, "the hand panel prints no `ESC  BACK` chip")
+      root.cardsUsed = 0
+      var chip = suite.targetNamed(picker, "use the card")
+      verify(chip !== null, "the hand panel prints no `SPACE  USE IT` chip")
       var chipAt = suite.centreOf(chip)
       mouseMove(root, chipAt.x, chipAt.y)
       mouseClick(root, chipAt.x, chipAt.y)
+      picker.slamBorn = -1e9
       mouseClick(root, chipAt.x, chipAt.y)
-      compare(race.handPanel.chosen, -1,
-              "a double-click on the panel's `ESC  BACK` chip put the card back and then"
-              + " chose card " + (race.handPanel.chosen + 1) + " at the same pixel: the"
-              + " footer redraws as `1 2 3  CHOOSE A CARD` under the pointer between the"
-              + " two presses.")
-      compare(root.raceLeaves, 0, "the double-click on the chip left the race")
+      compare(root.cardsUsed, 1,
+              "a double-click on the panel's `SPACE  USE IT` chip spent the hand twice")
+      mouseMove(root, 0, 0)
     }
 
     // ==================================================================
@@ -2352,51 +2334,37 @@ Item {
     }
 
     // ==================================================================
-    // ROUND 5. THE BACK-OUT GESTURE, FROM EITHER HAND, ON THE FOOTER THAT
-    // REDRAWS UNDER THE POINTER.
+    // PIECE F ROUND 7. THE FIRE, FROM THE KEY FIRST AND THEN THE POINTER.
     // ==================================================================
     //
-    // `test_31` walks D1, D2, D3 and D4 and stops one route short. D3 is a
-    // double-click on the hand panel's `ESC  BACK` chip: the first press puts
-    // the card back, the footer redraws as `1 2 3  CHOOSE A CARD` at the same
-    // pixel, and the second press chooses card 1. A critic drove the same defect
-    // with the FIRST press from the keyboard -- Escape, then a click on the
-    // footer 16 ms later -- and it still chose a card, because the key armed
-    // `escape` and the chip that took the pixel is `handFooter`.
-    //
-    // Which hand performed a gesture cannot change which names the gesture
-    // belongs to, so both Escape handlers and both ESC controls read the pair
-    // from `picker.backOutGuards` now. This is that route, driven.
-    function test_36_a_key_that_redraws_the_footer_guards_the_footer() {
-      root.showing = "race"
-      race.rivals = null
-      race.forceActiveFocus()
-      suite.settleFrame()
-      suite.dealRaceHand()
-
+    // `test_31` D2 is click -> key on `handFooter`; this is key -> click. The
+    // space bar fires the highlighted card and arms the name the chip declares,
+    // so a click on the chip 16 ms later is the other half of one gesture and
+    // is refused. Which hand performed a gesture cannot change which names the
+    // gesture belongs to.
+    function test_36_a_key_that_fires_guards_the_footer_chip() {
+      root.showing = "picker"
+      picker.forceActiveFocus()
+      suite.resetScreens()
       Actions.clear()
+      root.cardsUsed = 0
       mouseMove(root, 0, 0)
-      suite.clickNamed(race.handPanel, "card 1")
-      compare(race.handPanel.chosen, 0, "clicking a card in the race did not choose it")
 
-      // Where the chip is NOW, which is where the footer will be after the key.
-      var chip = suite.targetNamed(race.handPanel, "put the card back")
-      verify(chip !== null, "the hand panel prints no `ESC  BACK` chip")
+      var chip = suite.targetNamed(picker, "use the card")
+      verify(chip !== null, "the hand panel prints no `SPACE  USE IT` chip")
       var chipAt = suite.centreOf(chip)
 
-      root.raceLeaves = 0
-      keyClick(Qt.Key_Escape)
-      compare(race.handPanel.chosen, -1, "Escape did not put the card back")
+      keyClick(Qt.Key_Space)
+      compare(root.cardsUsed, 1, "the space bar did not fire the card")
+      picker.slamBorn = -1e9
+      var refusedBefore = Actions.refusedRepeats
       mouseMove(root, chipAt.x, chipAt.y)
       mouseClick(root, chipAt.x, chipAt.y)
-      compare(race.handPanel.chosen, -1,
-              "an Escape put the card back and a CLICK on the same pixel 16 ms later"
-              + " chose card " + (race.handPanel.chosen + 1) + ". The footer redraws as"
-              + " `1 2 3  CHOOSE A CARD` where the chip the child was looking at stood,"
-              + " so the pointer's half of one gesture landed on the control that took"
-              + " its place. This is `test_31`'s D3 with the first press from the"
+      compare(root.cardsUsed, 1,
+              "the space bar fired the card and a CLICK on `SPACE  USE IT` 16 ms later"
+              + " fired again. This is `test_31`'s D2 with the first press from the"
               + " keyboard.")
-      compare(root.raceLeaves, 0, "the click after the Escape left the race")
+      compare(Actions.refusedRepeats, refusedBefore + 1, "and the guard is what refused it")
       mouseMove(root, 0, 0)
     }
 
@@ -2420,15 +2388,17 @@ Item {
       "escape": {
         "clickThenKey": "test_28 -- click the race's ESC line, then Escape",
         "keyThenClick": "test_31 D4 -- Escape, then click the race's ESC line",
-        "clickThenClick": "test_31 D3 -- double-click the hand panel's ESC chip",
-        "keyThenKey": "not guarded; tst_race_keys test_13 asserts the second Escape"
+        "clickThenClick": "test_19 -- three clicks on the race's ESC line, which stays"
+                          + " under the pointer after it acts",
+        "keyThenKey": "not guarded; tst_race_keys test_12 asserts the second Escape"
                       + " leaves the race"
       },
       "handFooter": {
-        "clickThenKey": "test_18 -- the footer chip, then the key it prints",
-        "keyThenClick": "test_36 -- Escape, then a click on the redrawn footer",
-        "clickThenClick": "test_31 D3 -- the chip that replaces itself",
-        "keyThenKey": "not guarded; a second Escape is a second deliberate press"
+        "clickThenKey": "test_31 D2 -- click `SPACE  USE IT`, then the space bar",
+        "keyThenClick": "test_36 -- the space bar, then a click on `SPACE  USE IT`",
+        "clickThenClick": "test_31 D3 -- double-click `SPACE  USE IT`",
+        "keyThenKey": "not guarded; a second Space is a second deliberate press, and"
+                      + " in the race it finds no hand"
       },
       "pitCrew": {
         "clickThenKey": "test_37 -- click `H  PIT CREW`, then H",
@@ -3051,14 +3021,15 @@ Item {
 
       // Card 3 of the first hand is the Wrench, which is targeted.
       suite.clickNamed(picker, "card 3")
-      compare(picker.chosen, 2)
+      compare(picker.highlighted, 2)
       verify(picker.targeting, "the wrench did not open the aim")
       compare(picker.targetIndex, 0)
 
       suite.clickNamed(picker, "aim " + picker.rivals[2].name)
       compare(picker.targetIndex, 2, "clicking a rival tag did not aim at it")
 
-      keyClick(Qt.Key_Left)
+      // PIECE F ROUND 7: Up and Down are the aim's keys (design v4.1).
+      keyClick(Qt.Key_Up)
       compare(picker.targetIndex, 1,
               "the arrow key does not step on from where the click left the aim")
     }

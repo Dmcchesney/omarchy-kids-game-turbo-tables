@@ -5,45 +5,43 @@ import "../engine/engine.mjs" as Engine
 
 // The powerup hand, and the keys that spend it.
 //
-// Design, Streaks and the powerup hand: "Keys: `1`, `2`, `3` choose a card; for
-// a targeted card, left and right pick a rival, Enter confirms, Escape backs
-// out. The picker is a small panel in the lower right, not a modal over the
-// question, so the race stays visible."
+// Design v4.1, Streaks and the powerup hand: "digits never touch the hand; they
+// are always the answer. While a hand is held, one card is highlighted (the
+// first, by default), Left and Right move the highlight across the three
+// cards, and Space fires the highlighted card. A targeted card fires at the
+// nearest rival ahead; Up and Down change the target before firing, and the
+// target's kart is ringed while it is chosen. Enter is only ever the answer
+// key, Escape only ever leaves the race. Nothing is parked, deferred, or
+// confirmed: choosing is a look, spending is one press of a key that can never
+// be a digit."
+//
+// PIECE F ROUND 7 -- WHAT THIS FILE NO LONGER DOES, AND WHY.
+//
+// v4 gave `1`, `2` and `3` to the hand, and a third of the answers in the 1-12
+// tables begin with one of them. Four rounds of `ui/Race.qml` arbitrated the
+// collision -- a digit parked in the field, a digit deferred on the 23
+// single-digit facts, Enter meaning "the card" or "the answer" depending on
+// who typed what, Backspace meaning "it was a card", a one-beat line that said
+// a choice had been let go -- and this panel printed every branch of it:
+// `1 2 3  CHOOSE A CARD`, `⌫  BACK TO THE CARD`, `⏎  ANSWER 1`, `⏎  SEND THE
+// ANSWER`, `ESC  BACK`. The maintainer played it and said the hand was
+// unreliable to fire. He was right, and the fix is not a fifth explanation:
+// every one of those states existed only because a card key was also a digit.
+// None of them exists now. There is no `chosen` that can be -1 while a hand is
+// held, no `pendingDigit`, no `enterSpends`, no `letGo` line, no back-out
+// chip, and the panel's footer has exactly the keys the design names.
 //
 // NOT A MODAL, AND THIS FILE IS WHERE THAT IS TRUE OR NOT. There is no scrim
 // here, no full-bleed rectangle, no fill on the root item at all: the only
 // pixels this screen paints are inside one panel anchored to the bottom-right
 // corner. Everything the race screen draws -- the fact, the field, the track,
-// the karts -- keeps drawing behind it. A hand arriving in the middle of a lap
-// must not take the question off the screen, because the child is still
-// answering it.
+// the karts -- keeps drawing behind it.
 //
-// ENTER CONFIRMS, FOR EVERY CARD. The design names Enter in the targeted case,
-// where there is a rival to pick first. It is required here for the self and
-// every-rival cards too, and that is a deliberate reading rather than an
-// oversight: a hand costs the whole hand, `1` is next to the digits the child
-// is typing at speed for the entire race, and a mistyped answer that fires a
-// Turbo and throws away a Pile-Up is exactly the kind of loss the design's
-// fairness section spends its length preventing. Choosing is one key; spending
-// is two.
-//
-// ROUND 2 -- THIS PANEL IS DRIVEN, NOT FOCUSED. `ui/Race.qml` owns every key of
-// the race, because the race screen is the only place that knows the expected
-// answer and can therefore tell a card key from a digit. It calls `choose`,
-// `stepTarget`, `confirm` and `back` on this panel and reads `chosen`,
-// `needsTarget` and `targeting` back. The `Keys` handler below is still here
-// and still correct, so the panel is a complete screen on its own in the
-// harness, but in the game it never has focus and never fires.
-//
-// ROUND 2 -- ESCAPE HAS ONE MEANING AND NO ONE-WAY DOOR. The previous version
-// emitted `dismissed()` when Escape was pressed with no card chosen, and
-// printed `ESC HIDE` in the footer, and defined no key anywhere that brought
-// the panel back. A held hand is not something a child can lose: the design
-// says "You may hold a hand as long as you like", and the panel is not a modal,
-// so there is nothing to hide from. Escape now backs out of a *choice* and
-// nothing else, and with no choice made it is left unaccepted so the screen
-// behind can use it to leave the race. That is the same "back one" meaning
-// Escape has on every other screen in this game.
+// THIS PANEL IS DRIVEN, NOT FOCUSED. `ui/Race.qml` owns every key of the race
+// and calls `moveHighlight`, `stepTarget` and `fire` on this panel; it reads
+// `highlighted`, `targeting` and `targetId` back, and hands `targetId` to the
+// track so the aimed kart is ringed. The `Keys` handler below is the same
+// three keys, so the panel is a complete screen on its own in the harness.
 FocusScope {
   id: picker
 
@@ -59,18 +57,10 @@ FocusScope {
   // allowed to be small; the instructions are not.
   function fsFloor(v, floor) { return Math.max(floor, Math.round(v * s)) }
 
-  // The key rail as it is actually RENDERED. A round of this project shipped
-  // the claim that "the panel prints the way back" over a key that appeared in
-  // no string a child could see, so this may never be a second copy of the
-  // footer's words.
-  //
-  // ROUND 2: it is not one. `footerHints` below is the model the footer's chips
-  // are BUILT from -- each chip's printed line is `keys + "  " + action` off one
-  // of these objects -- so joining them is reading the same thing the panel
-  // draws, one step earlier. And the claim is now checked from outside as well:
-  // `dev/Harness.qml --print-controls` walks the rendered item tree, finds every
-  // visible Text that is shaped like a printed key hint, and fails the screen
-  // when one of them has no click target over it.
+  // The key rail as it is actually RENDERED. `footerHints` below is the model
+  // the footer's chips are BUILT from -- each chip's printed line is
+  // `keys + "  " + action` off one of these objects -- so joining them is
+  // reading the same thing the panel draws, one step earlier.
   readonly property string footerText: {
     var line = ""
     var hints = picker.footerHints
@@ -81,8 +71,6 @@ FocusScope {
     }
     return line
   }
-  // The same, for the one-beat line above it: "" whenever it is not showing.
-  readonly property string letGoLineText: letGoLine.visible ? letGoLine.text : ""
 
   // ------------------------------------------------------------- the panel
   // The dock's own geometry, so a host can line its charge bar up with the
@@ -112,69 +100,15 @@ FocusScope {
 
   property int seed: 42
 
-  // How many digits the child has already typed into the answer, which the host
-  // reads off the engine's `racer.entry`. It is the arbiter between Enter the
-  // submit key and Enter the spend key, and it is the host's to tell us because
-  // the entry belongs to the race, not to this panel.
-  property int entryLength: 0
+  // THE ONE GUARD NAME ON THIS PANEL. `SPACE  USE IT` spends the whole hand and
+  // cannot be undone, and the instant it acts the panel goes with the hand --
+  // so the second half of a double-click on it lands on whatever the race
+  // draws there next. The chip declares `handFooter`, and the Space key in
+  // `ui/Race.qml` and in the handler below take the same name, so a click and
+  // a press inside one double-click interval are one gesture whichever hand
+  // made them. See `ui/parts/Actions.qml`.
+  readonly property var fireGuards: ["handFooter"]
 
-  // Does Enter spend the card as things stand, or does the half-typed answer
-  // own it? Standing on its own this panel's rule is the simple one -- an empty
-  // field lets Enter spend -- and that is the default binding. `ui/Race.qml`
-  // overrides it, because only the race screen knows which of the digits in the
-  // field were typed by the very press that chose the card, and those digits
-  // are not an answer the child is in the middle of.
-  property bool enterSpends: picker.entryLength === 0
-
-  // ROUND 4 -- THE DEFERRED DIGIT, AND THE KEY THAT WAS NEVER PRINTED.
-  //
-  // On the 23 facts in the 1-12 deck whose answer is a single digit, a card key
-  // is ambiguous in a way no other press is: `1` on `2 x 3` is either "play card
-  // one" or "the answer is 1", and handing it to the engine settles it as a
-  // wrong answer on the spot. `ui/Race.qml` therefore parks the digit -- draws
-  // it in the field, keeps it out of the engine -- and waits for the child to
-  // say which it was. Enter says "it was my answer" and costs the streak.
-  // Backspace says "it was a card" and costs nothing.
-  //
-  // Round three printed only the first of those. The footer read
-  // `FINISH THE ANSWER FIRST      ESC  BACK`, which names the two keys that take
-  // something away and hides the one that does not, and tells the child to do
-  // the single most expensive thing available to them: finishing a one-digit
-  // answer means typing one digit, and that flushes the parked digit as a wrong
-  // answer FIRST -- streak gone, a `missed` entry and a darkened mastery lamp on
-  // a fact the child then gets right on the very next keystroke. Backspace
-  // appeared in no string on this panel, in its `Accessible.description`, or
-  // anywhere else in the game. On 16% of the deck a child holding a hand had no
-  // discoverable way to spend it.
-  //
-  // The host tells us the parked digit, because the field belongs to the race
-  // and not to this panel. "" means there is none. Everything below is printing:
-  // the arbitration in `ui/Race.qml` is unchanged by it.
-  property string pendingDigit: ""
-  readonly property bool deferred: picker.pendingDigit.length > 0
-
-  // ======================================================== PIECE M ROUND 5
-  //
-  // THE NAMES THE BACK-OUT GESTURE BELONGS TO, IN ONE PLACE.
-  //
-  // Four routes perform one gesture: this panel's `ESC  BACK` chip, this
-  // panel's own Escape key, the race's `ESC` line, and the race's Escape
-  // branch. Round four gave the two clicks one pair of names and the two keys
-  // another, and a critic drove the gap -- Escape in a race, then a click on
-  // the hand footer 16 ms later, choosing card 1, because the key had armed
-  // `escape` and not `handFooter`.
-  //
-  // The names describe WHAT THE PRESS DOES, so they cannot differ by hand:
-  //
-  //   with a card chosen, backing out puts it back and the footer REDRAWS
-  //   under the pointer as `1 2 3  CHOOSE A CARD`, so the gesture belongs to
-  //   `handFooter` as well as to `escape`;
-  //   with no card chosen it leaves the race and the footer is not involved.
-  readonly property var backOutGuards: picker.chosen >= 0 ? ["escape", "handFooter"]
-                                                          : ["escape"]
-
-  // ======================================================== PIECE M ROUND 2
-  //
   // THE FOOTER, AS THE LIST OF CONTROLS IT IS.
   //
   // Every group of the printed key rail -- the keys, and what they do -- with
@@ -183,155 +117,64 @@ FocusScope {
   // so there is one place a footer state is written down and the words a child
   // reads are the words the click acts on.
   //
+  //   ◀ ▶  PICK     moves the highlight. Not guarded: choosing is free and a
+  //                 child hammering it means it every time.
+  //   ▲ ▼  AIM      only while the highlighted card needs a rival. Not guarded,
+  //                 for the same reason.
+  //   SPACE  USE IT spends the hand. Destructive, guarded, and the only line on
+  //                 this panel that costs anything.
+  //
   // `act` is a name rather than a closure because a `var` model of closures is
   // rebuilt on every binding change and each rebuild would hand the delegates
-  // new functions; `footerAct` below is the switch, and it calls the same
-  // functions the panel's own key handler calls.
-  //
-  // The deferred line used to need a `TextMetrics` probe to decide whether it
-  // fitted on one row. The `Flow` wraps between groups on its own, at any panel
-  // width, which is what the probe was approximating.
+  // new functions; `footerAct` below is the switch.
   readonly property var footerHints: {
-    if (picker.chosen < 0)
-      return [{ "keys": "1 2 3", "action": "CHOOSE A CARD", "act": "chooseFirst",
-                "name": "Choose a card", "does": "choose the first card",
-                "key": "1", "warn": false, "destructive": false,
-                "guards": ["handFooter"],
-                "help": "Choose the first card. The 1, 2 and 3 keys choose a card each." }]
-    if (picker.deferred)
-      return [{ "keys": "⌫", "action": "BACK TO THE CARD", "act": "undoDigit",
-                "name": "Back to the card",
-                "does": "take the digit back out of the answer and keep the card",
-                "key": "Backspace", "warn": false, "destructive": false,
-                "guards": ["handFooter"],
-                "help": "Takes the " + picker.pendingDigit + " back out of the answer"
-                        + " box and keeps the card chosen. Backspace does it too." },
-              { "keys": "⏎", "action": "ANSWER " + picker.pendingDigit, "act": "submit",
-                "name": "Answer the parked digit",
-                "does": "send " + picker.pendingDigit + " as the answer",
-                "key": "Enter", "warn": false, "destructive": true,
-                "guards": ["handFooter"],
-                "help": "Sends " + picker.pendingDigit + " as the answer instead."
-                        + " Enter does it too." },
-              picker.backHint()]
-    if (picker.strandedTarget)
-      return [picker.backHint(true)]
-    if (!picker.enterSpends)
-      return [{ "keys": "⏎", "action": "SEND THE ANSWER", "act": "submit",
-                "name": "Send the answer", "does": "send what is in the answer box",
-                "key": "Enter", "warn": false, "destructive": true,
-                "guards": ["handFooter"],
-                "help": "Sends what is in the answer box. Enter does it too." },
-              picker.backHint()]
+    var hints = [{ "keys": "◀ ▶", "action": "PICK", "act": "nextCard",
+                   "name": "Next card", "does": "highlight the next card",
+                   "key": "Left, Right", "warn": false, "destructive": false,
+                   // This chip highlights the NEXT card, so of the two keys it
+                   // prints only Right does what it does; Left goes the other
+                   // way and is on the chip because the child has both.
+                   "keyRoute": ["right"],
+                   "guards": [],
+                   "help": "Highlights the next card. Left and right do it too." }]
     if (picker.targeting)
-      return [{ "keys": "◀ ▶", "action": "RIVAL", "act": "nextRival",
-                "name": "Next rival", "does": "aim at the next rival",
-                "key": "Left, Right", "warn": false, "destructive": false,
-                // ROUND 4. This chip aims at the NEXT rival, so of the two keys
-                // it prints only Right does what it does; Left goes the other
-                // way and is on the chip because the child has both. The
-                // crossover presses the one that matches. See
-                // `ui/parts/Clickable.qml`.
-                "keyRoute": ["right"],
-                // AND NOT GUARDED, on purpose. This is a CHOOSING control: a
-                // child clicking it three times means "three rivals on", and a
-                // guard here would be the maintainer's other complaint -- a
-                // control that has to be pressed several times -- pointing the
-                // other way. It also does not replace the footer, so nothing
-                // takes its place under the pointer.
-                "guards": [],
-                "help": "Aims at the next rival. Left and right do it too." },
-              picker.useHint("USE"),
-              picker.backHint()]
-    return [picker.useHint("USE IT"), picker.backHint()]
+      hints.push({ "keys": "▲ ▼", "action": "AIM", "act": "nextRival",
+                   "name": "Next rival", "does": "aim at the next rival",
+                   "key": "Up, Down", "warn": false, "destructive": false,
+                   "keyRoute": ["down"],
+                   "guards": [],
+                   "help": "Aims at the next rival. Up and down do it too." })
+    if (!picker.strandedTarget)
+      hints.push(picker.useHint(picker.targeting ? "USE" : "USE IT"))
+    return hints
   }
 
-  // `USE` after the rival picker, `USE IT` without one: the two strings this
-  // panel has always printed, and the one control that spends a hand.
+  // `USE` after the rival picker, `USE IT` without one: the two words this
+  // panel has always printed on the one control that spends a hand.
   function useHint(word) {
-    return { "keys": "⏎", "action": word, "act": "use", "name": "Use the card",
-             "does": "use " + (picker.chosenCard.length > 0 && Engine.isCard(picker.chosenCard)
-                               ? String(Engine.CARDS[picker.chosenCard].label)
+    return { "keys": "SPACE", "action": word, "act": "use", "name": "Use the card",
+             "does": "use " + (picker.highlightedCard.length > 0 && Engine.isCard(picker.highlightedCard)
+                               ? String(Engine.CARDS[picker.highlightedCard].label)
                                : "the card"),
-             "key": "Enter", "warn": false, "destructive": true,
-             "guards": ["handFooter"],
-             "help": "Uses the chosen card. Using one spends all three."
-                     + " Enter does it too." }
-  }
-
-  function backHint(warn) {
-    return { "keys": "ESC", "action": "BACK", "act": "back",
-             "name": "Put the card back", "does": "put the chosen card back",
-             "key": "Escape", "warn": warn === true, "destructive": false,
-             // ROUND 4 -- THE CHIP A CRITIC BROKE THE RACE WITH, TWICE.
-             //
-             // Putting a card back costs nothing, so this is not destructive and
-             // never was. It is guarded all the same, and by two names, because
-             // of what happens AROUND it:
-             //
-             //   `escape` -- it is the same back-out gesture the race's own ESC
-             //   line and the Escape key perform. Click this, press Escape, and
-             //   the race used to END: the card was already back, so the key
-             //   took the other branch. Measured, `raceLeaves = 1`.
-             //
-             //   `handFooter` -- this chip REPLACES ITSELF. The instant the card
-             //   goes back the footer redraws as `1 2 3  CHOOSE A CARD` at the
-             //   same pixel, and the second half of a double-click chose card 1.
-             //   That is round two's walking-repeat defect, verbatim, one
-             //   control to the left of where round two fixed it.
-             //
-             // ROUND 5. The pair is `picker.backOutGuards` now, and it is read
-             // from there by this chip, by the panel's own Escape key handler
-             // and by the race's `ESC` line and Escape branch -- four routes to
-             // one gesture, and the names they belong to written once.
-             "guards": picker.backOutGuards,
-             "help": "Puts the chosen card back. All three cards are still yours."
-                     + " Escape does it too." }
+             "key": "Space", "warn": false, "destructive": true,
+             "guards": picker.fireGuards,
+             "help": "Uses the highlighted card. Using one spends all three."
+                     + " The space bar does it too." }
   }
 
   function footerAct(act) {
-    // NOTHING ON THIS PANEL ACTS WHILE THE HAND IS FLYING OFF.
-    //
-    // The cards have had this guard since piece F (`onTapped: if
-    // (!picker.slamming)`), and the footer needed it for a sharper reason that
-    // the round-2 repeat sweep found: the chips CHANGE under the pointer the
-    // instant a card is spent. `⏎  USE IT` is replaced at the same pixel by
-    // `1 2 3  CHOOSE A CARD`, so the second press of a double-click on USE
-    // landed on the chip that had taken its place and chose a card the child
-    // never asked for. In the game the hand empties and the panel goes with it,
-    // which is why the same sweep reads SAME on the race screen; standing alone
-    // in the harness the hand stays and the walk-through is visible. It is the
-    // same defect either way and this is where it stops.
+    // NOTHING ON THIS PANEL ACTS WHILE THE HAND IS FLYING OFF. `shownHand`
+    // keeps drawing the spent cards for the length of the slam, and a press on
+    // a footer for a hand that has already been played is a press with no rule
+    // behind it.
     if (picker.slamming)
       return
-    if (act === "chooseFirst")
-      picker.tapCard(0)
-    else if (act === "use")
-      picker.useChosen()
-    else if (act === "back") {
-      // ROUND 5 -- THE CHIP IS THE THIRD ROUTE TO THE BACK-OUT GESTURE, and it
-      // was doing a third thing. The race's Escape key and its printed `ESC`
-      // line both clear the child's queued keystrokes as part of backing out
-      // (`ui/Race.qml`, `backOutRequested()`); this chip cleared `handTouched`'s
-      // two claims and not the queue, so backing out of a card WITH THIS CHIP
-      // during a reveal window left digits behind to be replayed into the next
-      // fact. It is the pit crew's defect on a second control, and the cause is
-      // the same one: a gesture written out again instead of called.
-      //
-      // The host owns the gesture. `backRequested` is how this chip asks for it,
-      // exactly as `submitRequested` and `undoDigitRequested` above hand Enter
-      // and Backspace to the screen that owns the answer field. Standing alone
-      // in the harness nothing is listening and `back()` below is the whole
-      // behaviour, which is what the panel has always done on its own.
-      picker.handTouched()
-      picker.backRequested()
-      picker.back()
-    } else if (act === "nextRival")
+    if (act === "nextCard")
+      picker.moveHighlight(1)
+    else if (act === "nextRival")
       picker.stepTarget(1)
-    else if (act === "submit")
-      picker.submitRequested()
-    else if (act === "undoDigit")
-      picker.undoDigitRequested()
+    else if (act === "use")
+      picker.fire()
   }
 
   // ======================================================== PIECE F: FEEL
@@ -354,11 +197,9 @@ FocusScope {
   //
   // THE HAND OUTLIVES ITSELF FOR 570 ms, ON PURPOSE. Spending a card spends the
   // whole hand, so by the time the slam should be drawn the engine has already
-  // taken all three cards away and `hand` is empty. `confirm()` therefore keeps
-  // a copy -- the cards, and which one was chosen -- and the panel draws that
-  // copy until the fly-off is over. Without it the design's most-used beat
-  // ("the chosen card enlarges, then slams down") would be a card that vanished
-  // on the frame the child pressed Enter, which is what shipped before.
+  // taken all three cards away and `hand` is empty. `fire()` therefore keeps a
+  // copy -- the cards, and which one was highlighted -- and the panel draws
+  // that copy until the fly-off is over.
   property real fxNow: 0
 
   property real dealBorn: -1e9
@@ -381,110 +222,38 @@ FocusScope {
 
   // "An unused hand breathes gently so the child remembers it." 0.38 Hz -- an
   // eighth of the design's 3 Hz cap -- and it is a fade in the border rather
-  // than a blink, so it never reads as an alarm. It stops the moment a card is
-  // chosen, because a chosen card is not an unused hand.
-  readonly property real breathe: (picker.reducedMotion || picker.chosen >= 0
+  // than a blink, so it never reads as an alarm. Every held hand is an unused
+  // hand now: a highlight is a look, not a choice, so the breath stays.
+  readonly property real breathe: (picker.reducedMotion
                                    || picker.hand.length === 0 || picker.slamming)
                                   ? 0
                                   : 0.5 + 0.5 * Math.sin(picker.fxNow / CardFx.HAND.breatheMs
                                                          * Math.PI * 2)
   property bool reducedMotion: false
 
-  // -1 is "no card chosen yet", which is the state a hand sits in for as long
-  // as the child likes. The design: "You may hold a hand as long as you like."
-  property int chosen: -1
+  // ------------------------------------------------------- the highlight
+  //
+  // WHICH CARD SPACE WOULD FIRE. Never -1 while a hand is held: the design says
+  // the first card is highlighted by default, so a child who has never pressed
+  // an arrow can fire with one press of Space. Left and Right move it and wrap.
+  property int highlighted: 0
   property int targetIndex: 0
 
-  // ROUND 5 -- A CARD THAT STOPS BEING CHOSEN SAYS SO.
-  //
-  // Round three's defect #5: on `2 x 6` a child holding a hand presses `1` then
-  // `2` -- two card keys -- and the pair spells 12, which is the answer. The
-  // race screen submits it as a correct answer, which is the least-bad reading
-  // of two keys that are also the right answer, and drops the card choice on
-  // the way past. The critic's finding was not the arbitration but the silence:
-  // "the hand vanishing without explanation". The same silence follows every
-  // other route by which a choice is let go -- Enter on a deferred digit,
-  // Escape, a digit of the child's own typed over a provisional one.
-  //
-  // The panel is where a child looks for the state of their hand, so the panel
-  // is where it is said, and saying it here means every one of those routes is
-  // covered without the race screen having to remember to call anything: the
-  // callers already call `reset()`.
-  //
-  // The wording is the one thing that must not be sloppy. The hand is NOT
-  // spent by any of those routes -- all three cards are still held -- so a
-  // banner reading CARD GONE would be a lie in the direction that matters. It
-  // says the card went back, and the footer under it still names the keys.
-  //
-  // Short on purpose. Every route that lets a choice go is reached in the
-  // middle of an answer, and the panel has to be back to naming keys by the
-  // time the child's next keystroke lands. The commonest route by far is not
-  // the collision the critic found but the ordinary one beside it -- ANY answer
-  // whose first digit is 1, 2 or 3, typed while a hand is held, highlights that
-  // card tile on the first press and unhighlights it on the second, and this
-  // line is what says why the highlight went. See
-  // `test_28_an_ordinary_answer_that_starts_with_a_card_key_says_it_too`.
-  readonly property int letGoMs: 900
-  property bool letGoShowing: false
-  readonly property string letGoText: "CARD PUT BACK  ·  ALL THREE STILL YOURS"
-
-  Timer {
-    id: letGoTimer
-    interval: picker.letGoMs
-    onTriggered: picker.letGoShowing = false
-  }
-
-  // A choice cleared without being spent. `confirm()` does not come through
-  // here, because a card that was actually played is not a card put back.
-  function clearChoice() {
-    picker.chosen = -1
-    picker.targetIndex = 0
-  }
-
-  function sayLetGo() {
-    if (!picker.visible)
-      return
-    picker.letGoShowing = true
-    letGoTimer.restart()
-  }
-
-  // ROUND 4 -- `picker.hand`, QUALIFIED, AND FOUR OF THE EIGHT CARDS DEPEND ON IT.
-  //
-  // This read `hand[chosen]` unqualified, and round three's "three across"
-  // rewrite of the panel below introduced `Row { id: handRow }` -- which was
-  // `id: hand`. A file-scope id BEATS the root object's own property in QML's
-  // unqualified lookup, so from that commit on `hand` here was a Row: its
-  // `.length` is undefined, `chosen < undefined` is false, and `chosenCard`
-  // was the empty string on every frame of every race.
-  //
-  // What that cost, because it is not a cosmetic bug: `needsTarget` is false
-  // for the empty string, so `targeting`, `targetId` and `strandedTarget` fell
-  // with it, the panel never offered a rival to aim at, and `confirm()` sent
-  // `cardUsed(index, "")` for a TARGETED card. The engine refuses that. So the
-  // Wrench, the Pothole, the Pile-Up and the Tow Hook -- half the deck, and
-  // every card that attacks anybody -- could be chosen, would print `USE IT`,
-  // and then did nothing at all: the hand came back and the child's twelve-in-
-  // a-row bought them nothing. A blind critic saw exactly that in the
-  // `hand-slam` strip and was right about it.
-  //
-  // The id is renamed AND this reads `picker.` explicitly. Either alone fixes
-  // it; both together mean the next id cannot bring it back.
-  readonly property string chosenCard: (picker.chosen >= 0
-                                        && picker.chosen < picker.hand.length)
-                                       ? String(picker.hand[picker.chosen]) : ""
-  // Does the chosen card need a rival at all? This is a property of the card
-  // and nothing else, so it stays true when the rival list empties -- which is
-  // the whole point. The old `targeting` folded "this card is targeted" and
-  // "there is someone to aim at" into one flag, so a Pile-Up chosen with every
-  // rival already home read as an untargeted card, printed `⏎ USE IT`, and
-  // fired `cardUsed(index, "")` into a refusal the child never saw.
-  readonly property bool needsTarget: chosenCard.length > 0
-                                      && Engine.isCard(chosenCard)
-                                      && Engine.CARDS[chosenCard].scope === "targeted"
+  readonly property string highlightedCard: (picker.hand.length > 0
+                                             && picker.highlighted >= 0
+                                             && picker.highlighted < picker.hand.length)
+                                            ? String(picker.hand[picker.highlighted]) : ""
+  // Does the highlighted card need a rival at all? This is a property of the
+  // card and nothing else, so it stays true when the rival list empties --
+  // which is the whole point: a Pile-Up highlighted with every rival already
+  // home is a card that cannot be fired, and the panel says so rather than
+  // firing `cardUsed(index, "")` into an engine refusal.
+  readonly property bool needsTarget: highlightedCard.length > 0
+                                      && Engine.isCard(highlightedCard)
+                                      && Engine.CARDS[highlightedCard].scope === "targeted"
   // Aiming is possible only when the card needs a rival AND one is left.
   readonly property bool targeting: needsTarget && picker.rivals.length > 0
-  // True when the child has chosen a card that can never be spent as things
-  // stand. The panel says so rather than swallowing the press.
+  // True when the highlighted card can never be spent as things stand.
   readonly property bool strandedTarget: needsTarget && picker.rivals.length === 0
 
   readonly property string targetId: (picker.targeting
@@ -498,183 +267,60 @@ FocusScope {
   // needs no rival.
   signal cardUsed(int index, string targetId)
 
-  // PIECE M -- THE ONE THING A MOUSE NEEDS THE HOST TO KNOW.
-  //
-  // In the game this panel never has focus: `ui/Race.qml` owns every key of the
-  // race, because only the race screen knows the expected answer and can tell a
-  // card key from a digit. That arbitration leaves state behind it -- a
-  // PROVISIONAL digit (one the card press itself put in the field) and a
-  // DEFERRED one (parked because it might be the answer to a one-digit fact) --
-  // and both exist only because `1`, `2` and `3` are also digits.
-  //
-  // A click is not a digit. It is the one press in this game with no ambiguity
-  // in it at all, so choosing a card by clicking it must clear whatever the
-  // keyboard's ambiguity left in the field, or a child who typed `1` and then
-  // reached for the mouse would leave a `1` sitting in the answer box that they
-  // never meant as an answer. This signal is how the panel says "a mouse did
-  // that": the race screen drops the parked digit and retires the provisional
-  // claim, and standing on its own in the harness nothing is listening because
-  // there is no arbitration to undo.
-  signal handTouched()
-
-  // PIECE M ROUND 2. The two footer keys that belong to the ANSWER rather than
-  // to the hand, asked of the host because the answer is the race's.
-  //
-  // `⏎  SEND THE ANSWER` and `⏎  ANSWER n` are printed on this panel in the two
-  // states where Enter is not the hand's key, and `⌫  BACK TO THE CARD` is the
-  // press that takes a parked digit out of the field. All three are the race
-  // screen's arbitration, not this panel's -- see the deferred-digit block
-  // above -- so the chip asks and `ui/Race.qml` answers through the same
-  // `submitKey()` and `dropPending()` a real key press reaches. Standing alone
-  // in the harness neither state can arise: both need an entry, and an entry
-  // needs a race.
-  signal submitRequested()
-  signal undoDigitRequested()
-
-  // PIECE M ROUND 5. The `ESC  BACK` chip, asked of the host for the same
-  // reason: backing out of a card is a gesture the RACE owns, and the race does
-  // three things this panel cannot see -- it drops a parked digit, retires a
-  // provisional claim, and clears the keystrokes a reveal window is holding.
-  // The chip did two of the three. See `footerAct` above and `ui/Race.qml`'s
-  // `backOutRequested()`. Standing alone there is no host and `back()` is the
-  // whole of it, which is the panel's own unchanged behaviour.
-  signal backRequested()
-
   visible: picker.hand.length > 0 || picker.slamming
 
-  // Two invariants the previous version did not keep, and both were reachable
-  // in a real Grand Prix.
+  // Two invariants, both reachable in a real Grand Prix.
   //
   //  - A rival crossing the line shrinks `rivals` under a live aim. The old
   //    `targetIndex` stayed where it was, `targetId` fell to "", and NO tile
-  //    carried the `▸` marker -- a targeting panel aiming at nothing, with no
-  //    shape and no text saying so. It is clamped back into range here.
-  //  - A hand is dealt while a card is chosen. `chosen` was a plain writable
-  //    int with no invariant, so a stale index survived into a hand that no
-  //    longer had that card.
+  //    carried the `▸` marker. It is clamped back into range here.
+  //  - A hand is dealt while a highlight is past its end. The highlight goes
+  //    back to the first card, which is where a fresh hand starts.
   onRivalsChanged: if (picker.targetIndex >= picker.rivals.length) picker.targetIndex = 0
-  //    A hand replaced under a chosen index is not a card put back -- the hand
-  //    it belonged to is gone -- so this one clears the choice silently. And a
-  //    line about the hand that has just been replaced does not belong over the
-  //    one that replaced it, or over the first hand of the next race, so the
-  //    beat is dropped here rather than left to run out on its timer.
-  //
-  // AND `hand` CHANGES WHEN THE HAND DOES NOT. The host hands it down off the
-  // engine's racer, and the engine clones its state on every step, so the array
-  // is a new object several times a second while the three cards in it stand
-  // still. `onHandChanged` therefore has to ask whether the CARDS changed --
-  // measured: bound to the identity, the one-beat line below was cleared by the
-  // next keystroke and a critic would have read it as never drawn at all.
-  property var lastHand: []
-  function sameCards(a, b) {
-    if (!a || !b || a.length !== b.length)
-      return false
-    for (var i = 0; i < a.length; i++) {
-      if (String(a[i]) !== String(b[i]))
-        return false
-    }
-    return true
-  }
-  onHandChanged: {
-    if (picker.sameCards(picker.hand, picker.lastHand))
-      return
-    picker.lastHand = picker.hand
-    picker.letGoShowing = false
-    letGoTimer.stop()
-    if (picker.chosen >= picker.hand.length)
-      picker.clearChoice()
-  }
+  onHandChanged: if (picker.highlighted >= picker.hand.length) picker.reset()
 
   Accessible.role: Accessible.Pane
   Accessible.name: "Power-up hand"
-  // The deferred sentence comes first, because while a digit is parked it is the
-  // only rule on this panel that costs anything, and a screen-reader user got no
-  // version of it at all before. It names all three keys and what each one does.
-  Accessible.description: (picker.letGoShowing
-                           ? "The card you had chosen has been put back. All three cards are"
-                             + " still yours. "
-                           : "")
-    + (picker.deferred
-    ? ("The digit " + picker.pendingDigit + " is waiting in the answer box. "
-       + "Backspace takes it back out and keeps the card chosen. "
-       + "Enter answers " + picker.pendingDigit + " instead. "
-       + "Escape puts the card back and takes the digit with it. "
-       + "One, two and three still change which card is chosen."
-       + (picker.targeting ? " Left and right pick a rival." : "")
-       + " Using a card costs the whole hand.")
-    : ("Press one, two or three to choose a card."
-       + (picker.targeting
-          ? " Left and right pick a rival, Enter uses it on " + picker.targetName + "."
-          : (picker.strandedTarget
-             ? " There is no rival left to aim at, so this card cannot be used."
-             : " Enter uses it."))
-       + " Escape puts the card back. Using a card costs the whole hand."))
+  Accessible.description: "Left and right highlight a card. "
+    + (picker.targeting
+       ? "Up and down pick a rival. Space uses it on " + picker.targetName + "."
+       : (picker.strandedTarget
+          ? "There is no rival left to aim at, so this card cannot be used."
+          : "Space uses it."))
+    + " Using a card costs the whole hand."
 
-  function choose(index) {
+  // Put the highlight on one card, from a click or from the arrows landing
+  // there. Choosing costs nothing and is never guarded.
+  function highlight(index) {
     if (index < 0 || index >= picker.hand.length)
       return
-    picker.chosen = index
+    picker.highlighted = index
     picker.targetIndex = 0
   }
 
-  // PIECE M. What a click on a card means, in one place, so the three routes
-  // into it -- the card, the harness's drive script and a screen reader's press
-  // action -- cannot drift apart.
-  //
-  // ================================================================== ROUND 2
-  //
-  // A CLICK ON A CARD CHOOSES IT, AND CANNOT SPEND IT. THAT IS THE WHOLE FIX.
-  //
-  // Round one collapsed the keyboard's two presses onto the card: an unchosen
-  // card was chosen, and a card that was already chosen was USED. A critic
-  // drove two real clicks sixteen milliseconds apart -- `click:card 3,
-  // click:card 3` -- and the hand was gone. The same key twice, `key:3, key:3`,
-  // merely left the card chosen.
-  //
-  // Everything about that is wrong in the same direction. Spending a card costs
-  // all three and there is no undo anywhere in this plugin. A double-click is
-  // not a child's mistake; it is what children do with a mouse. Nothing on
-  // screen ever said "click it again to use it" -- the second press was
-  // discoverable only from the screen reader's description -- so the gesture
-  // was undiscoverable AND destructive, which is the worst pair. And it was on
-  // the one mechanic the maintainer has already complained about: "launching a
-  // power up feels weird, I had to attempt to trigger it multiple times."
-  //
-  // The keyboard has always spent a card with a SECOND, DIFFERENT press --
-  // Enter, not the digit again -- and the panel has always printed that key.
-  // The mouse now has the same shape: the card chooses, and the footer's
-  // `⏎  USE IT` is the control that spends. It is a separate target, it says
-  // what it does in the words already on the screen, and it is marked
-  // `destructive`, so `ui/parts/Clickable.qml` refuses a second press inside
-  // the double-click interval as well.
-  //
-  // A repeat is therefore harmless on both halves: clicking a card five times
-  // chooses it five times, and the second click of a double-click on `USE IT`
-  // is refused by the guard and lands, in any case, on a footer that no longer
-  // offers it.
+  function moveHighlight(delta) {
+    var count = picker.hand.length
+    if (count === 0)
+      return
+    picker.highlight(((picker.highlighted + delta) % count + count) % count)
+  }
+
+  // A click on a card is the arrows landing on it, and nothing more. Spending
+  // is the footer's own line, exactly as it is Space on the keyboard -- design
+  // v4.2: "clicking a card chooses it and clicking the footer's own line
+  // spends it". A double-click on a card therefore cannot spend a hand, which
+  // is the round-2 defect of piece M and the maintainer's own complaint.
   function tapCard(index) {
-    picker.handTouched()
-    picker.choose(index)
-  }
-
-  // Spending the chosen card, from the footer's `⏎  USE IT`. `handTouched()`
-  // first for the same reason a card click sends it: a click is not a digit, so
-  // whatever the keyboard's digit arbitration parked in the answer field has to
-  // come back out before the hand is spent.
-  function useChosen() {
     if (picker.slamming)
-      return false
-    picker.handTouched()
-    return picker.confirm()
+      return
+    picker.highlight(index)
   }
 
-  // Clicking a rival is the Left/Right arrow landing on that rival, and nothing
-  // more: it aims, it does not fire. Firing is the card's second press, which
-  // is where the keyboard fires from too.
+  // Clicking a rival is Up or Down landing on that rival: it aims, it does
+  // not fire.
   function tapRival(index) {
     if (!picker.targeting || index < 0 || index >= picker.rivals.length)
       return
-    picker.handTouched()
     picker.targetIndex = index
   }
 
@@ -685,128 +331,65 @@ FocusScope {
     picker.targetIndex = ((picker.targetIndex + delta) % count + count) % count
   }
 
-  // The host's way of putting a chosen card back, from any of the routes above.
-  // It is called on states where nothing was chosen too -- a new race, a new
-  // hand -- and those say nothing, because nothing went anywhere.
+  // The host's way of putting the panel back to where a hand starts: the first
+  // card highlighted, the nearest rival aimed at. A new race, a new hand.
   function reset() {
-    var had = picker.chosen >= 0
-    picker.clearChoice()
-    if (had)
-      picker.sayLetGo()
+    picker.highlighted = 0
+    picker.targetIndex = 0
   }
 
-  // True when the card was actually spent. The old version returned nothing and
-  // guarded only `chosen < 0`, so three reachable states fired `cardUsed` into
-  // an engine refusal with nothing on screen changing: a stale index past the
-  // end of a new hand, a targeted card with every rival home, and a targeted
-  // card whose aim had fallen off a shrunk list.
-  function confirm() {
-    if (picker.chosen < 0 || picker.chosen >= picker.hand.length)
+  // SPACE. True when the card was actually spent. Three reachable states are
+  // refused rather than fired into an engine refusal with nothing on screen
+  // changing: the slam already playing, a highlight past the end of the hand,
+  // and a targeted card with every rival home.
+  function fire() {
+    if (picker.slamming)
+      return false
+    if (picker.highlighted < 0 || picker.highlighted >= picker.hand.length)
       return false
     if (picker.needsTarget && picker.targetId.length === 0)
       return false
-    var index = picker.chosen
+    var index = picker.highlighted
     var target = picker.needsTarget ? picker.targetId : ""
-    // PIECE F. Keep the hand that is about to be taken away, and which card of
-    // it was chosen, so the slam and the fly-off have something to draw. See
-    // the block at the top of this file.
+    // Keep the hand that is about to be taken away, and which card of it was
+    // fired, so the slam and the fly-off have something to draw.
     picker.slamHand = picker.hand.slice()
     picker.slamChosen = index
     picker.slamBorn = picker.fxNow
     // "the chosen card enlarges for 150, then slams down". The sound is the
-    // slam's, not the choice's: choosing costs nothing and says nothing.
+    // slam's: highlighting costs nothing and says nothing.
     Sfx.play("slam")
-    // No `letGoShowing = false` here, deliberately. Spending a card empties the
-    // hand, and `onHandChanged` below drops the line for that reason -- a
-    // second clear on this path would be a line no test could ever falsify.
-    picker.clearChoice()
+    picker.reset()
     picker.cardUsed(index, target)
     return true
   }
 
-  // Backing out of a choice is free and always was. With nothing chosen there
-  // is nothing to back out of, and the caller is told so, so the same Escape
-  // can go on to mean "leave the race" on the screen behind.
-  function back() {
-    if (picker.chosen < 0)
-      return false
-    picker.reset()
-    return true
-  }
-
   Keys.onPressed: function (event) {
-    if (event.key === Qt.Key_1 || event.key === Qt.Key_2 || event.key === Qt.Key_3) {
-      // ROUND 5 -- IT ARMS WHAT THE CHIP ARMS. `1 2 3  CHOOSE A CARD` declares
-      // `handFooter` because choosing a card REPLACES THE FOOTER at the pixel
-      // the child pressed: `⏎  USE IT` and `ESC  BACK` take its place, and the
-      // first of those spends the whole hand. The key did the same thing and
-      // armed nothing, so a key and then a click on the footer inside one
-      // interval spent a hand a click twice could not.
-      //
-      // A critic found this by extending `test_29`'s fingerprint with
-      // `Actions.armed`; the fingerprint carries it now, so this cannot drift
-      // apart again silently. Choosing is still not GUARDED against itself --
-      // three presses choose three times, which is the maintainer's other
-      // standing complaint pointing the right way -- because `handFooter` is
-      // armed by this press and not consulted by it.
-      Actions.arm(["handFooter"], "key")
-      picker.choose(event.key - Qt.Key_1)
-      // Deliberately NOT accepted: the same press is also the digit 1, 2 or 3,
-      // and the screen behind has to see it. In the game the race screen sees
-      // it first and arbitrates; this path is the standalone one.
+    if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+      picker.moveHighlight(event.key === Qt.Key_Left ? -1 : 1)
+      event.accepted = true
       return
     }
-    if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+    if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
       if (picker.targeting) {
-        picker.stepTarget(event.key === Qt.Key_Left ? -1 : 1)
+        picker.stepTarget(event.key === Qt.Key_Up ? -1 : 1)
         event.accepted = true
       }
       return
     }
-    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-      // A half-typed answer owns Enter. Only an empty field lets Enter spend a
-      // card, which is what stops a submit from costing a hand.
-      //
-      // ROUND 5. Spending the hand is the `⏎  USE IT` chip's action, and that
-      // chip declares `handFooter`: it replaces itself the instant it acts. The
-      // key that prints on it belongs to the same action, so it takes the same
-      // name -- a click on the chip and then this key inside one interval used
-      // to spend a hand that two clicks could not.
-      if (picker.enterSpends && picker.chosen >= 0) {
-        if (!Actions.take(["handFooter"], "key")) {
-          event.accepted = true
-          return
-        }
-        event.accepted = picker.confirm()
-      }
-      return
-    }
-    if (event.key === Qt.Key_Escape) {
-      // ROUND 4 of piece M. The same `escape` guard the footer's `ESC  BACK`
-      // chip and the race's own ESC line take: one back-out gesture, one guard,
-      // whichever hand the press came from. In the game this handler never
-      // fires -- `ui/Race.qml` owns every key of a race -- and the race's own
-      // Escape branch takes the same name; this is the standalone path, and it
-      // has to obey the same rule or the panel means something different in the
-      // harness from what it means in the game.
-      //
-      // ROUND 5 -- AND IT TAKES BOTH NAMES THE CHIP TAKES, not one of the two.
-      // `backHint()` above declares `["escape", "handFooter"]` and says why: the
-      // instant the card goes back the footer redraws as `1 2 3  CHOOSE A CARD`
-      // at the same pixel. A key that armed only `escape` left that redraw
-      // unguarded, and a critic drove exactly that on the race -- Escape, then a
-      // click on the footer 16 ms later, choosing card 1. Which hand performed
-      // the gesture cannot change WHICH NAMES the gesture belongs to.
-      if (!Actions.take(picker.backOutGuards, "key")) {
+    if (event.key === Qt.Key_Space) {
+      // The same guard the `SPACE  USE IT` chip declares, so a click on the
+      // chip and this key inside one double-click interval are one gesture.
+      if (!Actions.take(picker.fireGuards, "key")) {
         event.accepted = true
         return
       }
-      event.accepted = picker.back()
+      event.accepted = picker.fire()
       return
     }
     // Every other key is left unaccepted on purpose. The race screen behind
-    // this panel is where the digits of an answer belong, and a picker that
-    // swallowed them would stall the child mid-fact.
+    // this panel is where the digits of an answer belong, and Escape is the
+    // race's, and only ever leaves.
   }
 
   // ------------------------------------------------------------- the panel
@@ -824,8 +407,7 @@ FocusScope {
       radius: Theme.cornerRadius
       color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.94)
       border.width: 2
-      border.color: picker.strandedTarget ? Theme.hazard
-                                          : (picker.chosen >= 0 ? Theme.focusRing : Theme.amberDeep)
+      border.color: picker.strandedTarget ? Theme.hazard : Theme.amberDeep
     }
 
     Column {
@@ -836,9 +418,7 @@ FocusScope {
       spacing: picker.px(9)
 
       // The rule the whole panel turns on sits beside the title where it fits
-      // and drops to its own line where it does not. A `Row` clipped it
-      // mid-word against the panel border at 1366 x 768, and the one line a
-      // child must not lose is the one that says a card costs the hand.
+      // and drops to its own line where it does not.
       Flow {
         width: parent.width
         spacing: picker.px(10)
@@ -862,18 +442,12 @@ FocusScope {
         }
       }
 
-      // ROUND 3: THREE ACROSS, NOT THREE DOWN.
-      //
-      // A blind critic called this "a dark list panel ... These are not cards".
-      // The design's whole paragraph on the hand is in the language of cards --
-      // dealt, slid up, slammed down, flipped face down, flown off -- and none
-      // of it means anything to a six-year-old about three rows of a settings
-      // menu. `ui/parts/HandCard.qml` draws a portrait card in playing-card
-      // proportions; this is the hand it is laid out in.
+      // THREE ACROSS, NOT THREE DOWN. `ui/parts/HandCard.qml` draws a portrait
+      // card in playing-card proportions; this is the hand it is laid out in.
       Row {
-        // NOT `id: hand`. See `chosenCard` above: that id shadowed the root's
-        // own `hand` property for every unqualified binding in this file and
-        // silently disabled every targeted card in the deck for a whole round.
+        // NOT `id: hand`: a file-scope id beats the root object's own property
+        // in QML's unqualified lookup, and that shadowing once disabled every
+        // targeted card in the deck for a whole round.
         id: handRow
         width: parent.width
         spacing: picker.px(9)
@@ -889,7 +463,7 @@ FocusScope {
         //           staggered a sixth of the deal apart so three cards arrive
         //           as three cards
         //   breathe an unused hand's gentle fade
-        //   slam    the chosen card enlarges for 150 then slams down; the other
+        //   slam    the fired card enlarges for 150 then slams down; the other
         //           two flip face down (a scale through zero in x, which is
         //           what a card turning over is) and fly off to the right
         Item {
@@ -897,7 +471,7 @@ FocusScope {
           readonly property int slot: index
           readonly property bool isChosen: picker.slamming
                                            ? picker.slamChosen === slot
-                                           : picker.chosen === slot
+                                           : picker.highlighted === slot
           readonly property real dealU: picker.dealing
                                         ? Math.max(0, Math.min(1,
                                             (picker.dealT - slot * CardFx.HAND.dealMs / 6)
@@ -922,17 +496,24 @@ FocusScope {
             labelSize: picker.fsFloor(22, 18)
             detailSize: picker.fsFloor(14, 13)
             breathe: picker.breathe
+            // The presses that put the highlight on THIS card from where it
+            // is: none if it is already there, otherwise Right as many times
+            // as it is round the hand. `test_29` presses exactly this and
+            // demands the same screen the click left.
+            keyRoute: {
+              var count = picker.hand.length
+              if (count <= 0)
+                return []
+              var steps = ((cardSlot.slot - picker.highlighted) % count + count) % count
+              var route = []
+              for (var i = 0; i < steps; i++)
+                route.push("right")
+              return route
+            }
 
-            // PIECE M. Choose it, or -- if it is already chosen -- use it. The
-            // click goes through `tapCard`, which calls the panel's own
-            // `choose` and `confirm`: the same two functions `ui/Race.qml`
-            // calls for the `1 2 3` keys and for Enter.
-            //
-            // Dead while the hand is flying off. `shownHand` keeps drawing the
-            // spent cards for 570 ms so the slam has something to draw, and a
-            // click on a card that has already been played would be a press
-            // with no rule behind it.
-            onTapped: if (!picker.slamming) picker.tapCard(cardSlot.slot)
+            // A click highlights, exactly as the arrows do. Dead while the hand
+            // is flying off.
+            onTapped: picker.tapCard(cardSlot.slot)
 
             // The deal: up from the bottom right.
             y: picker.reducedMotion ? 0
@@ -945,7 +526,7 @@ FocusScope {
                                     / Math.max(0.001, 1 - cardSlot.slamEnd))
                            : Math.max(0, 1 - cardSlot.slamU / Math.max(0.001, cardSlot.slamEnd + 0.35))))
             transformOrigin: Item.Center
-            // The chosen card: enlarge, then slam.
+            // The fired card: enlarge, then slam.
             scale: (picker.reducedMotion || cardSlot.slamU < 0) ? 1
                    : (cardSlot.isChosen
                       ? (cardSlot.slamU < cardSlot.enlargeEnd
@@ -960,10 +541,6 @@ FocusScope {
               Scale {
                 origin.x: card.width / 2
                 origin.y: card.height / 2
-                // A flip is a scale through zero in x. It is the whole of what
-                // "flip face down" can be without a second face to draw, and it
-                // reads as a turn rather than as a shrink because the height
-                // does not change.
                 xScale: (picker.reducedMotion || cardSlot.slamU < 0 || cardSlot.isChosen)
                         ? 1
                         : Math.max(0.02, Math.cos(Math.min(1, cardSlot.slamU / Math.max(0.001, cardSlot.slamEnd))
@@ -984,8 +561,8 @@ FocusScope {
       // ------------------------------------------------------- the target
       //
       // Only a targeted card asks this question, and it asks it in place rather
-      // than in a second panel: the cards stay on screen, so a child who picked
-      // the wrong one can see it and press Escape.
+      // than in a second panel: the cards stay on screen, so a child who
+      // highlighted the wrong one can see it and press Left or Right.
       Item {
         width: parent.width
         height: picker.needsTarget ? targetColumn.height + picker.px(10) : 0
@@ -1030,24 +607,9 @@ FocusScope {
                 border.color: aimed ? Theme.focusRing
                                     : (aimHit.hovered ? Theme.hoverRing : Theme.line)
 
-                // ROUND 4 OF PIECE M -- THE ONE TILE THE POINTER DID NOTHING TO.
-                //
-                // The fill and the border above are `aimed ? ... : hovered ?
-                // ...`, so the tag that is ALREADY aimed drew the same picture
-                // whether the pointer was on it or not. Pointing at it changed
-                // nothing on the screen -- which is the exact defect this
-                // component's own doctrine is against, and it went unseen for
-                // three rounds because the pixel sweep walked two screens that
-                // have no aim tags on them.
-                //
-                // Selection is not focus. `ui/parts/ActionButton.qml` suppresses
-                // hover under FOCUS on purpose -- where the keyboard is standing
-                // is the more important fact, and a child needs one answer, not
-                // two -- but "this is the rival you are aiming at" and "your
-                // pointer is here" are two different facts and the child wants
-                // both. Drawn as a second ring inside the aimed one, the way
-                // `ui/parts/PaintGrid.qml` draws hover over the chosen swatch,
-                // so the aimed picture is not taken away to make room for it.
+                // Selection is not focus: "this is the rival you are aiming
+                // at" and "your pointer is here" are two different facts and
+                // the child wants both. A second ring inside the aimed one.
                 Rectangle {
                   anchors.fill: parent
                   anchors.margins: 3
@@ -1071,18 +633,10 @@ FocusScope {
                   font.letterSpacing: picker.px(1)
                 }
 
-                // PIECE M. Design v4.1: "a rival's kart tag as a target". This
-                // is that tag -- the rival's name, in the panel, in the moment
-                // the game asks a child who to aim at -- and it is the only
-                // place in the running game where the question is put. The
-                // rival tags `ui/TrackView.qml` draws on the road belong to
-                // piece T this round and are not touched here; the aim is
-                // reachable by mouse in the panel that asks for it, which is
-                // where the arrow keys reach it too.
                 Accessible.role: Accessible.Button
                 Accessible.name: "Aim at " + String(modelData.name)
                     + (aimTile.aimed ? ", aimed" : "")
-                Accessible.description: "Left and right pick a rival. Then use the card."
+                Accessible.description: "Up and down pick a rival. Then use the card."
                 Accessible.onPressAction: picker.tapRival(model.index)
 
                 Clickable {
@@ -1092,11 +646,10 @@ FocusScope {
                   stop: null
                   label: "aim " + String(modelData.name)
                   does: "aim at " + String(modelData.name)
-                  key: "Left, Right"
-                  // ROUND 4. The arrows STEP round the rivals and a click LANDS
-                  // on one, so the crossover presses Right as many times as this
-                  // tag is round the ring from the aim that is on. See
-                  // `ui/parts/Clickable.qml`.
+                  key: "Up, Down"
+                  // The arrows STEP round the rivals and a click LANDS on one,
+                  // so the crossover presses Down as many times as this tag is
+                  // round the ring from the aim that is on.
                   keyRoute: {
                     var count = picker.rivals ? picker.rivals.length : 0
                     if (count <= 0)
@@ -1104,7 +657,7 @@ FocusScope {
                     var steps = ((model.index - picker.targetIndex) % count + count) % count
                     var route = []
                     for (var i = 0; i < steps; i++)
-                      route.push("right")
+                      route.push("down")
                     return route
                   }
                   onActed: picker.tapRival(model.index)
@@ -1115,71 +668,17 @@ FocusScope {
         }
       }
 
-      // ROUND 5 -- the one-beat line that says a chosen card went back.
-      //
-      // The row is ALWAYS here and always the same height, empty or not. A line
-      // that appeared and disappeared would grow and shrink the dock, and
-      // `ui/Race.qml` hangs the charge bar off `picker.dockHeight`, so a
-      // message about a card would have made the charge bar jump twice a race.
-      Item {
-        width: parent.width
-        height: letGoLine.implicitHeight
-
-        Text {
-          id: letGoLine
-          textFormat: Text.PlainText
-          width: parent.width
-          elide: Text.ElideRight
-          visible: picker.letGoShowing
-          text: picker.letGoText
-          color: Theme.amber
-          font.family: Theme.mono
-          font.bold: true
-          font.pixelSize: picker.fsFloor(13, 12)
-          font.letterSpacing: picker.px(1)
-
-          // Read out on its own, because a screen-reader user gets no colour
-          // and no beat: the pane's description below carries the same sentence
-          // while it stands.
-          Accessible.role: Accessible.StaticText
-          Accessible.name: picker.letGoText
-          Accessible.ignored: !picker.letGoShowing
-        }
-      }
-
       Rectangle {
         width: parent.width
         height: 1
         color: Theme.line
       }
 
-      // The keys, always visible, always the same. A child who has never held a
-      // hand before finds out what to press by looking at the panel -- and when
-      // a card cannot be spent, this line is where it says why, rather than the
-      // press going nowhere in silence.
-      //
-      // ROUND 4 -- EVERY LINE NAMES KEYS AND WHAT THEY DO, not what the child
-      // has failed to do. `FINISH THE ANSWER FIRST` was an instruction with a
-      // price on it and no alternative printed beside it; it is gone. The
-      // deferred line below names all three keys that reach the parked digit,
-      // and it says what Enter would actually send -- `⏎  ANSWER 1`, with the
-      // digit in it -- so the child can read the cost off the panel while the
-      // fact is still on screen above them.
-      // PIECE M ROUND 2 -- THE FOOTER IS THE CONTROLS, NOT A PICTURE OF THEM.
-      //
-      // This was one `Text`. It printed `⏎  USE IT      ESC  BACK` in the same
-      // grey mono type the race's `ESC  LEAVE` is printed in, and the race's
-      // line was a click target while this one was paint. It is the only place
-      // in the game that tells a child how to put a card back, and the only
-      // place that names the key which spends the hand -- and a mouse could
-      // press neither.
-      //
-      // Every group of the line is now a `KeyHint`: the same words, the same
-      // grammar, in the same order, each one a control that does what it says.
-      // `footerHints` below is the single model both the chips and `footerText`
-      // are built from, so the string the panel publishes cannot say something
-      // the panel does not draw. The wrapping the deferred line needed a
-      // `TextMetrics` probe for is now the `Flow`'s own.
+      // The keys, always visible, always the same three. A child who has never
+      // held a hand before finds out what to press by looking at the panel.
+      // Every group of the line is a `KeyHint`: the same words, the same
+      // grammar, each one a control that does what it says. `footerHints` is
+      // the single model both the chips and `footerText` are built from.
       Flow {
         id: footerFlow
         width: parent.width
@@ -1191,6 +690,7 @@ FocusScope {
           KeyHint {
             keys: modelData.keys
             action: modelData.action
+            cap: true
             textSize: picker.fsFloor(14, 15)
             letterSpacing: picker.px(1)
             idleColor: modelData.warn ? Theme.hazard : Theme.text

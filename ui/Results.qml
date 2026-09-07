@@ -8,9 +8,9 @@ import "../engine/engine.mjs" as Engine
 // PODIUM FINISH                                  2nd of 4
 //
 // TIME          8:41            LAPS   12 / 12
-// CORRECT       144             PIT CREW   3
-// ACCURACY      91%             BEST STREAK   27
-// POWER-UPS     Nitro · Wrench ▸ Bolt · Roll Cage
+// CORRECT       144             ANSWERS SHOWN   3
+// ACCURACY      91%             BEST COMBO   27
+// POWER-UPS     3 CARDS PLAYED
 //
 // FACTS TO LOOK AT    7 × 8 = 56    6 × 9 = 54    12 × 7 = 84
 // TABLES LIT          ▮▮▮▮▮▮▮▮▮▯▯▯   9 of 12
@@ -251,26 +251,17 @@ FocusScope {
     return String(id).toUpperCase()
   }
 
-  // Design's wireframe: "Nitro · Wrench ▸ Bolt · Roll Cage". A card that needed
-  // a rival says which one; a card that did not, does not.
+  // PIECE F ROUND 7. The design's wireframe had "Nitro · Wrench ▸ Bolt · Roll
+  // Cage" here, and the maintainer read the shipped line as "a wall of names
+  // that wraps" (`docs/open-questions.md` §5.4): a Grand Prix spends up to five
+  // hands. It is a count now -- `3 CARDS PLAYED` -- which is a number a child
+  // reads at a glance and a row that never wraps.
+  readonly property int cardsPlayed: me ? me.cardsUsed.length : 0
   readonly property string powerupsText: {
     if (!me || me.cardsUsed.length === 0)
       return race && race.powerupsEnabled ? "NONE SPENT" : "OFF IN THIS MODE"
-    // Written out a piece at a time rather than joined. `npm run check:readme`
-    // fails any plugin QML file that assembles a string with Array.join or
-    // concat, on the grounds that this game has no honest reason to build a
-    // name at runtime, and the shape is the defect rather than what it spells.
-    var line = ""
-    for (var i = 0; i < me.cardsUsed.length; i++) {
-      var used = me.cardsUsed[i]
-      var label = Engine.isCard(String(used.card)) ? String(Engine.CARDS[used.card].label)
-                                                   : String(used.card)
-      var target = String(used.targetId)
-      if (target.length > 0 && target !== results.subjectId)
-        label += " ▸ " + racerName(target)
-      line += (i === 0 ? "" : " · ") + label
-    }
-    return line
+    return me.cardsUsed.length === 1 ? "1 CARD PLAYED"
+                                     : me.cardsUsed.length + " CARDS PLAYED"
   }
 
   // Design, Laps decks presets: the fact history "drives the mastery lamps in
@@ -443,6 +434,53 @@ FocusScope {
     readonly property int contentW: width - pad * 2
 
     // =====================================================  headline
+    //
+    // PIECE F ROUND 7 -- A THIN SUNSET BAND BEHIND THE HEADLINE.
+    //
+    // §5.5: "Results cut from golden hour to near-black. The chrome-stays-
+    // native rule is right; a thin sunset band behind the headline would keep
+    // it the same game." So: the race's own sky (`ui/parts/SunsetSky.qml`),
+    // at the height of the headline row and no more, at lap 12's hour --
+    // which is the hour the flag fell in -- with the sun low on the right. The
+    // rest of this screen keeps the theme's colours and the shell's font: only
+    // the band takes the light, and the headline reads over it as the fact
+    // reads over the sky, with the same purple ground under the words.
+    SunsetSky {
+      id: sunsetBand
+      objectName: "resultsSunsetBand"
+      x: page.contentX
+      y: page.pad - results.px(12)
+      width: page.contentW
+      height: headlineRow.height + results.px(24)
+      // Every proportion in the sky is measured against `unitH`: a band this
+      // thin with `unitH` at its own height would draw a sun ten pixels across.
+      // At the frame's height the sun, the cloud slabs and the hills are the
+      // race's own sizes, cropped to the band.
+      unitH: results.height * 0.5
+      horizon: 0.86
+      sunX: 0.90
+      nightfall: 0.85
+      stars: 0.4
+    }
+    Rectangle {
+      // A hairline under the band, in the headline's own tone, the way the
+      // rule under the headline already is.
+      x: sunsetBand.x
+      y: sunsetBand.y + sunsetBand.height
+      width: sunsetBand.width
+      height: 1
+      color: Theme.lineStrong
+    }
+    Rectangle {
+      // The headline's ground: the fact's plate, so cream and amber read over a
+      // pink sky here for the same reason they do in the race.
+      x: sunsetBand.x
+      y: sunsetBand.y
+      width: sunsetBand.width
+      height: sunsetBand.height
+      color: Qt.rgba(0.235, 0.071, 0.157, 0.55)
+    }
+
     Item {
       id: headlineRow
       x: page.contentX
@@ -538,7 +576,9 @@ FocusScope {
       }
       StatRow {
         width: parent.width
-        label: "PIT CREW"
+        // §5.4: "`PIT CREW 4` on results means nothing to a child: `ANSWERS
+        // SHOWN 4`." The engine's count is unchanged; the word is the child's.
+        label: "ANSWERS SHOWN"
         value: results.pitCrewText
         valueColor: Theme.teal
         labelSize: results.fs(19)
@@ -547,7 +587,9 @@ FocusScope {
       }
       StatRow {
         width: parent.width
-        label: "BEST STREAK"
+        // §5.4: "`BEST STREAK` on results is `BEST COMBO` (design, and the
+        // hub's stance)."
+        label: "BEST COMBO"
         value: results.bestStreakText
         valueColor: Theme.amber
         labelSize: results.fs(19)

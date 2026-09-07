@@ -1470,6 +1470,21 @@ Item {
   // Race.qml puts UNDER the glyphs for the frames a crossbar is behind them.
   property rect factRect: Qt.rect(0, 0, 0, 0)
 
+  // ------------------------------------------------------------ THE AIM
+  //
+  // PIECE F ROUND 7. Design v4.1: "A targeted card fires at the nearest rival
+  // ahead; Up and Down change the target before firing, and the target's kart
+  // is ringed while it is chosen." The hand panel says who (`Picker.targetId`)
+  // and `ui/Race.qml` hands the id down here; this view draws a ring around
+  // that kart's sprite, a chevron over its roof, and marks its name plate --
+  // shape and text as well as colour, which is the design's accessibility
+  // rule -- for as long as the id is set. "" is nobody, which is every moment
+  // a targeted card is not highlighted. Nothing here fires: the ring is a
+  // picture of the panel's state, and the panel is the only thing that spends.
+  property string aimKartId: ""
+  readonly property int aimKart: aimKartId.length > 0 ? fxIndexOfId(aimKartId) : -1
+  readonly property color aimTone: Theme.teal
+
   // WHERE A CROSSBAR IS, PER PROP, FROM THE KIT'S OWN NUMBERS.
   //
   // This used to be four constants -- one span, one aspect and two beam
@@ -2922,10 +2937,14 @@ Item {
         radius: 3
         color: view.fxPlateShowing(index)
                ? view.fxPlateFace(index, fxPlateTone) : view.plateGround
-        border.width: view.fxPlateRing(index) > 0.05 ? 2 : 1
+        // The aimed rival's plate wears the aim's own ring, two pixels, so
+        // "this is who Space fires at" is on the tag as well as on the kart.
+        border.width: (view.fxPlateRing(index) > 0.05 || view.aimKart === index) ? 2 : 1
         border.color: view.fxPlateRing(index) > 0.05
                       ? Qt.rgba(1, 1, 1, 0.35 + 0.65 * view.fxPlateRing(index))
-                      : Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95)
+                      : (view.aimKart === index
+                         ? view.aimTone
+                         : Qt.rgba(badge.paintCol.r, badge.paintCol.g, badge.paintCol.b, 0.95))
       }
 
       Row {
@@ -2936,7 +2955,8 @@ Item {
           id: tag
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: kartName
+          // The arrow is the aim, the same mark the hand panel's tile carries.
+          text: (view.aimKart === index ? "▸ " : "") + kartName
           color: Theme.textBright
           font.family: Theme.mono
           font.bold: true
@@ -3189,12 +3209,14 @@ Item {
                ? view.fxPlateFace(index, fxPlateTone) : view.plateGround
         // Two pixels of border when the rival is within one question: the
         // child is about to be passed and the plate says so without a word.
-        border.width: (view.fxPlateRing(index) > 0.05
+        border.width: (view.fxPlateRing(index) > 0.05 || view.aimKart === index
                        || (view.haveExact && chaser.gapQuestions >= -1)) ? 2 : 1
         border.color: view.fxPlateRing(index) > 0.05
                       ? Qt.rgba(1, 1, 1, 0.35 + 0.65 * view.fxPlateRing(index))
-                      : Qt.rgba(chaser.paintCol.r, chaser.paintCol.g,
-                                chaser.paintCol.b, 0.95)
+                      : (view.aimKart === index
+                         ? view.aimTone
+                         : Qt.rgba(chaser.paintCol.r, chaser.paintCol.g,
+                                   chaser.paintCol.b, 0.95))
       }
 
       Row {
@@ -3215,7 +3237,7 @@ Item {
         Text {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: kartName
+          text: (view.aimKart === index ? "▸ " : "") + kartName
           color: Theme.textBright
           font.family: Theme.mono
           font.bold: true
@@ -3986,6 +4008,19 @@ Item {
     // or not. See the `fxPlate` roles: this is the one readout an effect has
     // that the projection cannot take away.
     fxPlateFor(kart, text, tone, life + delay)
+  }
+
+  // A rival passing the child. Design v4.1: "a pass by a rival is a tag on
+  // that rival's kart and a pulse of its dot on the minimap, not a sentence."
+  // The tag is the plate readout every other event uses -- on the road under
+  // the kart, or on the chaser rail, wherever the projection has that rival --
+  // and the pulse is the one the Pile-Up's victim gets.
+  function fxPassedBy(kart, text, tone, life) {
+    if (kart < 0 || kart >= kartModel.count)
+      return
+    fxPlateFor(kart, text, tone, life)
+    minimapPulseKart = kart
+    minimapPulseBorn = fxClock
   }
 
   function fxPlateFor(kart, text, tone, life) {
@@ -5224,6 +5259,64 @@ Item {
   // -------------------------------------------------------------- the rings
   // The shock a hit sends out, drawn at a floor size so an impact on a kart at
   // the vanishing point is still an impact a child can see. See `fxRing`.
+  // ------------------------------------------------------------ the aim ring
+  //
+  // A ring around the aimed kart and a chevron over its roof, in the aim tone,
+  // for as long as `aimKartId` names it. It is a mark on the road at that
+  // kart's place, so it is drawn only where the kart is honestly drawn --
+  // a rival behind the camera carries the aim on its chaser plate instead --
+  // and like every effect item it may not enter the line's box: `fxTopFor`.
+  // The breath is the hand's own 0.38 Hz, so a ringed kart and a breathing
+  // hand are one state; under reduced motion the ring holds still.
+  Item {
+    id: aimRing
+    readonly property int kart: view.aimKart
+    readonly property real zed: kart >= 0 ? view.fxKartZ(kart) : view.playerZ
+    readonly property real span: kart >= 0 ? view.fxKartSpan(kart) : 0
+    readonly property real cx: kart >= 0 ? view.fxKartX(kart) : 0
+    readonly property real roofY: kart >= 0 ? view.fxKartTop(kart) : 0
+    readonly property real groundY: kart >= 0 ? view.fxKartY(kart) : 0
+    readonly property real breath: view.reducedMotion ? 1
+                                   : 0.85 + 0.15 * Math.sin(view.fxClock / CardFx.HAND.breatheMs
+                                                            * Math.PI * 2)
+    readonly property real pad: Math.max(4, span * 0.06)
+    // The chevron's own room, inside this item's box so the guard band above
+    // clamps the chevron and not only the ring under it.
+    readonly property real chevron: Math.max(14, Math.round(span * 0.16)) * 1.15
+
+    objectName: "aimRing"
+    visible: kart >= 0 && view.fxKartOnRoad(kart) && zed > view.nearDistance
+             && zed < view.drawDistance
+    x: cx - span * 0.36 - pad
+    y: Math.max(view.fxTopFor(cx, span * 0.36 + pad), roofY - pad - chevron)
+    width: span * 0.72 + pad * 2
+    height: Math.max(8, groundY + pad - y)
+    z: 1000 - zed + 0.007
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.topMargin: aimRing.chevron
+      radius: Math.max(4, aimRing.span * 0.08)
+      color: "transparent"
+      antialiasing: true
+      border.width: Math.max(2, Math.round(aimRing.span * 0.035))
+      border.color: Qt.rgba(view.aimTone.r, view.aimTone.g, view.aimTone.b, aimRing.breath)
+    }
+
+    // The chevron: the aim tiles' own arrow, turned to point down at the kart.
+    Text {
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: 0
+      textFormat: Text.PlainText
+      text: "▼"
+      color: view.aimTone
+      font.family: Theme.mono
+      font.bold: true
+      font.pixelSize: Math.max(14, Math.round(aimRing.span * 0.16))
+      opacity: aimRing.breath
+    }
+  }
+
   Repeater {
     model: fxRingModel
 

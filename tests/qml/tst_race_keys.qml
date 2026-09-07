@@ -2,15 +2,31 @@ import QtQuick
 import QtTest
 import qs.Commons
 import "../../ui"
+import "../../ui/parts"
 import "../../engine/engine.mjs" as Engine
 
 // The race screen's keyboard, driven with real key events only.
 //
-// `1`, `2` and `3` are card keys and answer digits at the same time, and this
-// file is the record of what every reachable combination of them costs a child.
-// Nothing here calls `typeKey`, `choose`, `confirm` or `send`: every assertion
-// is made by `keyClick()`, which posts the events a window manager posts, so
-// what passes is the arbitration a child meets.
+// PIECE F ROUND 7. Design v4.1 gives the race one key map and this file is
+// the record of it:
+//
+//   digits         only ever the answer, whatever the hand is doing
+//   Enter          only ever the answer; with an empty field it does nothing
+//   Backspace      edits the answer
+//   H              the pit crew
+//   Left, Right    move the hand's highlight (nothing with no hand)
+//   Up, Down       change a targeted card's rival (nothing otherwise)
+//   Space          fires the highlighted card (nothing with no hand)
+//   Escape         only ever leaves the race
+//
+// Every case below is one row of that table, and every row is a claim that
+// fails if the rule is changed: the first case is the strip the plan names --
+// `1` on `2 × 3` with a hand held is a wrong answer and no card -- and it is
+// written so that the OLD rule (a card key) fails it on two counts, not one.
+//
+// Nothing here calls `typeKey`, `fire`, `moveHighlight` or `send`: every
+// assertion is made by `keyClick()`, which posts the events a window manager
+// posts, so what passes is the keyboard a child meets.
 //
 // Two things are set up rather than played, and both are named where they are
 // used: the seed (to rebuild the race between cases) and `race.rivals = null`
@@ -19,48 +35,15 @@ import "../../engine/engine.mjs" as Engine
 //
 // Run it:
 //   QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-//     qmltestrunner -platform offscreen -import dev/imports -input tests/qml
+//     qmltestrunner -platform offscreen -import ui -import dev/imports -input tests/qml
 //
-// ---------------------------------------------------------------------------
-// RUN THIS HEADLESS, AND WHY THAT IS NOT A PREFERENCE
-// ---------------------------------------------------------------------------
-//
-// This spec was reported flaky -- "3 failures in 20 runs alone at HEAD on a
-// clean tree", across five different case names -- and worse, it was scoring
-// other people's mutation runs: three `ui/Store.qml` mutations came back KILLED
-// partly by cases in this file, which contains the string `Store` zero times.
-//
-// It is not flaky. It is a spec made entirely of real key events, and a real
-// key event needs a window that holds the keyboard. Measured, four concurrent
-// `qmltestrunner` processes, same tree, same HEAD, one variable:
-//
-//   windowed (cocoa)          65 of 100 runs failed, 17 different case names
-//   headless (-platform offscreen)   0 of 100 runs failed
-//   one process at a time, either platform   0 of 60 runs failed
-//
-// macOS gives keyboard activation to one window at a time. A second Qt window
-// anywhere on the machine -- another spec, another agent's harness, anything --
-// deactivates this one, every item's `activeFocus` goes false, and `keyClick()`
-// after that is delivered nowhere. The engine sees no input, so `dealHand()`
-// reports "a hand of three is held: 0", `streakTo()` reports "the streak is
-// where the case wants it", `hintUntil()` reports "reached a fact whose answer
-// fits the shape" -- three sentences about the child's keyboard, none of them
-// true, and which case says them depends on when the other window appeared.
-// That is the whole of the flake, and it is in the runner, not in the
-// arbitration and not in `ui/Race.qml`.
-//
-// Two things follow, and both are in this file. Every key goes through
-// `pressKey()`, which checks the precondition on every press and says exactly
-// this when it is gone rather than letting a lost keystroke be read as a
-// verdict. And the run line above is headless, which is the repository's rule
-// for every Qt process on this Mac anyway.
-//
-// The two rules every row below is judged against:
-//
-//   A deliberate card choice must cost nothing -- no streak, no `missed` entry,
-//   no attempt, no card.
-//   A wrong answer must cost the streak and only the streak, and it must reach
-//   the engine rather than being deleted on the way.
+// RUN THIS HEADLESS, AND WHY THAT IS NOT A PREFERENCE. A real key event needs
+// a window that holds the keyboard. macOS gives keyboard activation to one
+// window at a time; a second Qt window anywhere on the machine deactivates
+// this one, `keyClick()` after that is delivered nowhere, and a case fails
+// with a sentence about the child's keyboard that is not true. Measured: 65 of
+// 100 windowed runs failed that way, 0 of 100 headless. Every key goes through
+// `pressKey()`, which checks the precondition on every press.
 Item {
   id: root
   width: 1920
@@ -75,11 +58,17 @@ Item {
   }
 
   property int cardsPlayed: 0
+  property int lastCardIndex: -1
+  property string lastCardTarget: ""
   property int leaveRequests: 0
 
   Connections {
     target: race.handPanel
-    function onCardUsed(index, targetId) { root.cardsPlayed += 1 }
+    function onCardUsed(index, targetId) {
+      root.cardsPlayed += 1
+      root.lastCardIndex = index
+      root.lastCardTarget = targetId
+    }
   }
 
   Connections {
@@ -95,25 +84,16 @@ Item {
     // ------------------------------------------------------------- pressing
     function digitKey(d) { return Qt.Key_0 + d }
 
-    // Every key in this file goes through here, and every key is checked
-    // against the one precondition the whole spec rests on: the race screen's
-    // key catcher still has active focus. See "RUN THIS HEADLESS" in the header
-    // -- when it does not, `keyClick` is delivered nowhere, the engine sees no
-    // input at all, and the assertion that fails is a row about the child's
-    // keyboard rather than the truth, which is that the keystroke never
-    // arrived. Sixty-five runs in a hundred failed that way, spread over
-    // seventeen different case names, and every one of them read as a verdict
-    // about the arbitration.
     function pressKey(code) {
       verify(race.focusTarget.activeFocus,
              "the race screen's key catcher lost active focus mid-case, so this keystroke"
              + " was delivered nowhere. Nothing below this line is a statement about the"
-             + " arbitration. Run this spec headless (-platform offscreen): a windowed run"
-             + " shares keyboard activation with every other window on the machine.")
+             + " keyboard. Run this spec headless (-platform offscreen).")
       keyClick(code)
     }
 
-    // "12EBXH" -> the digits 1 and 2, Enter, Backspace, Escape, H.
+    // "12EBXH<>^vS" -> digits, Enter, Backspace, Escape, H, Left, Right, Up,
+    // Down, Space.
     function press(script) {
       for (var i = 0; i < script.length; i++) {
         var c = script.charAt(i)
@@ -121,6 +101,11 @@ Item {
         else if (c === "B") tc.pressKey(Qt.Key_Backspace)
         else if (c === "X") tc.pressKey(Qt.Key_Escape)
         else if (c === "H") tc.pressKey(Qt.Key_H)
+        else if (c === "<") tc.pressKey(Qt.Key_Left)
+        else if (c === ">") tc.pressKey(Qt.Key_Right)
+        else if (c === "^") tc.pressKey(Qt.Key_Up)
+        else if (c === "v") tc.pressKey(Qt.Key_Down)
+        else if (c === "S") tc.pressKey(Qt.Key_Space)
         else tc.pressKey(tc.digitKey(Number(c)))
       }
     }
@@ -128,14 +113,14 @@ Item {
     // ---------------------------------------------------------------- setup
     function fresh(seedValue) {
       race.seed = seedValue
-      // The AI karts are frozen for the length of a case. A rival's Wrench is a
-      // two-second field lock, and a lock landing mid-measurement would make
-      // these rows say something about the rivals rather than about the keys.
       race.rivals = null
       race.forceActiveFocus()
       verify(race.focusTarget.activeFocus, "the race screen's key catcher has focus")
       root.cardsPlayed = 0
+      root.lastCardIndex = -1
+      root.lastCardTarget = ""
       root.leaveRequests = 0
+      Actions.clear()
     }
 
     function answerString() { return String(Engine.factAnswer(race.human.currentFact)) }
@@ -175,19 +160,29 @@ Item {
       compare(race.human.streak, n, "the streak is where the case wants it")
     }
 
-    // Wait out any one-beat line the SET-UP left on the panel, so a case that
-    // asserts the line is drawn cannot pass on a leftover from `streakTo()`.
-    // The line is short-lived on purpose, and this is the price of that.
-    function quiet() {
-      tryCompare(race.handPanel, "letGoLineText", "", 2000)
+    // The first slot in the hand holding a card that needs a rival, or -1.
+    function targetedSlot() {
+      for (var i = 0; i < race.hand.length; i++)
+        if (Engine.isCard(race.hand[i]) && Engine.CARDS[race.hand[i]].scope === "targeted")
+          return i
+      return -1
     }
 
-    function isLen(n) { return function (a) { return a.length === n } }
-    function isExactly(s) { return function (a) { return a === s } }
-    function startsWithNot(n) {
-      // a two-digit answer that does NOT start with `n`, so `n` cannot be the
-      // first digit of it
-      return function (a) { return a.length === 2 && a.charAt(0) !== String(n) }
+    // Move the highlight onto a slot with real Right presses.
+    function highlightSlot(slot) {
+      var guard = 0
+      while (race.handPanel.highlighted !== slot && guard < 6) {
+        tc.pressKey(Qt.Key_Right)
+        guard += 1
+      }
+      compare(race.handPanel.highlighted, slot, "the highlight is on slot " + slot)
+    }
+
+    function needOf(racerId) {
+      for (var b = 0; b < race.state.racers.length; b++)
+        if (race.state.racers[b].id === racerId)
+          return race.state.racers[b].questionsNeededThisLap
+      return -1
     }
 
     // ---------------------------------------------------------------- rows
@@ -200,7 +195,8 @@ Item {
         "hand": race.hand.length,
         "cards": root.cardsPlayed,
         "entry": race.shownEntry,
-        "chosen": race.handPanel.chosen,
+        "highlighted": race.handPanel.highlighted,
+        "target": race.handPanel.targetIndex,
         "fact": Engine.factLabel(race.human.currentFact),
         "answer": tc.answerString()
       }
@@ -217,16 +213,16 @@ Item {
                   + "|hand " + before.hand + "->" + after.hand
                   + "|card played " + (after.cards - before.cards)
                   + "|field '" + after.entry + "'"
-                  + "|chosen " + after.chosen)
+                  + "|highlighted " + after.highlighted)
     }
 
-    // A deliberate card choice cost nothing.
+    // A hand key cost nothing on the answer side.
     function costNothing(before, after, id) {
       compare(after.streak, before.streak, id + ": the streak is untouched")
       compare(after.missed, before.missed, id + ": no fact was recorded as missed")
       compare(after.attempts, before.attempts, id + ": no attempt was recorded")
-      compare(after.hand, before.hand, id + ": the hand is intact")
-      compare(after.cards - before.cards, 0, id + ": no card was played")
+      compare(after.entry, before.entry, id + ": the field is untouched")
+      compare(after.fact, before.fact, id + ": the fact did not move")
     }
 
     // A wrong answer cost the streak and only the streak.
@@ -242,554 +238,417 @@ Item {
     function test_00_the_race_takes_the_keyboard() {
       tc.fresh(101)
       verify(race.state !== null)
-      compare(race.pending, "")
-      compare(race.provisional, 0)
+      compare(race.hand.length, 0, "a fresh race holds no hand")
+      compare(race.pending, undefined, "the parked-digit machinery is gone")
+      compare(race.provisional, undefined, "and the provisional claim with it")
     }
 
-    // A -- one-digit answer, and the key IS that answer. The press is the
-    // answer, unambiguously, and the hand is not touched.
-    function test_01_one_digit_answer_equal_to_the_card_key() {
+    // ---------------------------------------------------------------------
+    // THE STRIP THE PLAN NAMES. `1` on `2 × 3` with a hand held: a wrong
+    // answer, and no card. Under v4 the same press chose card one and parked
+    // the digit; this row fails that rule twice -- the attempt is scored, and
+    // the highlight has not moved to the card the digit named.
+    // ---------------------------------------------------------------------
+    function test_01_a_digit_with_a_hand_held_is_an_answer_and_never_a_card() {
       tc.fresh(102)
       tc.dealHand()
       tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) <= 3 })
-      var key = Number(tc.answerString())
+      // A one-digit answer that is not 2, so `2` is unambiguously wrong -- and
+      // `2` rather than `1`, so a card key that "chose the card it names" would
+      // move the highlight off the default and be caught by the row below.
+      tc.hintUntil(function (a) { return a.length === 1 && Number(a) !== 2 })
+      compare(race.handPanel.highlighted, 0, "the first card is highlighted by default")
       var before = tc.snap()
-      tc.press(String(key))
-      var after = tc.snap()
-      tc.row("A", "1-digit answer = card key", String(key), before, after)
-      compare(after.streak, before.streak + 1, "A: the answer was right and the streak grew")
-      compare(after.hand, before.hand, "A: the hand is intact")
-      compare(after.cards - before.cards, 0, "A: no card was played")
-      compare(after.missed, before.missed, "A: nothing was recorded as missed")
-    }
-
-    // B -- one-digit answer, key is NOT the answer. This is the shape round two
-    // deleted: no sputter, no streak reset, no `missed` entry, and then Enter
-    // spent all three cards. The digit is now deferred and shown.
-    function test_02_one_digit_answer_unequal_to_the_card_key_is_shown() {
-      tc.fresh(103)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      var before = tc.snap()
-      tc.press("1")
-      var after = tc.snap()
-      tc.row("B", "1-digit answer != card key, press only", "1", before, after)
-      compare(after.entry, "1", "B: the child's keystroke is on screen, not deleted")
-      compare(after.chosen, 0, "B: and the card is chosen, so both readings are visible")
-      tc.costNothing(before, after, "B")
-      // ROUND 5: the message this line carried named `FINISH THE ANSWER FIRST`,
-      // which round four deleted. A test's name is a claim, and a claim about a
-      // string is checked against the string. See test_22.
-      compare(race.handPanel.enterSpends, false,
-              "B: Enter would answer the parked digit, not spend the card")
-    }
-
-    // G -- the same shape, followed by the Enter a child is taught to press. It
-    // must submit the answer: streak gone, a miss recorded, and no card played.
-    function test_03_a_genuine_wrong_one_two_or_three_costs_the_streak_only() {
-      tc.fresh(104)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      var before = tc.snap()
-      tc.press("1E")
-      var after = tc.snap()
-      tc.row("G", "1-digit answer != card key, then Enter", "1 E", before, after)
-      tc.costStreakOnly(before, after, "G")
-      compare(after.fact, before.fact, "G: the same fact stays, as the answer loop says")
-      compare(after.entry, "", "G: the field cleared")
-    }
-
-    // B2 -- and Backspace on that deferred digit puts the child one printed key
-    // from the card, with nothing spent on the way.
-    function test_04_backspace_on_a_deferred_digit_frees_the_card() {
-      tc.fresh(105)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      var before = tc.snap()
-      tc.press("1B")
-      var mid = tc.snap()
-      compare(mid.entry, "", "B2: the deferred digit is taken back")
-      compare(mid.chosen, 0, "B2: the card is still chosen")
-      compare(race.handPanel.enterSpends, true, "B2: the panel now says USE IT")
-      tc.costNothing(before, mid, "B2")
-      tc.press("E")
-      var after = tc.snap()
-      tc.row("B2", "1-digit answer != card key, Backspace, Enter", "1 B E", before, after)
-      compare(after.cards - before.cards, 1, "B2: the card was played")
-      compare(after.streak, before.streak, "B2: and the streak survived it")
-      compare(after.missed, before.missed, "B2: nothing was recorded as missed")
-      compare(after.hand, 0, "B2: using one spends all three")
-    }
-
-    // C -- a two-digit answer. The first card key types provisionally.
-    function test_05_two_digit_answer_one_card_key_then_enter_plays_it() {
-      tc.fresh(106)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
-      var before = tc.snap()
-      tc.press("1")
-      var mid = tc.snap()
-      compare(mid.entry, "1", "C: the digit shows, held provisional")
-      tc.costNothing(before, mid, "C")
-      tc.press("E")
-      var after = tc.snap()
-      tc.row("C", "2-digit answer, one card key then Enter", "1 E", before, after)
-      compare(after.cards - before.cards, 1, "C: the card was played")
-      compare(after.streak, before.streak, "C: the streak survived")
-      compare(after.missed, before.missed, "C: nothing was recorded as missed")
-      compare(after.entry, "", "C: the provisional digit was given back")
-    }
-
-    // I -- THE ROUND-TWO DEFECT. Two different card keys on a two-digit answer.
-    // `1` then `2` used to make `12`, which the engine submitted on the spot:
-    // streak gone, a miss banked on a fact never attempted, and no card played.
-    function test_06_two_different_card_keys_change_the_choice_and_cost_nothing() {
-      tc.fresh(107)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) {
-        // a two-digit answer that is neither `1x` nor exactly `12`, so `1` then
-        // `2` cannot be the child typing this answer
-        return a.length === 2 && a.charAt(0) !== "1"
-      })
-      var before = tc.snap()
-      tc.press("12")
-      var after = tc.snap()
-      tc.row("I", "2-digit answer, two different card keys", "1 2", before, after)
-      tc.costNothing(before, after, "I")
-      compare(after.chosen, 1, "I: the second key is now the chosen card")
-      compare(after.entry, "2", "I: and the field holds that card's digit, not 12")
-    }
-
-    // I, verbatim -- the critic's own reproduction: an answer whose FIRST digit
-    // is the first card key, so that press is a live start of the answer, and
-    // whose second digit is not the second card key. `1` then `2` on `1 x 10`.
-    // Round two made `12`, `12`.length === `10`.length, and the engine submitted
-    // it: streak 2 -> 0, missed 0 -> 1, no card played.
-    function test_06b_the_second_card_key_over_a_live_first_digit() {
-      tc.fresh(121)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) {
-        return a.length === 2 && a.charAt(0) === "1" && a.charAt(1) !== "2"
-      })
-      var before = tc.snap()
-      tc.press("1")
-      var mid = tc.snap()
-      compare(mid.entry, "1", "I: the first key is a live first digit of the answer")
-      compare(mid.chosen, 0, "I: and it chose card one")
       tc.press("2")
       var after = tc.snap()
-      tc.row("I·", "answer starts with the first card key, then a second", "1 2", before, after)
-      tc.costNothing(before, after, "I·")
-      compare(after.chosen, 1, "I: the second key is now the chosen card")
-      compare(after.entry, "2", "I: and the field holds that card's digit, not 12")
-      compare(after.fact, before.fact, "I: the fact did not move")
-
-      // and the same key twice, over the same live first digit
-      var b2 = tc.snap()
-      tc.press("11")
-      var a2 = tc.snap()
-      tc.row("I2·", "the same card key twice over a live first digit", "1 1", b2, a2)
-      tc.costNothing(b2, a2, "I2·")
-      compare(a2.chosen, 0, "I2: back to card one")
-      compare(a2.entry, "1", "I2: one digit in the field, not 11")
+      tc.row("STRIP", "1-digit fact, a wrong card-number digit, hand held", "2", before, after)
+      tc.costStreakOnly(before, after, "STRIP")
+      compare(after.highlighted, 0, "STRIP: the digit did not touch the highlight")
+      compare(after.entry, "", "STRIP: the field cleared, as a wrong answer clears it")
+      compare(after.fact, before.fact, "STRIP: the same fact stays, as the answer loop says")
     }
 
-    // I2 -- the same card key twice.
-    function test_07_the_same_card_key_twice_costs_nothing() {
-      tc.fresh(108)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
-      var before = tc.snap()
-      tc.press("11")
-      var after = tc.snap()
-      tc.row("I2", "2-digit answer, same card key twice", "1 1", before, after)
-      tc.costNothing(before, after, "I2")
-      compare(after.chosen, 0, "I2: still card one")
-      compare(after.entry, "1", "I2: one digit in the field, not 11")
+    // The same, on the exact fact the plan names, when the deck offers it, and
+    // on every one-digit fact the deck offers otherwise: six seeds.
+    function test_02_the_strip_on_six_decks() {
+      var seeds = [103, 104, 105, 106, 107, 108]
+      for (var i = 0; i < seeds.length; i++) {
+        tc.fresh(seeds[i])
+        tc.dealHand()
+        tc.streakTo(1)
+        tc.hintUntil(function (a) { return a.length === 1 && Number(a) !== 1 })
+        var before = tc.snap()
+        tc.press("1")
+        var after = tc.snap()
+        tc.costStreakOnly(before, after, "seed " + seeds[i])
+        compare(after.highlighted, before.highlighted,
+                "seed " + seeds[i] + ": `1` on " + before.fact + " did not move the highlight")
+      }
     }
 
-    // I3 -- three card keys running, which is what a child does with three cards
-    // printed in front of them.
-    function test_08_three_card_keys_running_cost_nothing() {
+    // A digit that starts a two-digit answer, with a hand held: it is the
+    // start of the answer, the field shows it, nothing else changes, and the
+    // rest of the answer completes it.
+    function test_03_a_card_number_digit_starts_a_two_digit_answer() {
       tc.fresh(109)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
-      var before = tc.snap()
-      tc.press("123")
-      var after = tc.snap()
-      tc.row("I3", "2-digit answer, three card keys running", "1 2 3", before, after)
-      tc.costNothing(before, after, "I3")
-      compare(after.chosen, 2, "I3: the last key chose")
-      compare(after.entry, "3", "I3: one digit in the field, not 123")
-    }
-
-    // The other half of the same rule: no answer became untypable.
-    function test_09_a_two_digit_answer_starting_with_a_card_key_is_still_typable() {
-      tc.fresh(110)
       tc.dealHand()
       tc.streakTo(2)
       tc.hintUntil(function (a) { return a.length === 2 && Number(a.charAt(0)) <= 3 })
       var before = tc.snap()
-      tc.press(before.answer)
+      tc.press(before.answer.charAt(0))
+      var mid = tc.snap()
+      compare(mid.entry, before.answer.charAt(0), "the digit is in the field")
+      compare(mid.highlighted, 0, "and the highlight did not move")
+      compare(mid.attempts, before.attempts, "and nothing was scored yet")
+      tc.press(before.answer.charAt(1))
       var after = tc.snap()
-      tc.row("C2", "2-digit answer typed in full", before.answer, before, after)
-      compare(after.streak, before.streak + 1, "C2: it was accepted as the answer")
-      compare(after.hand, before.hand, "C2: the hand was not spent")
-      compare(after.cards - before.cards, 0, "C2: no card was played")
+      tc.row("C", "2-digit answer starting with a card number, typed in full",
+             before.answer, before, after)
+      compare(after.streak, before.streak + 1, "C: accepted as the answer")
+      compare(after.hand, 3, "C: the hand is intact")
+      compare(after.cards - before.cards, 0, "C: no card was played")
     }
 
-    // ... including one whose two digits are BOTH card keys, which is the
-    // collision the round-two rule could not see.
-    function test_10_an_answer_made_of_two_card_keys_is_still_typable() {
+    // ---------------------------------------------------------------------
+    // SPACE
+    // ---------------------------------------------------------------------
+
+    // With no hand, Space changes nothing. Asserted as a snapshot of the whole
+    // race plus the guard, not as an absent signal: a Space that quietly typed
+    // a character, armed a guard or moved the deck would be caught here.
+    function test_04_space_with_no_hand_changes_nothing() {
+      tc.fresh(110)
+      compare(race.hand.length, 0, "no hand is held")
+      tc.press("7")
+      var before = tc.snap()
+      var armedBefore = JSON.stringify(Actions.armed)
+      tc.press("S")
+      var after = tc.snap()
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "Space with no hand changed the race: " + JSON.stringify(after))
+      compare(JSON.stringify(Actions.armed), armedBefore,
+              "Space with no hand armed a guard, so the next press would be refused")
+      compare(root.cardsPlayed, 0, "and no card was played")
+    }
+
+    // With a hand, Space fires the highlighted card -- the first, by default --
+    // and costs the answer nothing.
+    function test_05_space_with_a_hand_fires_the_highlighted_card() {
       tc.fresh(111)
       tc.dealHand()
       tc.streakTo(2)
-      tc.hintUntil(function (a) {
-        return a.length === 2 && Number(a.charAt(0)) <= 3 && Number(a.charAt(1)) >= 1 && Number(a.charAt(1)) <= 3
-      })
+      // A card that needs no rival in slot 0, or move on to a deck where it is:
+      // the first hand of a race is always Nitro, Oil Slick, Wrench, so slot 0
+      // is Nitro on every deck.
+      compare(String(race.hand[0]), "nitro", "the first card of the first hand is Nitro")
       var before = tc.snap()
-      tc.press(before.answer)
+      tc.press("S")
       var after = tc.snap()
-      tc.row("C3", "2-digit answer, both digits card keys", before.answer, before, after)
-      compare(after.streak, before.streak + 1, "C3: accepted as the answer")
-      compare(after.hand, before.hand, "C3: the hand was not spent")
-      compare(after.cards - before.cards, 0, "C3: no card was played")
+      tc.row("SPACE", "hand held, Space", "S", before, after)
+      compare(after.cards - before.cards, 1, "SPACE: the card was played")
+      compare(root.lastCardIndex, 0, "SPACE: and it was the highlighted card, slot 0")
+      compare(after.hand, 0, "SPACE: using one spends all three")
+      compare(after.streak, before.streak, "SPACE: the streak survived")
+      compare(after.missed, before.missed, "SPACE: nothing was recorded as missed")
+      compare(after.attempts, before.attempts, "SPACE: no attempt was recorded")
     }
 
-    // L -- a card key, then the pit crew. Round two left the provisional claim
-    // alive across the hint, so the next digit the child typed was backspaced
-    // away by an Enter that spent the hand.
-    function test_11_a_card_key_then_the_hint_leaves_no_claim_behind() {
+    // Right, then Space: card 2.
+    function test_06_right_then_space_fires_card_two() {
       tc.fresh(112)
       tc.dealHand()
       tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
       var before = tc.snap()
-      tc.press("1H")
-      compare(race.provisional, 0, "L: the hint retired the provisional claim")
-      compare(race.pending, "", "L: and any deferred digit with it")
-      var next = tc.answerString()
-      tc.press(next.charAt(0))
+      tc.press(">")
       var mid = tc.snap()
-      verify(mid.entry.charAt(mid.entry.length - 1) === next.charAt(0),
-             "L: the child's own digit is in the field")
-      tc.press(next.substring(1))
+      compare(mid.highlighted, 1, "Right moved the highlight to card 2")
+      tc.costNothing(before, mid, "RIGHT")
+      compare(mid.cards - before.cards, 0, "RIGHT: moving the highlight fires nothing")
+      tc.press("S")
       var after = tc.snap()
-      tc.row("L", "card key, hint, then answer the new fact", "1 H " + next, before, after)
-      compare(after.hand, before.hand, "L: the hand was not spent")
-      compare(after.cards - before.cards, 0, "L: no card was played")
-      compare(after.streak, before.streak + 1, "L: the new fact was answered correctly")
+      tc.row("RIGHT-SPACE", "hand held, Right then Space", "> S", before, after)
+      compare(after.cards - before.cards, 1, "the card was played")
+      compare(root.lastCardIndex, 1, "and it was card 2")
+      compare(after.hand, 0, "using one spends all three")
     }
 
-    // F -- a card key then Backspace on a two-digit answer.
-    function test_12_a_card_key_then_backspace() {
+    // Left and Right wrap round the three cards, and a Right over a Right is
+    // card three. Three presses of one key are three presses.
+    function test_07_left_and_right_wrap_round_the_hand() {
       tc.fresh(113)
       tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
-      var before = tc.snap()
-      tc.press("1B")
-      var after = tc.snap()
-      tc.row("F", "2-digit answer, card key then Backspace", "1 B", before, after)
-      compare(after.entry, "", "F: the digit came back out")
-      compare(after.chosen, 0, "F: the card is still chosen")
-      tc.costNothing(before, after, "F")
-      compare(race.handPanel.enterSpends, true, "F: Enter would play the card")
+      compare(race.handPanel.highlighted, 0)
+      tc.press("<")
+      compare(race.handPanel.highlighted, 2, "Left from the first card wraps to the third")
+      tc.press(">")
+      compare(race.handPanel.highlighted, 0, "Right from the third wraps to the first")
+      tc.press(">>")
+      compare(race.handPanel.highlighted, 2, "two Rights are card three")
+      tc.press(">")
+      compare(race.handPanel.highlighted, 0, "and a third wraps")
+      compare(root.cardsPlayed, 0, "none of it fired anything")
+      compare(race.hand.length, 3, "and the hand is intact")
     }
 
-    // E -- a card key then Escape. Escape is back-one: it puts the card back and
-    // takes the digit with it, and only then does it mean leave the race.
-    function test_13_a_card_key_then_escape() {
+    // With no hand, the arrows do nothing at all.
+    function test_08_the_arrows_with_no_hand_change_nothing() {
       tc.fresh(114)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
+      compare(race.hand.length, 0)
+      tc.press("4")
       var before = tc.snap()
-      tc.press("1X")
+      tc.press("<>^v")
       var after = tc.snap()
-      tc.row("E", "2-digit answer, card key then Escape", "1 X", before, after)
-      compare(after.entry, "", "E: no stray digit is left in the field")
-      compare(after.chosen, -1, "E: the card was put back")
-      compare(root.leaveRequests, 0, "E: the first Escape did not leave the race")
-      tc.costNothing(before, after, "E")
-      tc.press("X")
-      compare(root.leaveRequests, 1, "E: the second Escape left the race")
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "an arrow with no hand changed the race: " + JSON.stringify(after))
     }
 
-    // E2 -- Escape on a DEFERRED digit, the one-digit shape.
-    function test_14_escape_on_a_deferred_digit() {
+    // ---------------------------------------------------------------------
+    // UP AND DOWN, AND THE RING
+    // ---------------------------------------------------------------------
+
+    // A targeted card: Up and Down change the rival, the ringed kart follows,
+    // and Space fires at the one that is ringed -- proven by the engine's own
+    // number on the victim, which no view state can fake.
+    function test_09_up_and_down_change_the_target_and_space_fires_at_it() {
+      tc.fresh(42)
+      tc.dealHand()
+      var slot = tc.targetedSlot()
+      verify(slot >= 0, "the hand holds a card that needs a rival: " + JSON.stringify(race.hand))
+      compare(race.aimedRivalId, "", "nothing is aimed while a self card is highlighted")
+      compare(race.trackView.aimKart, -1, "and no kart is ringed")
+      tc.highlightSlot(slot)
+      verify(race.handPanel.targeting, "a targeted card opens the aim: " + race.handPanel.highlightedCard)
+      compare(race.handPanel.targetIndex, 0, "the nearest rival is aimed at first")
+      var first = race.handPanel.targetId
+      compare(race.aimedRivalId, first, "the race hands the aim to the road")
+      compare(race.trackView.fxKartIdOf(race.trackView.aimKart), first,
+              "and the road rings that kart")
+
+      tc.press("v")
+      compare(race.handPanel.targetIndex, 1, "Down aims at the next rival")
+      var second = race.handPanel.targetId
+      verify(second !== first, "which is a different rival")
+      compare(race.trackView.fxKartIdOf(race.trackView.aimKart), second, "and the ring moved")
+      tc.press("^")
+      compare(race.handPanel.targetIndex, 0, "Up aims back")
+      tc.press("^")
+      compare(race.handPanel.targetIndex, race.handPanel.rivals.length - 1, "and wraps")
+      tc.press("v")
+      tc.press("v")
+      compare(race.handPanel.targetIndex, 1, "two Downs from the first is the second")
+      var victim = race.handPanel.targetId
+      var need = tc.needOf(victim)
+
+      var before = tc.snap()
+      tc.press("S")
+      var after = tc.snap()
+      console.log("ROW|AIM|" + race.handPanel.highlightedCard + " at " + victim
+                  + " needed " + need + " -> " + tc.needOf(victim))
+      compare(after.cards - before.cards, 1, "Space fired the card")
+      compare(root.lastCardTarget, victim, "at the rival that was ringed")
+      compare(after.hand, 0, "using one spends all three")
+      compare(race.aimedRivalId, "", "and the ring is gone with the hand")
+      compare(race.trackView.aimKart, -1)
+      verify(tc.needOf(victim) > need,
+             "and the rival it was aimed at really pays for it: " + victim
+             + " needed " + need + ", now needs " + tc.needOf(victim))
+    }
+
+    // Up and Down with a self card highlighted change nothing.
+    function test_10_up_and_down_do_nothing_on_a_self_card() {
       tc.fresh(115)
       tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
+      compare(String(race.hand[0]), "nitro")
       var before = tc.snap()
-      tc.press("1X")
+      tc.press("^v^")
       var after = tc.snap()
-      tc.row("E2", "1-digit answer != card key, then Escape", "1 X", before, after)
-      compare(after.entry, "", "E2: the deferred digit went with the card")
-      compare(after.chosen, -1, "E2: the card was put back")
-      compare(root.leaveRequests, 0, "E2: Escape did not leave the race")
-      tc.costNothing(before, after, "E2")
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "Up or Down on a self card changed the race: " + JSON.stringify(after))
     }
 
-    // A wrong answer that is not a card key at all, for the comparison the two
-    // rules are read against.
-    function test_15_an_ordinary_wrong_answer_costs_the_streak_only() {
+    // ---------------------------------------------------------------------
+    // ENTER AND ESCAPE
+    // ---------------------------------------------------------------------
+
+    // Enter never fires a card: with a hand held and an empty field it does
+    // nothing, and with digits in the field it sends the answer.
+    function test_11_enter_is_only_ever_the_answer() {
       tc.fresh(116)
       tc.dealHand()
       tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) !== 9 })
+      tc.hintUntil(function (a) { return a.length === 2 })
       var before = tc.snap()
+      tc.press("E")
+      var mid = tc.snap()
+      compare(JSON.stringify(mid), JSON.stringify(before),
+              "Enter on an empty field with a hand held changed the race: "
+              + JSON.stringify(mid))
+      compare(root.cardsPlayed, 0, "and it fired no card")
+      // A one-digit wrong start, then Enter: the answer is sent and scored.
       tc.press("9")
+      compare(race.shownEntry, "9", "the digit is in the field")
+      tc.press("E")
       var after = tc.snap()
-      tc.row("W", "1-digit fact, an ordinary wrong answer", "9", before, after)
-      tc.costStreakOnly(before, after, "W")
+      tc.row("ENTER", "2-digit fact, hand held, 9 then Enter", "9 E", before, after)
+      tc.costStreakOnly(before, after, "ENTER")
+      compare(race.handPanel.highlighted, 0, "and the hand was not touched")
     }
 
-    // D -- three digits. The deck's three-digit answers live in the last laps,
-    // so this case walks there with the pit crew and then types.
-    function test_16_three_digit_answers() {
+    // Escape only ever leaves, whatever the hand is doing.
+    function test_12_escape_only_ever_leaves() {
       tc.fresh(117)
       tc.dealHand()
-      tc.hintUntil(tc.isLen(3))
-      tc.streakTo(1)
-      tc.hintUntil(tc.isLen(3))
+      var slot = tc.targetedSlot()
+      verify(slot >= 0)
+      tc.highlightSlot(slot)
+      verify(race.handPanel.targeting, "a rival is being aimed at, the deepest state the hand has")
       var before = tc.snap()
-      tc.press(before.answer)
+      tc.press("X")
+      compare(root.leaveRequests, 1, "the first Escape left the race")
       var after = tc.snap()
-      tc.row("D1", "3-digit answer typed in full", before.answer, before, after)
-      compare(after.streak, before.streak + 1, "D1: accepted as the answer")
-      compare(after.hand, before.hand, "D1: the hand was not spent")
-      compare(after.cards - before.cards, 0, "D1: no card was played")
-
-      tc.hintUntil(tc.isLen(3))
-      var b2 = tc.snap()
-      tc.press("1")
-      var m2 = tc.snap()
-      tc.costNothing(b2, m2, "D2")
-      tc.press("E")
-      var a2 = tc.snap()
-      tc.row("D2", "3-digit answer, one card key then Enter", "1 E", b2, a2)
-      compare(a2.cards - b2.cards, 1, "D2: the card was played")
-      compare(a2.streak, b2.streak, "D2: the streak survived")
-      compare(a2.missed, b2.missed, "D2: nothing was recorded as missed")
+      compare(after.hand, 3, "and the hand is intact")
+      compare(after.highlighted, slot, "and the highlight did not move")
+      compare(after.cards - before.cards, 0, "and no card was played")
+      // A second, deliberate Escape is a second press. Key after key is not
+      // a repeat (`ui/parts/Actions.qml`).
+      tc.press("X")
+      compare(root.leaveRequests, 2, "a second Escape leaves again")
     }
 
-    // H -- no hand held. 1, 2 and 3 are only digits, and a wrong one is a wrong
-    // answer like any other.
-    function test_17_with_no_hand_the_card_keys_are_only_digits() {
+    // ---------------------------------------------------------------------
+    // WHAT THE PANEL PRINTS
+    // ---------------------------------------------------------------------
+
+    // The footer names the keys the design names and none it took away. Read
+    // off the string the chips are built from, which is what the panel draws.
+    function test_13_the_footer_prints_the_hands_keys_and_no_digit() {
       tc.fresh(118)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      compare(race.hand.length, 0, "H: no hand is held")
-      var before = tc.snap()
-      tc.press("1")
-      var after = tc.snap()
-      tc.row("H", "no hand held, a wrong 1", "1", before, after)
-      compare(after.missed, before.missed + 1, "H: it was submitted as the answer")
-      compare(after.attempts, before.attempts + 1, "H: one attempt")
-      compare(race.handPanel.chosen, -1, "H: nothing was chosen")
-    }
-
-    // J -- round one's finding, at the fact level: two card keys must not walk
-    // the deck on. Round two's `1` `2` banked a miss and advanced the fact.
-    function test_18_card_keys_never_walk_the_deck_on() {
-      tc.fresh(119)
       tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(tc.startsWithNot(1))
-      var before = tc.snap()
-      tc.press("12121212")
-      var after = tc.snap()
-      tc.row("J", "2-digit answer, four card-key pairs", "1 2 1 2 1 2 1 2", before, after)
-      compare(after.fact, before.fact, "J: the same fact is still on screen")
-      tc.costNothing(before, after, "J")
+      var footer = race.handPanel.footerText
+      console.log("FOOTER AS RENDERED: " + JSON.stringify(footer))
+      verify(footer.indexOf("◀ ▶  PICK") >= 0, "the arrows pick: " + JSON.stringify(footer))
+      verify(footer.indexOf("SPACE  USE IT") >= 0, "Space uses it: " + JSON.stringify(footer))
+      verify(footer.indexOf("1 2 3") < 0, "no digit is printed as a key")
+      verify(footer.indexOf("⏎") < 0, "Enter is not printed on the hand")
+      verify(footer.indexOf("ESC") < 0, "Escape is not printed on the hand")
+      verify(footer.indexOf("AIM") < 0, "and nothing about aiming while a self card is up")
+
+      var slot = tc.targetedSlot()
+      tc.highlightSlot(slot)
+      footer = race.handPanel.footerText
+      console.log("FOOTER WHILE AIMING: " + JSON.stringify(footer))
+      verify(footer.indexOf("▲ ▼  AIM") >= 0, "Up and Down aim: " + JSON.stringify(footer))
+      verify(footer.indexOf("SPACE  USE") >= 0, "and Space still uses")
+      var spoken = String(race.handPanel.Accessible.description)
+      verify(spoken.indexOf("Left and right") >= 0 && spoken.indexOf("Space") >= 0
+             && spoken.indexOf("Up and down") >= 0,
+             "a screen-reader user is told the same keys: " + JSON.stringify(spoken))
     }
 
-    // The ladder is gone, and with it the running last-place label the design's
-    // Fairness list rules out.
-    function test_19_there_is_no_standings_ladder() {
-      tc.fresh(120)
-      compare(race.ladder, undefined, "the ladder property is gone")
-      var names = []
+    // The race's own two hints are key caps, in the garage's words.
+    function test_14_the_race_key_hints_are_key_caps() {
+      tc.fresh(119)
+      var hints = []
       function walk(item) {
-        if (item === null || item === undefined)
+        if (!item)
           return
-        if (item.Accessible !== undefined && item.Accessible.name !== undefined
-            && String(item.Accessible.name).length > 0)
-          names.push(String(item.Accessible.name))
+        if (item.isKeyHint === true)
+          hints.push(item)
         var kids = item.children
-        if (kids === undefined)
-          return
-        for (var i = 0; i < kids.length; i++)
+        for (var i = 0; kids && i < kids.length; i++)
           walk(kids[i])
       }
       walk(race)
-      for (var i = 0; i < names.length; i++) {
-        verify(names[i].indexOf("Race order") < 0, "no 'Race order' strip is named")
-        verify(!(names[i].indexOf("4th") === 0), "nothing is named starting '4th'")
+      var pit = null
+      var leave = null
+      for (var h = 0; h < hints.length; h++) {
+        if (String(hints[h].keys) === "H")
+          pit = hints[h]
+        if (String(hints[h].keys) === "ESC")
+          leave = hints[h]
       }
-      console.log("A11Y NAMES ON THE RACE SCREEN: " + JSON.stringify(names))
+      verify(pit !== null, "the race prints an H hint")
+      verify(leave !== null, "the race prints an ESC hint")
+      verify(pit.cap === true, "the pit crew is drawn as a key cap")
+      verify(leave.cap === true, "the way out is drawn as a key cap")
+      compare(String(pit.text), "H  PIT CREW  ·  shows the answer",
+              "the pit crew says what it does: " + pit.text)
+      compare(String(leave.text), "ESC  LEAVE", "and the way out only ever leaves")
+      // Neither hint changes its words with the hand.
+      tc.dealHand()
+      compare(String(leave.text), "ESC  LEAVE", "with a hand held the way out still says LEAVE")
+      compare(String(leave.action), "LEAVE")
     }
 
-    // The failure mode `pressKey()` exists for, and the reason every other row
-    // in this file can be trusted.
-    //
-    // It is reproduced by taking the focus away, not by opening a second window
-    // -- the state is "the key catcher does not have active focus", and a test
-    // can put the tree in that state directly. Reproducing the state beats
-    // reproducing the race, and this repository does not open windows.
-    //
-    // Both halves matter. If the precondition can never go false the guard is
-    // dead wood; if a keystroke with the focus elsewhere still reached the
-    // engine there would have been nothing to guard. Measured windowed, before
-    // the guard: 65 runs in 100 failed this way, in seventeen different case
-    // names, every one of them phrased as a verdict about the child's keyboard.
-    function test_20_a_keystroke_with_the_focus_elsewhere_reaches_nothing() {
-      tc.fresh(122)
-      var before = tc.snap()
+    // ---------------------------------------------------------------------
+    // THE LINE
+    // ---------------------------------------------------------------------
 
-      focusThief.forceActiveFocus()
-      compare(race.focusTarget.activeFocus, false,
-              "the precondition pressKey() checks cannot go false, so the guard is dead wood")
+    // The fact and the field are one line, and the reveal uses it.
+    // The caret blinks at 1.25 Hz on a wall-clock timer, so the line is read
+    // with the caret taken out and the caret is asserted on its own beat.
+    function lineNoCaret() { return String(race.lineText).replace("▮", "") }
+    function caretShowing() { return String(race.lineText).indexOf("▮") >= 0 }
 
-      // Deliberately raw: this is the press `pressKey()` now refuses to make.
-      keyClick(tc.digitKey(Number(before.answer.charAt(0))))
-      var after = tc.snap()
-      compare(after.attempts, before.attempts, "a key with the focus elsewhere was scored")
-      compare(after.streak, before.streak, "a key with the focus elsewhere moved the streak")
-      compare(after.entry, before.entry, "a key with the focus elsewhere reached the field")
+    function test_15_the_answer_line_reads_as_one_line() {
+      tc.fresh(120)
+      tc.hintUntil(function (a) { return a.length === 2 })
+      var label = Engine.factLabel(race.human.currentFact)
+      var right = tc.answerString()
+      // The pit crew that walked the deck here shows each answer for 1200 ms
+      // on the same line; the case starts once that has cleared.
+      tryVerify(function () { return race.revealText === "" }, 3000,
+                "the pit crew's reveal cleared")
+      compare(tc.lineNoCaret(), label + " = ", "the line is the fact and an equals sign")
+      tryVerify(tc.caretShowing, 1000, "and the caret blinks in the empty answer")
+      tc.press(right.charAt(0))
+      compare(tc.lineNoCaret(), label + " = " + right.charAt(0),
+              "a typed digit sits on the line after the equals sign")
+      tryVerify(tc.caretShowing, 1000, "with the caret after it")
+      tc.press("B")
+      compare(tc.lineNoCaret(), label + " = ", "Backspace takes it back")
 
-      race.forceActiveFocus()
-      verify(race.focusTarget.activeFocus, "the case did not give the focus back")
+      // Two wrong answers: the same line shows the revealed fact and its
+      // answer, then goes back to the new fact.
+      tc.press("79E")
+      tc.press("79E")
+      verify(race.holdsForReveal(), "the second wrong answer put the reveal on the line")
+      compare(race.lineText, label + " = " + right,
+              "the reveal is the same line, and the caret is out of it: " + race.lineText)
+      verify(Engine.factLabel(race.human.currentFact) !== label,
+             "and the engine has already moved on behind it")
+      tryVerify(function () { return !race.holdsForReveal() }, 3000, "the reveal let the line go")
+      compare(tc.lineNoCaret(), Engine.factLabel(race.human.currentFact) + " = ",
+              "and the line is the new fact again")
+      tryVerify(tc.caretShowing, 1000, "with the caret back")
     }
 
-    // And the guard itself, in the same state. `expectFail` turns the refusal
-    // above into the expected outcome, so a `pressKey()` that stopped checking
-    // would be reported as a test that unexpectedly passed. Without this the
-    // guard is a line nothing is watching -- which is exactly the standard this
-    // round applied to two guards in `shell/FileStore.qml`.
-    function test_21_press_key_refuses_a_press_the_screen_cannot_receive() {
-      tc.fresh(123)
-      focusThief.forceActiveFocus()
-      expectFail("", "pressKey() made a press the race screen could not receive")
-      tc.pressKey(Qt.Key_1)
-    }
-
-    // =====================================================================
-    // ROUND 5 -- the four things round four changed, and the one round five
-    // added. Round four landed in `ui/Picker.qml` and `ui/Race.qml` with no
-    // case in this file behind any of it: four behaviours a critic had found by
-    // driving, fixed, and then guarded by nothing. These are those guards.
-    // =====================================================================
-
-    // ROUND 4, defect 1 -- THE KEY THAT WAS PRINTED NOWHERE.
-    //
-    // This case reads the string the panel DRAWS, off the Text item that draws
-    // it, because the claim it checks is the one this project got wrong by
-    // reading an expression instead of a frame: round three's commit said "the
-    // panel prints the way back" while the footer read FINISH THE ANSWER FIRST
-    // and Backspace appeared in no visible or spoken string in the game.
-    function test_22_the_deferred_footer_prints_all_three_keys() {
-      tc.fresh(130)
+    // A digit pressed into the reveal window waits for the line; Space does
+    // not, because the hand is not the line.
+    function test_16_the_reveal_holds_digits_and_not_the_hand() {
+      tc.fresh(121)
       tc.dealHand()
       tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      tc.press("1")
-      compare(race.pending, "1", "the digit is parked, which is the state under test")
-
-      var footer = race.handPanel.footerText
-      var spoken = String(race.handPanel.Accessible.description)
-      console.log("DEFERRED FOOTER AS RENDERED: " + JSON.stringify(footer))
-      console.log("DEFERRED DESCRIPTION AS SPOKEN: " + JSON.stringify(spoken))
-
-      verify(footer.indexOf("⌫") >= 0,
-             "the Backspace key is printed on the panel: " + JSON.stringify(footer))
-      verify(footer.indexOf("BACK TO THE CARD") >= 0,
-             "and it is printed with what it does: " + JSON.stringify(footer))
-      verify(footer.indexOf("⏎  ANSWER 1") >= 0,
-             "Enter is printed with what it would send: " + JSON.stringify(footer))
-      verify(footer.indexOf("ESC") >= 0, "and Escape is still printed")
-      verify(footer.indexOf("FINISH THE ANSWER FIRST") < 0,
-             "the sentence that cost a child their streak is gone")
-      verify(spoken.indexOf("Backspace takes it back out") >= 0,
-             "a screen-reader user is told the free key too: " + JSON.stringify(spoken))
-    }
-
-    // ROUND 4, defect 2 -- THE REVEAL WINDOW.
-    //
-    // A fact missed twice is covered by `7 x 8 = 56` for 1500 ms while the deck
-    // has already moved on. A card key pressed into that window was read
-    // against the engine's new fact, which the child could not see, and was
-    // credited as a CORRECT ANSWER to a question never shown. Round four queues
-    // those keys instead. Every press here is real; the only wait is the
-    // reveal's own.
-    function test_23_a_card_key_during_a_reveal_is_held_not_scored() {
-      tc.fresh(131)
-      tc.dealHand()
-      tc.streakTo(2)
-      // A two-digit fact, so `7` `9` submits itself. 79 is prime, so it is not
-      // the answer to anything in the 1-12 deck: a guaranteed wrong answer that
-      // uses no card key.
-      tc.hintUntil(tc.isLen(2))
-      var factUnderTest = Engine.factLabel(race.human.currentFact)
-      tc.press("79")
-      tc.press("79")
-      verify(race.holdsForReveal(),
-             "the second wrong answer put the reveal over the field")
+      tc.hintUntil(function (a) { return a.length === 2 })
+      tc.press("79E")
+      tc.press("79E")
+      verify(race.holdsForReveal(), "the reveal window is open")
       var covered = tc.snap()
-      verify(Engine.factLabel(race.human.currentFact) !== factUnderTest,
-             "and the engine's fact has already moved on behind it, which is the trap")
-
       tc.press("1")
       var held = tc.snap()
-      compare(race.revealQueue.length, 1, "the card key is waiting, not spent and not scored")
-      compare(held.streak, covered.streak, "nothing was credited to a fact off screen")
-      compare(held.attempts, covered.attempts, "no attempt was recorded against it")
+      compare(race.revealQueue.length, 1, "the digit is waiting, not scored")
+      compare(held.attempts, covered.attempts, "no attempt was recorded against a fact off screen")
       compare(held.hand, 3, "the hand is intact")
-      compare(held.cards - covered.cards, 0, "no card was played")
-      compare(held.chosen, -1, "and nothing was chosen while the field was covered")
-
-      // WAIT FOR THE WINDOW, NOT FOR A NUMBER OF MILLISECONDS.
-      //
-      // This read `tc.wait(1700)` against a reveal the engine holds for 1500,
-      // which is two hundred milliseconds of slack -- and on a loaded machine
-      // the whole of this file has been measured taking anywhere between 108
-      // and 448 seconds, so a Qt Timer can and does land outside it. The test
-      // then failed on "the queue was replayed", which is not the rule it is
-      // about: the rule is that the keys wait for the FIELD and are replayed
-      // when it comes back, and the field coming back is a state, not a
-      // duration. `tryVerify` polls for that state and then the assertions
-      // below are made against it, so the check is stricter than it was rather
-      // than looser -- nothing about what must be true has changed, only what
-      // the test waits on. Three seconds is twice the reveal's own hold.
-      tryVerify(function () { return !race.holdsForReveal() }, 3000,
-                "the reveal let the field go")
-      compare(race.revealQueue.length, 0, "the queue was replayed when the field came back")
-      verify(!race.holdsForReveal(), "and the window is closed")
-      var after = tc.snap()
-      tc.row("R", "two wrong answers, then a card key inside the reveal",
-             "7 9 7 9 1", covered, after)
-      compare(after.cards - covered.cards, 0, "R: no card was played by the replay either")
+      tc.press("S")
+      compare(root.cardsPlayed, 1, "Space fired the card through the reveal")
+      compare(race.hand.length, 0, "and the hand is spent")
+      tryVerify(function () { return !race.holdsForReveal() }, 3000, "the reveal let the line go")
+      compare(race.revealQueue.length, 0, "the digit was replayed when the line came back")
     }
 
-    // ROUND 4, defects 3 and 4 -- THE STALL.
-    //
-    // WHAT IS SET UP AND WHAT IS PLAYED. A stall is the world's, not the
-    // child's: it arrives when a rival's Wrench lands, and there is no key a
-    // child can press to be hit. The rivals are frozen in this file on purpose
-    // (see the header), so `stall()` writes the field the engine's own
-    // `applyCard` writes -- `stalledUntilMs` on the human, which is what
-    // `Engine.isStalled` reads and what `race.stalled` is bound to -- through a
-    // real `Engine.step`. Every keystroke in the two cases below is still real.
+    // ---------------------------------------------------------------------
+    // THE STALL, ON THE FIELD
+    // ---------------------------------------------------------------------
     function stall(ms) {
       var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
       var next = stepped.state
@@ -812,294 +671,197 @@ Item {
       verify(!race.stalled, "the stall is over")
     }
 
-    // N -- a stall landing between a card key and Enter. Round three cleared
-    // the parked digit before the send, the engine refused it because the field
-    // was locked, and the child lost the keystroke AND the card together.
-    function test_24_a_stall_between_a_card_key_and_enter_destroys_neither() {
-      tc.fresh(132)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      var before = tc.snap()
-      tc.press("1")
-      compare(race.pending, "1", "N: the digit is parked and the card is chosen")
-      compare(race.handPanel.chosen, 0, "N: the card is chosen")
+    function named(name) {
+      var found = []
+      function walk(item) {
+        if (!item)
+          return
+        if (String(item.objectName) === name)
+          found.push(item)
+        var kids = item.children
+        for (var i = 0; kids && i < kids.length; i++)
+          walk(kids[i])
+      }
+      walk(race)
+      return found
+    }
 
+    function drawn(item) {
+      var node = item
+      while (node && node !== root) {
+        if (!node.visible || node.opacity <= 0.02)
+          return false
+        node = node.parent
+      }
+      return true
+    }
+
+    function textsOn(screen) {
+      var out = []
+      function walk(item) {
+        if (!item)
+          return
+        if (typeof item.text === "string" && item.font !== undefined
+            && item.text.length > 0 && tc.drawn(item))
+          out.push(String(item.text))
+        var kids = item.children
+        for (var i = 0; kids && i < kids.length; i++)
+          walk(kids[i])
+      }
+      walk(screen)
+      return out
+    }
+
+    // A locked field is bolts on the answer slot and no banner anywhere; the
+    // caret stops; Space still fires, because the hand is not the field.
+    function test_17_the_stall_is_drawn_on_the_field_and_not_as_a_banner() {
+      tc.fresh(122)
+      tc.dealHand()
+      var field = tc.named("answerField")[0]
+      verify(field !== undefined, "the answer field is on the screen")
+      compare(tc.named("caret").length, 1)
+      var caretItem = tc.named("caret")[0]
+      tryVerify(function () { return tc.drawn(caretItem) }, 1000,
+                "the caret is drawn while the field is open")
       tc.stall(3000)
-      tc.press("E")
-      var locked = tc.snap()
-      compare(race.pending, "1", "N: the parked digit survived the locked Enter")
-      compare(locked.chosen, 0, "N: and so did the card choice")
-      verify(race.handPanel.footerText.indexOf("⌫") >= 0,
-             "N: the panel still prints both keys: "
-             + JSON.stringify(race.handPanel.footerText))
-      tc.costNothing(before, locked, "N")
-
-      tc.unstall()
-      tc.press("B")
-      compare(race.pending, "", "N: Backspace takes the digit back once the field returns")
-      compare(race.handPanel.chosen, 0, "N: with the card still chosen")
-      tc.press("E")
-      var after = tc.snap()
-      tc.row("N", "card key, stall, Enter, unstall, Backspace, Enter",
-             "1 [stall] E [end] B E", before, after)
-      compare(after.cards - before.cards, 1, "N: and the card the child chose was played")
-      compare(after.streak, before.streak, "N: with the streak untouched")
-    }
-
-    // M -- a card key equal to a one-digit answer, pressed while the field is
-    // locked. Round three did NOTHING with it: no card, no digit, no refusal
-    // said out loud, for the two or three seconds of the hit.
-    function test_25_a_card_key_that_is_the_answer_still_chooses_during_a_stall() {
-      tc.fresh(133)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) >= 1 && Number(a) <= 3 })
-      var key = Number(tc.answerString())
-      var before = tc.snap()
-      tc.stall(3000)
-      tc.press(String(key))
-      var after = tc.snap()
-      tc.row("M", "1-digit answer = card key, pressed during a stall", String(key),
-             before, after)
-      compare(after.chosen, key - 1, "M: the press chose the card it names")
-      compare(after.entry, "", "M: and nothing was typed into a locked field")
-      compare(race.handPanel.enterSpends, true, "M: Enter would spend it")
-      // `⏎  USE IT` for a self card, `⏎  USE` after the rival picker for a
-      // targeted one -- which of the three the round-robin dealt is not this
-      // case's business. What is: Enter is printed as the key that spends it.
-      verify(race.handPanel.footerText.indexOf("⏎  USE") >= 0,
-             "M: and the panel says so: " + JSON.stringify(race.handPanel.footerText))
-      tc.costNothing(before, after, "M")
+      verify(!tc.drawn(caretItem), "the caret stops while the field is locked")
+      wait(450)
+      verify(race.stalled && !tc.drawn(caretItem), "and stays stopped across a blink")
+      var bolts = tc.named("stallBolt")
+      compare(bolts.length, 4, "four bolts")
+      var fieldBox = field.mapToItem(root, 0, 0, field.width, field.height)
+      for (var b = 0; b < bolts.length; b++) {
+        verify(tc.drawn(bolts[b]), "bolt " + b + " is drawn on the locked field")
+        var box = bolts[b].mapToItem(root, 0, 0, bolts[b].width, bolts[b].height)
+        verify(box.x + box.width > fieldBox.x - 40 && box.x < fieldBox.x + fieldBox.width + 40
+               && box.y + box.height > fieldBox.y - 40 && box.y < fieldBox.y + fieldBox.height + 40,
+               "bolt " + b + " sits on the answer field, not somewhere else: "
+               + JSON.stringify(box) + " against " + JSON.stringify(fieldBox))
+      }
+      verify(tc.drawn(tc.named("stallBar")[0]), "and the lock bar is on the field")
+      var texts = tc.textsOn(race)
+      for (var t = 0; t < texts.length; t++)
+        verify(texts[t].indexOf("ENGINE HIT") < 0, "no banner says ENGINE HIT: " + texts[t])
+      // The hand is not the field.
+      tc.press("S")
+      compare(root.cardsPlayed, 1, "Space fired the card through the stall")
       tc.unstall()
     }
 
-    // ROUND 5 -- defect 5 of round three, the silence.
-    //
-    // Two card keys that happen to spell the answer are submitted as that
-    // answer, which is the least-bad reading, and the card choice goes with
-    // them. The critic's finding was the hand "vanishing without explanation".
-    // The panel now says what happened, and says the true thing: the CHOICE
-    // went back, the hand did not.
-    function test_26_a_card_put_back_by_a_pair_of_card_keys_is_announced() {
-      tc.fresh(134)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) {
-        return a.length === 2 && Number(a.charAt(0)) <= 3
-               && Number(a.charAt(1)) >= 1 && Number(a.charAt(1)) <= 3
-      })
-      tc.quiet()
-      var before = tc.snap()
-      tc.press(before.answer.charAt(0))
-      compare(race.handPanel.chosen, Number(before.answer.charAt(0)) - 1,
-             "the first key chose a card, provisionally")
-      tc.press(before.answer.charAt(1))
-      var after = tc.snap()
-      tc.row("P", "2-digit answer, both digits card keys, the choice let go",
-             before.answer, before, after)
-      compare(after.chosen, -1, "the choice went when the pair became the answer")
-      compare(after.hand, 3, "but the hand did not")
-      compare(after.streak, before.streak + 1, "and the pair was accepted as the answer")
-
-      var line = race.handPanel.letGoLineText
-      console.log("LET-GO LINE AS RENDERED: " + JSON.stringify(line))
-      verify(line.indexOf("CARD PUT BACK") >= 0,
-             "the panel says the card went back: " + JSON.stringify(line))
-      verify(line.indexOf("ALL THREE STILL YOURS") >= 0,
-             "and that the hand is still held: " + JSON.stringify(line))
-      var spoken = String(race.handPanel.Accessible.description)
-      verify(spoken.indexOf("put back") >= 0,
-             "and a screen-reader user is told the same: " + JSON.stringify(spoken))
-      verify(spoken.indexOf("All three cards are still yours") >= 0,
-             "including the half that matters: " + JSON.stringify(spoken))
+    // ---------------------------------------------------------------------
+    // ONE CALLOUT, AND A PASS BY A RIVAL IS NOT ONE
+    // ---------------------------------------------------------------------
+    function callouts() {
+      var found = []
+      function walk(item) {
+        if (!item)
+          return
+        if (item.isTransient === true)
+          found.push(item)
+        var kids = item.children
+        for (var i = 0; kids && i < kids.length; i++)
+          walk(kids[i])
+      }
+      walk(race)
+      return found
     }
 
-    // The same line must NOT appear when a card was actually spent -- "put
-    // back" over a hand that is gone would be the one lie this panel must never
-    // tell -- and must not appear when nothing was chosen at all.
-    function test_27_the_let_go_line_stays_off_when_a_card_was_spent() {
-      tc.fresh(135)
-      tc.dealHand()
-      compare(race.handPanel.letGoLineText, "",
-              "a hand just dealt says nothing: nothing has been chosen or let go")
-      tc.hintUntil(function (a) { return a.length === 1 && Number(a) > 3 })
-      compare(race.handPanel.letGoLineText, "",
-              "and the pit crew walking the deck on says nothing either")
-      tc.press("1B")
-      compare(race.handPanel.chosen, 0, "the card is chosen with an empty field")
-      compare(race.handPanel.letGoLineText, "",
-              "choosing a card is not letting one go")
-      tc.press("E")
-      compare(root.cardsPlayed, 1, "the card was played")
-      compare(race.hand.length, 0, "using one spends all three")
-      compare(race.handPanel.letGoLineText, "",
-              "a card that was SPENT is never announced as put back")
+    function test_18_there_is_one_callout_slot_and_the_newest_wins() {
+      tc.fresh(123)
+      var slots = tc.callouts()
+      compare(slots.length, 1, "exactly one callout on the race screen, not a stack")
+      race.say("PASSED BOLT", Theme.lime)
+      compare(String(slots[0].text), "PASSED BOLT")
+      race.say("ROLL CAGE HELD", Theme.teal)
+      compare(String(slots[0].text), "ROLL CAGE HELD", "the newest replaces the last")
+      compare(tc.callouts().length, 1, "and there is still one")
+      verify(slots[0].showing, "and it is showing")
     }
 
-    // The commonest route to the same line, recorded rather than discovered: an
-    // ordinary two-digit answer whose FIRST digit is 1, 2 or 3, typed while a
-    // hand is held. The first press highlights that card tile -- `ui/Race.qml`
-    // chooses it provisionally, because it cannot yet know -- and the second
-    // press takes the highlight away again. The line is what says why, and it
-    // says the true thing: nothing was spent.
-    function test_28_an_ordinary_answer_that_starts_with_a_card_key_says_it_too() {
-      tc.fresh(136)
-      tc.dealHand()
-      tc.streakTo(2)
-      tc.hintUntil(function (a) {
-        return a.length === 2 && Number(a.charAt(0)) <= 3 && Number(a.charAt(1)) > 3
-      })
-      tc.quiet()
-      var before = tc.snap()
-      tc.press(before.answer.charAt(0))
-      compare(race.handPanel.chosen, Number(before.answer.charAt(0)) - 1,
-              "the first digit lights the card tile it names")
-      compare(race.handPanel.letGoLineText, "", "and says nothing yet")
-      tc.press(before.answer.charAt(1))
-      var after = tc.snap()
-      tc.row("P2", "2-digit answer starting with a card key", before.answer, before, after)
-      compare(after.streak, before.streak + 1, "P2: the answer was accepted")
-      compare(after.hand, 3, "P2: the hand is intact")
-      compare(after.cards - before.cards, 0, "P2: no card was played")
-      verify(race.handPanel.letGoLineText.indexOf("ALL THREE STILL YOURS") >= 0,
-             "P2: and the panel says the highlight going does not mean the hand went: "
-             + JSON.stringify(race.handPanel.letGoLineText))
+    function test_19_a_rival_passing_is_a_tag_and_a_pulse_not_a_sentence() {
+      tc.fresh(124)
+      var slot = tc.callouts()[0]
+      var bolt = race.trackView.fxIndexOfId("bolt")
+      verify(bolt >= 0, "Bolt is on the road")
+      race.sayPass({ "otherId": "bolt", "gained": false })
+      verify(!slot.showing || String(slot.text).indexOf("SLIPPED") < 0,
+             "a rival passing did not become a callout: " + slot.text)
+      compare(race.trackView.kartPlateText(bolt), "SLIPPED PAST",
+              "Bolt's own tag says it")
+      compare(race.trackView.minimapPulseKart, bolt, "and Bolt's dot pulses on the minimap")
+      // The child passing IS a callout.
+      race.sayPass({ "otherId": "bolt", "gained": true })
+      compare(String(slot.text), "PASSED BOLT")
+      verify(slot.showing)
     }
 
-    // Q -- THE HOLE BETWEEN THE ROWS ABOVE, AND IT COST A STREAK.
-    //
-    // Every shape either side of this one is guarded: a card key followed by
-    // another card key (I1..I3), a card key followed by Enter (D), Backspace
-    // (F), Escape (M), the hint (L), and an answer whose FIRST digit is itself
-    // a card key (C2, C3, P2). The one in the middle was not: a card key, then
-    // an answer digit that is NOT a card key.
-    //
-    // `4 x 12 = 48`. `1` chooses card one and prints a provisional `1`. `4` is
-    // past the end of a hand of three, so it is not a card key at all and goes
-    // straight to the engine -- and the provisional `1` was still in the field.
-    // `14` is two digits long, so it submitted itself: the streak gone, one
-    // `missed`, one attempt, on a question the child got right. Six runs out of
-    // six before the fix.
-    function test_29_a_card_key_then_an_answer_the_hand_cannot_type() {
-      tc.fresh(140)
-      tc.dealHand()
-      tc.streakTo(3)
-      // A two-digit answer whose first digit is past a hand of three, so the
-      // press that follows the card key cannot be read as another card.
-      tc.hintUntil(function (a) { return a.length === 2 && Number(a.charAt(0)) > 3 })
-      tc.quiet()
-      var before = tc.snap()
-      tc.press("1")
-      compare(race.handPanel.chosen, 0, "Q: the card key chose card one")
-      compare(after0(), "1", "Q: and printed its digit, provisionally")
-      tc.press(before.answer.charAt(0))
-      compare(after0(), before.answer.charAt(0),
-              "Q: the card's digit came back out, so the field is the child's own first"
-              + " digit and nothing else")
-      tc.press(before.answer.charAt(1))
-      var after = tc.snap()
-      tc.row("Q", "2-digit answer, card key then an answer starting past the hand",
-             "1 " + before.answer, before, after)
-      compare(after.streak, before.streak + 1, "Q: the answer was accepted")
-      compare(after.missed, before.missed, "Q: nothing was recorded as missed")
-      compare(after.attempts, before.attempts + 1,
-              "Q: one attempt, for the one answer that was given")
-      compare(after.hand, before.hand, "Q: the hand is intact")
-      compare(after.cards - before.cards, 0, "Q: no card was played")
-      compare(after.chosen, -1, "Q: and the card choice was let go of")
-    }
-
-    // The same shape on five more seeds, because the bug it guards depended on
-    // which fact the deck happened to be showing and a single seed could hide
-    // it again.
-    function test_30_the_same_on_five_more_decks() {
-      var seeds = [141, 142, 143, 144, 145]
-      for (var i = 0; i < seeds.length; i++) {
-        tc.fresh(seeds[i])
-        tc.dealHand()
-        tc.streakTo(3)
-        tc.hintUntil(function (a) { return a.length === 2 && Number(a.charAt(0)) > 3 })
-        var before = tc.snap()
-        tc.press("1" + before.answer)
-        var after = tc.snap()
-        compare(after.streak, before.streak + 1,
-                "seed " + seeds[i] + ": `1` then " + before.answer
-                + " on " + before.fact + " = " + before.answer
-                + " is the answer, not " + ("1" + before.answer.charAt(0)))
-        compare(after.missed, before.missed,
-                "seed " + seeds[i] + ": and nothing was missed")
-        compare(after.cards - before.cards, 0,
-                "seed " + seeds[i] + ": and no card was played")
+    // The ladder is gone, and with it the running last-place label the design's
+    // Fairness list rules out.
+    function test_20_there_is_no_standings_ladder() {
+      tc.fresh(125)
+      compare(race.ladder, undefined, "the ladder property is gone")
+      var names = []
+      function walk(item) {
+        if (item === null || item === undefined)
+          return
+        if (item.Accessible !== undefined && item.Accessible.name !== undefined
+            && String(item.Accessible.name).length > 0)
+          names.push(String(item.Accessible.name))
+        var kids = item.children
+        if (kids === undefined)
+          return
+        for (var i = 0; i < kids.length; i++)
+          walk(kids[i])
+      }
+      walk(race)
+      for (var i = 0; i < names.length; i++) {
+        verify(names[i].indexOf("Race order") < 0, "no 'Race order' strip is named")
+        verify(!(names[i].indexOf("4th") === 0), "nothing is named starting '4th'")
       }
     }
 
-    // ROUND 4 OF PIECE F -- THE CARDS THAT ATTACK SOMEBODY ACTUALLY FIRE.
-    //
-    // Every spending case above this line happens to choose a card whose scope
-    // is `self`, so for a whole round the panel could be shipped with
-    // `chosenCard` reading the empty string -- `ui/Picker.qml` had an `id: hand`
-    // on the layout Row shadowing the root's own `hand` property -- and the
-    // suite stayed green while the Wrench, the Pothole, the Pile-Up and the Tow
-    // Hook were all refused by the engine for want of a target. Half the deck,
-    // and every card that does anything to a rival.
-    //
-    // So this case walks to the first TARGETED card in the hand, and asserts
-    // the three things that were false: the panel knows the card needs a rival,
-    // it is aiming at a named one, and the rival's own lap requirement goes up
-    // when Enter lands. The last of those is the engine's number, not the
-    // panel's, so no amount of view state can make it pass.
-    function test_31_a_targeted_card_is_aimed_and_really_lands() {
-      tc.fresh(42)
+    // The harness's key-press injection fires through the same functions the
+    // keys reach.
+    function test_21_the_harness_fires_a_card_the_way_the_keys_do() {
+      tc.fresh(126)
       tc.dealHand()
-      var slot = -1
-      for (var i = 0; i < race.hand.length; i++)
-        if (Engine.isCard(race.hand[i])
-            && Engine.CARDS[race.hand[i]].scope === "targeted")
-          slot = slot < 0 ? i : slot
-      verify(slot >= 0, "the hand holds a card that needs a rival: "
-                        + JSON.stringify(race.hand))
-      // A fact whose answer cannot be read as this card's key, so the press is
-      // unambiguously a card choice.
-      tc.hintUntil(tc.startsWithNot(slot + 1))
-      var before = tc.snap()
-      tc.press(String(slot + 1))
-      compare(race.handPanel.chosen, slot, "the card is chosen")
-      compare(race.handPanel.chosenCard, race.hand[slot],
-              "and the panel knows WHICH card it is -- this read \"\" for a round")
-      verify(race.handPanel.needsTarget,
-             "a targeted card asks for a rival: " + race.handPanel.chosenCard)
-      verify(race.handPanel.targetId.length > 0,
-             "and the panel is aiming at one")
-      var victim = race.handPanel.targetId
-      var need = 0
-      for (var b = 0; b < race.state.racers.length; b++)
-        if (race.state.racers[b].id === victim)
-          need = race.state.racers[b].questionsNeededThisLap
-      tc.press("E")
-      var after = tc.snap()
-      var needAfter = 0
-      for (var c = 0; c < race.state.racers.length; c++)
-        if (race.state.racers[c].id === victim)
-          needAfter = race.state.racers[c].questionsNeededThisLap
-      console.log("ROW|F4-TARGET|" + race.hand.length + " left|" + victim
-                  + " needed " + need + " -> " + needAfter)
-      compare(after.cards - before.cards, 1, "the card was played")
-      compare(after.hand, 0, "using one spends all three")
-      verify(needAfter > need,
-             "and the rival it was aimed at really pays for it: " + victim
-             + " needed " + need + ", now needs " + needAfter)
+      verify(race.injectEvent("fireCard", "2"), "fireCard:2 fired")
+      compare(root.cardsPlayed, 1)
+      compare(root.lastCardIndex, 1, "card 2")
+      compare(race.hand.length, 0)
+      verify(!race.injectEvent("fireCard", "1"), "and with no hand it refuses")
     }
 
-    function after0() { return race.shownEntry }
+    // The failure mode `pressKey()` exists for, and the reason every other row
+    // in this file can be trusted.
+    function test_22_a_keystroke_with_the_focus_elsewhere_reaches_nothing() {
+      tc.fresh(127)
+      var before = tc.snap()
+      focusThief.forceActiveFocus()
+      compare(race.focusTarget.activeFocus, false,
+              "the precondition pressKey() checks cannot go false, so the guard is dead wood")
+      keyClick(tc.digitKey(Number(before.answer.charAt(0))))
+      var after = tc.snap()
+      compare(after.attempts, before.attempts, "a key with the focus elsewhere was scored")
+      compare(after.entry, before.entry, "a key with the focus elsewhere reached the field")
+      race.forceActiveFocus()
+      verify(race.focusTarget.activeFocus, "the case did not give the focus back")
+    }
+
+    function test_23_press_key_refuses_a_press_the_screen_cannot_receive() {
+      tc.fresh(128)
+      focusThief.forceActiveFocus()
+      expectFail("", "pressKey() made a press the race screen could not receive")
+      tc.pressKey(Qt.Key_1)
+    }
 
     function cleanup() {
-      // Whatever a case did with the focus, the next one starts from the race.
+      race.externalClock = false
       race.forceActiveFocus()
     }
   }
 
-  // Somewhere for the focus to go that is not the race screen. See test_20.
+  // Somewhere for the focus to go that is not the race screen. See test_22.
   Item {
     id: focusThief
     width: 1

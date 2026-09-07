@@ -71,10 +71,10 @@ FocusScope {
   // lurch and the pull-back come from the engine's events.
   readonly property alias trackView: track
   // The powerup panel, exposed for the same reason the road is: a keyboard
-  // walkthrough has to be able to ask which card is chosen and what the panel
-  // is telling the child, and reading it off the panel is the only way to check
-  // the screen rather than a second copy of its state. Nothing outside drives
-  // it; the digit arbitration below is the only caller.
+  // walkthrough has to be able to ask which card is highlighted, who is aimed
+  // at and what the panel is printing, and reading it off the panel is the only
+  // way to check the screen rather than a second copy of its state. Nothing
+  // outside drives it; the key handler below is the only caller.
   readonly property alias handPanel: picker
 
   readonly property bool reducedMotion: Store.setting("reducedMotion") === true
@@ -422,12 +422,8 @@ FocusScope {
     race.priorState = race.state
     race.state = result.state
     handleEvents(result.events)
-    // Every claim the keyboard holds over the field is checked against the
-    // field the engine just handed back. This is the one funnel every input
-    // goes through, so no key handler can leave a stale claim behind.
-    race.reconcileClaims()
-    // ... and if the reveal that was covering the field has just gone, the keys
-    // the child pressed into it are replayed here rather than inside
+    // If the reveal that was covering the line has just gone, the keys the
+    // child pressed into it are replayed here rather than inside
     // `handleEvents`, so the whole step has landed before the first of them is
     // read against it.
     if (race.revealHolds && !reveal.active)
@@ -504,7 +500,7 @@ FocusScope {
         break
       case "reveal":
         if (e.racerId === me) {
-          reveal.show(Engine.factLabel(e.fact) + " = " + e.answer, e.revealMs, Theme.teal)
+          reveal.show(Engine.factLabel(e.fact), String(e.answer), e.revealMs, Theme.teal)
           // The field is the child's and this took it away from them mid-answer.
           // Everything they press until it comes back waits in `revealQueue`.
           race.revealHolds = true
@@ -512,7 +508,7 @@ FocusScope {
         break
       case "pitCrew":
         if (e.racerId === me)
-          reveal.show(Engine.factLabel(e.fact) + " = " + e.answer, 1200, Theme.teal)
+          reveal.show(Engine.factLabel(e.fact), String(e.answer), 1200, Theme.teal)
         break
       // ------------------------------------------------------------ PIECE F
       //
@@ -546,11 +542,12 @@ FocusScope {
           picker.reset()
           // "Reaching twelve: the charge bar flashes, the twelve segments burst
           // into three cards that slide up from the bottom right ... and
-          // POWER-UP READY reads once."
+          // POWER-UP READY reads once." The words are the charge bar's own
+          // state (`ui/parts/ChargeBar.qml` prints them at twelve), not a
+          // callout: design v4.1 gives the callout slot to the road's events.
           picker.deal()
           charge.burstNow()
           Sfx.play("deal")
-          say("POWER-UP READY", Theme.amberGlow)
         }
         break
       case "hit":
@@ -639,7 +636,7 @@ FocusScope {
   // WHAT IT DOES NOW. It puts the race into the situation the strip is about
   // and then lets the REAL RULES run: `race.send({ kind: "useCard", ... })`,
   // which is the identical call `ui/Picker.qml`'s `onCardUsed` makes when the
-  // child presses Enter. Every event the strip reacts to is then the engine's
+  // child presses Space. Every event the strip reacts to is then the engine's
   // own `cardUsed`, `hit`, `blocked`, `swap`, `lapComplete` and `passed`. The
   // lap counter really moves, the place really changes, the hand really
   // empties, the stall really starts, and the aftermath really ends when the
@@ -786,18 +783,18 @@ FocusScope {
       return true
     }
 
-    // `chooseCard:<n>` is not an engine event and does not pretend to be one:
+    // `fireCard:<n>` is not an engine event and does not pretend to be one:
     // it presses the keys. The hand's slam is a keyboard beat, so the only
-    // honest way to shoot it is through the same arbitration a child's press
-    // goes through -- the picker's own choose, then `submitKey`, exactly as
-    // ui/Race.qml's own handler calls them.
-    if (kind === "chooseCard") {
+    // honest way to shoot it is through the same functions a child's presses
+    // reach -- Right until the highlight is on slot n, then Space, exactly as
+    // this file's own handler calls them.
+    if (kind === "fireCard") {
       var slot = Math.max(1, Math.min(3, parseInt(name || "1", 10)))
       if (race.hand.length < slot)
         return false
-      picker.choose(slot - 1)
-      race.submitKey()
-      return true
+      while (picker.highlighted !== slot - 1)
+        picker.moveHighlight(1)
+      return race.fireKey()
     }
     return false
   }
@@ -813,28 +810,25 @@ FocusScope {
   }
 
   // ---------------------------------------------------------- the callouts
-  // Design, The view: callouts for 1.6 s. Three slots, used round-robin, so
-  // two events in the same step do not overwrite one another.
+  // Design v4.1, The view: callouts for 1.6 s, ONE AT A TIME -- "a single slot
+  // under the fact line, the newest replacing the last, never stacked over the
+  // road". The maintainer counted four boxes in the child's eye line after one
+  // hit (`docs/open-questions.md` §5.3); there is one `Callout` on this screen
+  // now and `say` writes it.
   //
   // PIECE F -- `big` is the third argument and it is used by exactly one card.
   // Design v4, Pile-Up: "the callout is in the large type reserved for this
   // card." Reserved means reserved: `say(..., true)` is called from the
   // `cardUsed` branch for `pileUp` and from nowhere else in the file.
-  // A CALLOUT THAT BELONGS TO AN IMPACT WAITS FOR THE IMPACT.
   //
-  // ROUND 2. The `blocked` event arrives in the same engine step as the
-  // `cardUsed` that caused it -- the ordering guarantee puts a card's effects
-  // straight after the card -- and the view queues the block's flash and ring
-  // behind the wrench's 500 ms flight so the shatter happens where the wrench
-  // is. Round one did not queue the WORDS with them, so a blind critic read
-  // `ROLL CAGE HELD - BOLT` at +180 ms "while the wrench is still visibly
-  // mid-flight above the road": the announcement 480 ms before the event it
-  // announced. The design's own line about this card is "the block is the
-  // payoff and must be loud", and a payoff said first is not a payoff.
-  //
-  // Held here rather than inside `say` because most callouts are NOT impacts:
-  // the card the child chose is announced when they choose it, a pass when the
-  // karts cross, a rival's signal when it is sent.
+  // A CALLOUT THAT BELONGS TO AN IMPACT WAITS FOR THE IMPACT. The `blocked`
+  // event arrives in the same engine step as the `cardUsed` that caused it,
+  // and the view queues the block's flash and ring behind the wrench's 500 ms
+  // flight so the shatter happens where the wrench is. The words wait with
+  // them: a payoff said first is not a payoff. Held here rather than inside
+  // `say` because most callouts are NOT impacts: the card the child fired is
+  // announced when they fire it, a pass when the karts cross, a rival's signal
+  // when it is sent.
   property var pendingSay: []
   function sayAtImpact(message, tone, big) {
     if (!track.cueTelegraphing) {
@@ -854,19 +848,8 @@ FocusScope {
   }
 
   function say(message, tone, big) {
-    for (var i = 0; i < calloutSlots.count; i++) {
-      var slot = calloutSlots.itemAt(i)
-      if (slot && !slot.showing) {
-        slot.big = big === true
-        slot.say(message, tone)
-        return
-      }
-    }
-    var first = calloutSlots.itemAt(0)
-    if (first) {
-      first.big = big === true
-      first.say(message, tone)
-    }
+    callout.big = big === true
+    callout.say(message, tone)
   }
 
   // -------------------------------------------- passes, said when they show
@@ -902,11 +885,16 @@ FocusScope {
     return -1
   }
 
+  // Design v4.1: "`PASSED BOLT` belongs there; `BOLT SLIPPED PAST` does not:
+  // a pass by a rival is a tag on that rival's kart and a pulse of its dot on
+  // the minimap, not a sentence." The words on the tag are the design's own
+  // for the event, on the kart it happened to, for the callout's 1.6 s.
   function sayPass(entry) {
     if (entry.gained)
       say("PASSED " + nameOf(entry.otherId), Theme.lime)
     else
-      say(nameOf(entry.otherId) + " SLIPPED PAST", Theme.hazard)
+      track.fxPassedBy(indexOfRacer(entry.otherId), "SLIPPED PAST", Theme.hazard,
+                       Engine.CALLOUT_MS)
   }
 
   function releasePasses() {
@@ -1130,167 +1118,48 @@ FocusScope {
   }
 
   // ------------------------------------------------------------- keyboard
-  // Digits, Enter, Backspace, H, 1 2 3, arrows, Escape -- the design's whole
-  // key list and nothing else. There is no field to type into: the entry is
-  // the engine's `racer.entry` string, drawn below, and the digits go through
+  //
+  // Design v4.1, in full: digits are only ever the answer; Enter is only ever
+  // the answer key; Backspace edits it; `H` is the pit crew; Escape only ever
+  // leaves the race. The hand is Left, Right, Up, Down and Space, and nothing
+  // else. There is no field to type into: the entry is the engine's
+  // `racer.entry` string, drawn on the answer line, and the digits go through
   // `step` like everything else.
   //
   // ---------------------------------------------------------------------------
-  // 1, 2 AND 3 ARE BOTH CARD KEYS AND DIGITS, AND THIS IS WHERE THAT IS SETTLED
+  // PIECE F ROUND 7 -- THE DIGIT ARBITRATION IS GONE, AND THIS IS WHERE IT WAS
   // ---------------------------------------------------------------------------
   //
-  // The design gives 1, 2 and 3 to the powerup hand and also needs them as
-  // digits, because a third of the answers in the 1-12 tables begin with one of
-  // them. Round one sent the digit unconditionally and also moved the hand's
-  // selection, and `Engine.typeDigit` submits the instant the entry is as long
-  // as the answer. Two things followed, both measured on this file with real key
-  // events:
+  // Four rounds of this file settled what a press of `1` meant while a hand was
+  // held: a card, a digit, a provisional digit that the card press had put in
+  // the field, a deferred digit parked on screen and kept from the engine
+  // because sending it would submit a wrong answer, an Enter that meant the
+  // card if every character in the field was the card press's own and the
+  // answer otherwise, a Backspace that meant "it was a card", a reveal window
+  // that queued all of it. Every branch was measured, every branch was right
+  // about the branch before it, and the maintainer's verdict on the whole was
+  // "launching a power up feels weird, I had to attempt to trigger it multiple
+  // times" (`docs/open-questions.md` §5.2). A card key that is also a digit
+  // cannot be made unambiguous on the 23 single-digit facts, and it was the
+  // design's own key choice that made it one.
   //
-  //   - fact `1 x 6`, a hand held, one press of `1`: submitted as the answer to
-  //     a question the child had not attempted. Streak gone, a `missed` fact
-  //     recorded, that fact printed under FACTS TO LOOK AT on the results
-  //     screen, and its mastery lamp put out. Nine of the twelve answers in the
-  //     ones lap are one digit.
-  //   - fact `1 x 10`, a hand held, `1` then Enter -- and Enter is the only key
-  //     the panel printed: the stray `1` was submitted as the answer, the streak
-  //     went, a miss was recorded, and the card was not played. Three losses and
-  //     no gain. The working sequence was `1 Backspace Enter`, and nothing on
-  //     the screen mentioned Backspace.
+  // So the design changed rather than the explanation. `provisional`,
+  // `pending`, `takeBackProvisional`, `dropPending`, `flushPending`,
+  // `enterSpendsCard`, `reconcileClaims`, `expectedAnswer` and the card
+  // branches of `typeKey` are deleted, not disabled: there is no state on this
+  // screen that a digit can leave behind, because a digit now goes to the
+  // engine on the press, whatever the hand is doing. `tests/qml/tst_race_keys.qml`
+  // is the record of what every key costs under the new rule, and the one row
+  // the plan names -- `1` on `2 × 3` with a hand held is a wrong answer and no
+  // card -- is its first case.
   //
-  // That broke the design's second pillar -- "Mistakes cost the streak, never
-  // the position" -- by charging the streak for a deliberate, correct action.
-  // The race screen is the only place that can fix it, because it is the only
-  // place that knows the expected answer; the picker cannot see it and should
-  // not. The arbitration, in full:
-  //
-  // ROUND TWO FIXED THE FIRST PRESS AND LEFT THE SECOND. The rule below used to
-  // read the key against an EMPTY field only, so once one card key had put its
-  // digit in the field the next card key fell through to the ordinary-digit
-  // path: `1` then `2` on `1 x 10` made `12`, `Engine.typeDigit` submits the
-  // instant the entry is as long as the answer, and the child who changed their
-  // mind between two of the three keys the panel prints lost the streak, banked
-  // a miss on a fact they never attempted, put out a mastery lamp and played no
-  // card. 121 of the 144 facts in the 1-12 deck have a two-or-more-digit answer,
-  // and there is no other way to change which card is chosen. So the rule below
-  // is written against the WHOLE of what the card presses have put in the field,
-  // not against the first press only.
-  //
-  //   A press of 1, 2 or 3, with that card in the hand and NOTHING OF THE
-  //   CHILD'S OWN in the field, is read against the answer on screen. Write
-  //   `cand` for what the field would show if the press were typed.
-  //
-  //   a. `cand` IS the answer (`1 x 1`, press 1; `3 x 4`, press 1 then 2). The
-  //      press is unambiguously the answer. It types, the engine submits it, the
-  //      child is right, and the hand is not touched.
-  //   b. `cand` is a shorter start of the answer (`1 x 10`, press 1; `11 x 11`,
-  //      press 1 then 2). It chooses the card AND types the digit, because the
-  //      child may well be typing the answer. Nothing can be submitted -- the
-  //      entry is still short -- and the digits are held PROVISIONAL: they
-  //      belong to the card presses, not to an answer.
-  //   c. `cand` cannot be the answer (`1 x 10`, press 1 then 2; `1 x 6`, press
-  //      1). Whatever else it is, it is not the child typing this answer, so it
-  //      is a card choice -- possibly a change of one. The digits the earlier
-  //      presses put in are taken back first, so the field never accumulates
-  //      two card keys into a number, and then:
-  //        - the answer is two digits or more: the digit is typed and held
-  //          provisional, exactly as in (b). It cannot submit, because one digit
-  //          is shorter than the answer.
-  //        - the answer is ONE digit: typing it would submit a wrong answer on
-  //          the spot. The digit is DEFERRED instead -- `pending` below. It is
-  //          drawn in the field so the child can see the key landed, and it is
-  //          handed to the engine only when the child says it is an answer.
-  //
-  //   Enter decides, and `pending` decides first. A deferred digit is the
-  //   child's answer as far as Enter is concerned: it goes to the engine, the
-  //   engine submits it, and a wrong one costs the streak and nothing else --
-  //   the sputter, the reset and the recorded miss the design's answer loop
-  //   step 4 asks for. Round two swallowed that press entirely: no sputter, no
-  //   streak reset, no `missed` entry, and then Enter spent all three cards on a
-  //   card and a rival the child had never confirmed.
-  //
-  //   With no deferred digit, Enter is the design's confirm key: if every
-  //   character in the field was typed by the presses that chose the card, the
-  //   child meant the card, the digits are taken back with the engine's own
-  //   backspace and the card is played. If the child typed anything of their
-  //   own, the field is an answer and Enter submits it.
-  //
-  //   Backspace, Escape and `H` all retire the claim. Backspace on a deferred
-  //   digit simply drops it and leaves the card chosen, so the panel's own
-  //   footer turns from the deferred line to `⏎ USE IT`. Escape drops it and
-  //   puts the card back. `H` drops it because the hint moves the fact, and a
-  //   claim that outlives its fact eats the next digit the child types -- round
-  //   two's `1` `H` `4` `⏎`, which backspaced the child's own `4` away and spent
-  //   the hand.
-  //
-  // ROUND 4 -- WHAT ROUND THREE GOT WRONG ABOUT ITS OWN RULE.
-  //
-  // The rule above is a fork with two branches, and round three printed one of
-  // them. The comment that used to sit here said the card was "one printed key
-  // away". It was not printed anywhere: the footer read
-  // `FINISH THE ANSWER FIRST      ESC  BACK`, Backspace appeared in no string a
-  // child could see or hear, and the sentence the footer DID print pointed at
-  // the branch that costs a streak, a `missed` entry and a mastery lamp on a
-  // fact the child is about to get right. `ui/Picker.qml` now prints both
-  // branches and names the digit Enter would send; the arbitration below is
-  // unchanged by that.
-  //
-  // Three things below it did change, and all three are about time rather than
-  // about which key was pressed:
-  //
-  //   - An engine hit locks the field. A deferred digit handed over while the
-  //     field is locked is refused by the engine and was cleared here anyway, so
-  //     the digit AND the card both vanished on a rival's timing. `flushPending`
-  //     now asks whether the engine can take the digit before it lets go of it,
-  //     and says whether it succeeded, so Enter under a stall leaves the child
-  //     exactly where they were.
-  //   - Under that same lock, a card key equal to a one-digit answer used to run
-  //     case (a) -- reset the panel, hand the digit over, watch the engine refuse
-  //     it -- and did nothing at all, not even choose the card. Case (a) is now
-  //     guarded on the lock and falls through to the card choice, which is the
-  //     only reading left when the field cannot be typed into.
-  //   - A second wrong answer on a fact reveals it for 1500 ms. The engine moves
-  //     the deck on at once and the FIELD keeps the old fact's answer for that
-  //     window, so a key pressed into it was arbitrated -- and could be submitted
-  //     and credited -- against a question whose answer box the child could not
-  //     see. Those keystrokes are held in `revealQueue` and replayed the instant
-  //     the field comes back.
-  //
-  // Nothing is ever spent by a keystroke that was meant as a digit; a card
-  // choice, and a change of card choice, costs nothing at all; no answer in the
-  // tables has become untypable while a hand is held; and no keystroke of the
-  // child's is thrown away -- under a stall it waits for the field, and under a
-  // reveal it waits for the fact.
-
-  // ======================================================== PIECE M ROUND 5
-  //
-  // THE TWO GESTURES OF THIS SCREEN, EACH WRITTEN ONCE.
-  //
-  // Round four gave the pit crew a click target and wrote above it: "the same
-  // three calls the `H` branch of `keys` makes, in the same order and for the
-  // same reason". It made three of four. The fourth was `clearRevealQueue()`,
-  // and a critic drove what that costs, in a live race, on the busiest screen in
-  // the game:
-  //
-  //     a second wrong answer puts the answer on the screen for 1500 ms
-  //     the child types 7, 5 at it -- the field is gone, so the digits queue
-  //     H            -> revealQueue = []      the digits are dropped
-  //     a click on `H  PIT CREW` -> revealQueue = [7, 5]
-  //
-  // and those two digits are then REPLAYED INTO THE NEXT FACT. A child who
-  // clicks for help gets a wrong answer on the following question through no
-  // fault of their own, and with the keyboard they do not. That is this piece's
-  // central claim failing on a destructive control, and no gate could see it,
-  // because the comment was where the sharing should have been.
-  //
-  // A comment cannot be a contract. These two functions are, and every route to
-  // either gesture -- the key branch below, the printed line's `onTapped`, the
-  // hand panel's chip -- calls one of them and adds nothing of its own. There is
-  // no longer a place for the two to drift apart, so there is no longer a claim
-  // to check by reading.
-  //
-  // `clearRevealQueue()` is unconditional on purpose. Outside a reveal window it
-  // empties an empty array and lowers a flag that is already down; inside one it
-  // is the whole defect. A branch here would be a fifth thing to keep in step.
+  // WHAT THE REVEAL WINDOW STILL HOLDS. A second wrong answer shows the fact's
+  // answer for 1500 ms while the engine has already moved the deck on, so a
+  // digit pressed into that window would be scored against a question the
+  // child cannot see. Those digits, and an Enter behind them, still wait in
+  // `revealQueue` and are replayed the instant the line comes back. The hand's
+  // keys do not wait: the hand is on screen throughout, and a card has nothing
+  // to do with the fact behind it.
 
   /** Show this fact's answer and move on. `H`, and the printed `H` line. */
   function pitCrewRequested() {
@@ -1299,35 +1168,22 @@ FocusScope {
     // The child's held keystrokes belong to the fact they were typed at, and
     // this moves the fact on.
     race.clearRevealQueue()
-    // Every claim on the old fact's field dies with it, or it eats the first
-    // digit the child types at the new one.
-    race.dropPending()
-    race.clearProvisional()
     race.send({ "kind": "hint" })
   }
 
-  /**
-   * Back out one step: put a chosen card back if there is one, otherwise leave.
-   *
-   * `Escape`, the printed `ESC` line, and the hand panel's `ESC  BACK` chip.
-   * (`docs/design.md:89`, v4.1, deletes the overload -- "Escape only ever leaves
-   * the race" -- and when that lands this becomes one branch. It is piece F's
-   * line to redraw; what this piece owes it is that every route to it is the
-   * same route.)
-   */
-  function backOutRequested() {
+  /** Leave the race. `Escape`, and the printed `ESC` line. Only ever this. */
+  function leaveNow() {
     if (!race.state)
       return
     race.clearRevealQueue()
-    if (picker.chosen >= 0) {
-      race.dropPending()
-      race.takeBackProvisional()
-      picker.reset()
-      return
-    }
-    race.dropPending()
     race.leaveRequested()
   }
+
+  // Space, from the key or from the hand panel's own `SPACE  USE IT` line:
+  // fire the highlighted card. With no hand held it does nothing at all, and
+  // nothing on screen changes -- `tests/qml/tst_race_keys.qml` asserts that
+  // with a fingerprint of the race, not with an absence of an event.
+  readonly property bool handHeld: race.hand.length > 0 && !picker.slamming
 
   Item {
     id: keys
@@ -1341,55 +1197,46 @@ FocusScope {
       var key = event.key
 
       if (key === Qt.Key_Escape) {
-        // ROUND 4 -- THE GUARD IS THE ACTION'S, AND IT DOES NOT CARE WHICH HAND
-        // THE PRESS CAME FROM.
-        //
-        // Round three read `leaveHint.guarding` here, which patched exactly one
-        // of the three ways this hazard fires and left the other two. A critic
-        // measured all three: a click on the hand panel's own `ESC  BACK` chip
-        // followed by an Escape LEFT THE RACE (`raceLeaves = 1`) -- because the
-        // chip is a different control with a different guard; a double-click on
-        // that chip put the card back and then CHOSE CARD 1 at the same pixel;
-        // and an Escape followed by a click on this screen's ESC line left the
-        // race, because the key armed nothing at all.
-        //
-        // `escape` is the name of the gesture. The chip declares it, the ESC
-        // line declares it, and this branch takes it -- so whichever of the
-        // three routes the first press came by, the second one inside the
-        // double-click interval is refused.
-        //
-        // ROUND 5 -- AND KEY -> KEY IS NOT, WHICH IS ROUND FOUR REVERTED.
-        //
-        // Round four also refused Escape after Escape, arguing that this line
-        // changes meaning between the two presses. `docs/design.md:89` (v4.1)
-        // has already deleted that overload -- "Escape only ever leaves the
-        // race" -- so the lockout defended a state the game is not supposed to
-        // have, and charged for it in the one currency this piece exists to stop
-        // spending: a press that silently did nothing, with no cursor change, no
-        // flash and no sound. A second Escape leaves the race, as
-        // `tests/qml/tst_race_keys.qml` has always said it does.
-        //
-        // ROUND 5 -- AND IT ARMS BOTH NAMES, not one. `picker.backOutGuards` is
-        // the pair the panel's own chip declares: with a card chosen this press
-        // redraws the hand footer under the pointer, so the gesture belongs to
-        // `handFooter` too. A critic drove the gap -- Escape, then a click on
-        // the footer 16 ms later, choosing card 1.
-        if (!Actions.take(picker.backOutGuards, "key")) {
+        // ONE MEANING, and the guard is the action's: `escape` is the name the
+        // printed `ESC  LEAVE` line declares, so a click on it and this key
+        // inside one double-click interval are one gesture whichever hand made
+        // them. Key after key is not guarded -- a second Escape is a second
+        // deliberate press -- and with one meaning there is nothing for a
+        // lockout to defend anyway. See `ui/parts/Actions.qml`.
+        if (!Actions.take(["escape"], "key")) {
           event.accepted = true
           return
         }
-        // One meaning, and one function: `backOutRequested()` above, which the
-        // printed `ESC` line and the panel's chip also call.
-        race.backOutRequested()
+        race.leaveNow()
+        event.accepted = true
+        return
+      }
+
+      // ------------------------------------------------------ the hand's keys
+      // Before the reveal window, on purpose: the hand is on screen throughout
+      // a reveal and a card play has nothing to do with the fact behind it.
+      if (key === Qt.Key_Left || key === Qt.Key_Right) {
+        if (race.handHeld)
+          picker.moveHighlight(key === Qt.Key_Left ? -1 : 1)
+        event.accepted = true
+        return
+      }
+      if (key === Qt.Key_Up || key === Qt.Key_Down) {
+        if (race.handHeld && picker.targeting)
+          picker.stepTarget(key === Qt.Key_Up ? -1 : 1)
+        event.accepted = true
+        return
+      }
+      if (key === Qt.Key_Space) {
+        race.fireKey()
         event.accepted = true
         return
       }
 
       // ------------------------------------------------- the reveal window
-      // While the field is showing a fact's answer back to the child, the deck
-      // has already moved and the answer box is not on screen. Keys that belong
-      // to the answer wait here for it. Escape above is not one of them -- back
-      // one is back one, at every moment of the game.
+      // While the line is showing a fact's answer back to the child, the deck
+      // has already moved and the answer is not on screen. Keys that belong to
+      // the answer wait here for it.
       if (race.holdsForReveal()) {
         if (key >= Qt.Key_0 && key <= Qt.Key_9) {
           race.queueForReveal(key - Qt.Key_0)
@@ -1405,19 +1252,14 @@ FocusScope {
         }
         if ((key === Qt.Key_Return || key === Qt.Key_Enter) && race.revealQueue.length > 0) {
           // Enter after digits belongs to those digits, so it queues behind
-          // them. A bare Enter with nothing queued still plays a chosen card at
-          // once: the hand is on screen throughout the reveal and a card play
-          // has nothing to do with the fact behind it.
+          // them.
           race.queueForReveal(-1)
           event.accepted = true
           return
         }
-        // `H` is not handled here. ROUND 5: it used to clear the queue here,
-        // BEFORE the guard below had decided whether this press acts at all, so
-        // a refused press still threw the child's digits away -- half a press,
-        // which is the one thing `Actions.take` returning false forbids. The
-        // clearing moved into `pitCrewRequested()`, where the click reaches it
-        // too; falling through is what takes it there.
+        // `H` is not handled here: it clears the queue inside
+        // `pitCrewRequested()`, AFTER the guard below has decided whether this
+        // press acts at all, so a refused press does not throw digits away.
       }
 
       if (key === Qt.Key_Return || key === Qt.Key_Enter) {
@@ -1427,24 +1269,14 @@ FocusScope {
       }
 
       if (key === Qt.Key_Backspace) {
-        // A backspace of the child's own retires the provisional claim: what is
-        // left in the field is theirs now. On a deferred digit it takes back the
-        // digit and leaves the card chosen, which is the printed way to a card
-        // on a one-digit fact: the panel's footer turns to `⏎ USE IT`.
-        if (race.pending.length > 0) {
-          race.dropPending()
-          event.accepted = true
-          return
-        }
-        race.clearProvisional()
         race.send({ "kind": "backspace" })
         event.accepted = true
         return
       }
 
       if (key === Qt.Key_H) {
-        // ROUND 4. The same guard the printed `H  PIT CREW` line takes, for the
-        // same reason: this spends one of the child's questions and there is no
+        // The same guard the printed `H  PIT CREW` line takes, for the same
+        // reason: this spends one of the child's questions and there is no
         // undo, so a press that is the tail of a press already made -- from
         // either hand -- does nothing.
         if (!Actions.take(["pitCrew"], "key")) {
@@ -1452,13 +1284,6 @@ FocusScope {
           return
         }
         race.pitCrewRequested()
-        event.accepted = true
-        return
-      }
-
-      if (key === Qt.Key_Left || key === Qt.Key_Right) {
-        if (picker.targeting)
-          picker.stepTarget(key === Qt.Key_Left ? -1 : 1)
         event.accepted = true
         return
       }
@@ -1471,149 +1296,56 @@ FocusScope {
     }
   }
 
-  // ------------------------------------------------- the digit arbitration
-  //
-  // How many digits currently in the field were typed by the press that chose
-  // the card. 0 or 1 in practice: the second digit a child types is their own
-  // and retires the claim.
-  property int provisional: 0
-
-  // A digit a card press put on screen that the engine has NOT been given,
-  // because handing it over would have submitted a wrong answer on the spot.
-  // Never more than one character: it only ever arises against a one-digit
-  // answer, and any second keystroke resolves it one way or the other. It is
-  // drawn in the field, so it is visible to the child rather than swallowed.
-  property string pending: ""
-
-  function clearProvisional() { race.provisional = 0 }
-
-  function dropPending() { race.pending = "" }
-
-  // Will the engine take a digit right now? This mirrors the engine's own
-  // `canAnswer`, which is private to `src/engine/race.ts`, and it is asked
-  // BEFORE a deferred digit is let go of rather than after. Round three cleared
-  // `pending` and then sent; under an engine hit the send was refused, the
-  // follow-up submit was skipped because the entry was empty, and the child's
-  // keystroke and their card choice were both gone with nothing on screen
-  // saying so. A stall is two to three seconds long and lands on a rival's
-  // clock, not the child's.
-  function fieldTakesDigits() {
-    if (!race.state || !race.human)
+  // Space. The same guard the panel's `SPACE  USE IT` chip declares, taken by
+  // the key route, so a click on the chip and a press of the bar inside one
+  // double-click interval are one gesture. With no hand there is nothing to
+  // take and nothing is armed: a press that could not fire anything must not
+  // refuse the child's next press either.
+  function fireKey() {
+    if (!race.handHeld)
       return false
-    if (race.state.status !== "racing" && race.state.status !== "settling")
+    if (!Actions.take(picker.fireGuards, "key"))
       return false
-    if (race.human.finished)
-      return false
-    if (race.human.currentFact < 0)
-      return false
-    return !race.stalled
-  }
-
-  // Hand the deferred digit to the engine. It goes through `typeDigit` like
-  // every other digit -- same leading-zero rule, same automatic submit -- so a
-  // deferred wrong answer costs exactly what a typed one costs: the streak, a
-  // sputter, a `missed` entry, and nothing else.
-  //
-  // Returns true only when the digit actually left this file. False means the
-  // field is locked and the digit is still deferred, still drawn, and still one
-  // printed key from the card.
-  function flushPending() {
-    if (race.pending.length === 0)
-      return false
-    if (!race.fieldTakesDigits())
-      return false
-    var value = Number(race.pending)
-    race.pending = ""
-    race.clearProvisional()
-    race.send({ "kind": "digit", "value": value })
-    // Belt and braces: if the engine took the digit without submitting (it
-    // cannot, on a one-digit answer, but the field is not this file's to
-    // assume), Enter still means submit.
-    if (race.entryLength() > 0)
-      race.send({ "kind": "submit" })
-    return true
+    return picker.fire()
   }
 
   function entryLength() { return race.human ? race.human.entry.length : 0 }
 
-  // What the field shows: the engine's entry plus any deferred digit. This is
-  // the string the arbitration reads, the picker measures, and the readout below
-  // draws, so all three agree about what the child is looking at.
-  readonly property string shownEntry: (race.human ? race.human.entry : "") + race.pending
+  // What the answer field shows: the engine's entry, and nothing else. The
+  // name survives from the rounds in which it was the entry plus a parked
+  // digit; there is no parked digit any more, so it is the entry.
+  readonly property string shownEntry: race.human ? race.human.entry : ""
 
-  // The answer to the question on screen, as the string the child has to type.
-  function expectedAnswer() {
-    if (!race.human || race.human.currentFact < 0)
-      return ""
-    return String(Engine.factAnswer(race.human.currentFact))
-  }
-
-  // Enter spends the card exactly when the field holds nothing but the digits
-  // the card presses put there -- and a deferred digit is never one of them: it
-  // is on screen precisely because it might be an answer, so Enter reads it as
-  // one and the panel prints `⏎  ANSWER n` beside the Backspace that takes it
-  // back while it is there.
-  function enterSpendsCard() {
-    if (picker.chosen < 0)
-      return false
-    if (race.pending.length > 0)
-      return false
-    return race.entryLength() === race.provisional
-  }
-
-  function takeBackProvisional() {
-    // The count is held locally: `reconcileClaims` below rewrites
-    // `race.provisional` under every send, and a loop that trusted the property
-    // it is mutating would be counting two things at once.
-    var left = race.provisional
-    while (left > 0 && race.entryLength() > 0) {
-      race.send({ "kind": "backspace" })
-      left -= 1
-    }
-    race.provisional = 0
-  }
-
-  // The field belongs to the fact it was typed at. The engine clears the entry
-  // in five places -- a correct answer, a wrong one, a reveal, a hint, a fresh
-  // lap -- and every one of them would otherwise leave a claim behind that eats
-  // the child's next digit. This runs after every step, so no path can forget.
-  function reconcileClaims() {
-    if (race.provisional > race.entryLength())
-      race.provisional = race.entryLength()
-    if (race.pending.length > 0 && race.entryLength() > 0)
-      race.pending = ""
-  }
-
-  // The fact moving is the other half of the same rule, and it is the one the
-  // hint used to slip through.
-  readonly property int factOnScreen: race.human ? race.human.currentFact : -1
-  onFactOnScreenChanged: {
-    race.pending = ""
-    race.provisional = 0
-  }
+  // THE LINE, AS IT READS. `7 × 8 = ▮` while the child is typing, `7 × 8 = 56`
+  // through a reveal, `7 × 8 = 5▮` half-way. Published so a test and the
+  // harness can assert what the child is looking at off the items that draw
+  // it, rather than off a second copy of the state. The caret is drawn as a
+  // block and read as `▮`; it is absent while the line is locked or revealed.
+  readonly property string lineText: factWord.words + " "
+                                     + answerWord.words + (caretMark.visible ? "▮" : "")
+  // What the line is revealing, if anything: `7 × 8 = 56` for the reveal's
+  // hold, "" otherwise. The pit crew's reveal and the wrong answer's both.
+  readonly property string revealText: reveal.text
 
   // ------------------------------------------------------ the reveal window
   //
   // Design, The answer loop 5: a second wrong answer on the same fact "shows the
   // answer for a moment" and the deck moves on. The engine moves it in the same
-  // step; the field on screen is handed over to `7 x 8 = 56` for 1500 ms
-  // (`fieldBox` below draws the entry only while `!reveal.active`). For that
-  // window the child is being shown one thing and the arbitration is reading
-  // another, and a key pressed into it went straight through: a card key landed
-  // as a CORRECT ANSWER to a question whose answer box was not on screen, took
-  // the streak up and lit that fact's mastery lamp.
+  // step; the line on screen is handed over to `7 × 8 = 56` for 1500 ms. For
+  // that window the child is being shown one thing and the engine is holding
+  // another, and a key pressed into it went straight through: a digit landed
+  // as an answer to a question whose line was not on screen.
   //
-  // Keys that belong to the answer wait here instead and are replayed through
-  // the whole arbitration the moment the field comes back, so they cost what
-  // they would have cost had the child pressed them one beat later, and nothing
-  // is scored against a question they were not being shown.
+  // Keys that belong to the answer wait here instead and are replayed the
+  // moment the line comes back, so they cost what they would have cost had the
+  // child pressed them one beat later, and nothing is scored against a
+  // question they were not being shown.
   //
   // The pit crew's reveal is deliberately NOT held. `H` is the child's own
-  // request to be shown the answer and move on; they pressed the key that moved
-  // the deck, the new fact is already drawn above them at a tenth of the screen
-  // height, and holding their next keystroke would put a 1.2 s wall in front of
-  // a key they pressed on purpose. Only the reveal a wrong answer imposes takes
-  // the field away from a child who was in the middle of using it.
+  // request to be shown the answer and move on; holding their next keystroke
+  // would put a 1.2 s wall in front of a key they pressed on purpose. Only the
+  // reveal a wrong answer imposes takes the line away from a child who was in
+  // the middle of using it.
   property bool revealHolds: false
   property var revealQueue: []
 
@@ -1635,7 +1367,7 @@ FocusScope {
     race.revealQueue = []
   }
 
-  // Called the instant the reveal stops covering the field, by whichever of the
+  // Called the instant the reveal stops covering the line, by whichever of the
   // three things ends it: the hold timer, a correct answer, or another wrong one.
   function releaseReveal() {
     if (!race.revealHolds)
@@ -1647,7 +1379,6 @@ FocusScope {
       if (race.revealHolds) {
         // A replayed key was itself a second wrong answer and opened a new
         // window. The rest of the queue belongs to that one, not to this one.
-        // Nothing can have been queued in between: a replay posts no key events.
         race.revealQueue = queued.slice(i)
         return
       }
@@ -1660,134 +1391,19 @@ FocusScope {
   }
 
   // What Enter means, in one place, so a key held back by the reveal window
-  // replays through exactly the branch a live press would have taken.
+  // replays through exactly the branch a live press would have taken: the
+  // answer, if there is one in the field, and nothing otherwise. It never
+  // touches the hand.
   function submitKey() {
-    if (race.pending.length > 0) {
-      // A deferred digit is the child's answer. It goes to the engine now,
-      // which submits it and charges a wrong one the streak -- and only the
-      // streak. It never becomes a card play.
-      //
-      // ROUND 4. Unless the engine cannot take it: an engine hit locks the
-      // field for two or three seconds, and round three cleared the digit,
-      // reset the panel and sent into the lock, so a rival's timing deleted the
-      // child's keystroke and their card choice together. If the digit did not
-      // land, nothing here moves and the panel still prints both keys.
-      if (race.flushPending())
-        picker.reset()
-      return
-    }
-    if (race.enterSpendsCard()) {
-      race.takeBackProvisional()
-      picker.confirm()
-      return
-    }
-    if (race.entryLength() > 0) {
-      race.clearProvisional()
-      picker.reset()
+    if (race.entryLength() > 0)
       race.send({ "kind": "submit" })
-      return
-    }
-    if (picker.chosen >= 0)
-      picker.confirm()
   }
 
+  // A digit. It goes to the engine, whatever the hand is doing: `typeDigit`
+  // applies the leading-zero rule and submits the instant the entry is as long
+  // as the answer, so a wrong `1` on `2 × 3` costs the streak and only the
+  // streak, exactly as it does with no hand held.
   function typeKey(digit) {
-    var expected = race.expectedAnswer()
-    var holding = digit >= 1 && digit <= 3 && race.hand.length >= digit
-    // Nothing of the child's own in the field: everything in it, deferred digit
-    // included, was put there by a card press.
-    var clean = race.entryLength() === race.provisional
-
-    if (holding && clean && expected.length > 0) {
-      var cand = race.shownEntry + String(digit)
-
-      if (cand === expected && !race.stalled) {
-        // (a) the press completes the correct answer. Type it, let the engine
-        // submit it, and leave the hand alone.
-        //
-        // ROUND 4 -- `!race.stalled`. With the field locked by an engine hit
-        // this branch reset the panel, handed the digit over and watched the
-        // engine refuse it: on `2 x 1` a press of `2` did NOTHING for the two or
-        // three seconds of the hit -- no card chosen, no digit, no refusal said
-        // out loud, and any card already chosen quietly dropped. The press
-        // cannot be this answer while the answer cannot be given, so it falls
-        // through to (c), which chooses the card and prints `⏎  USE IT`.
-        race.dropPending()
-        race.clearProvisional()
-        picker.reset()
-        race.send({ "kind": "digit", "value": digit })
-        return
-      }
-
-      if (cand.length < expected.length && expected.indexOf(cand) === 0) {
-        // (b) the press could be building the answer, and it cannot submit.
-        // Choose the card and type it, provisionally.
-        picker.choose(digit - 1)
-        race.send({ "kind": "digit", "value": digit })
-        race.provisional = race.entryLength()
-        return
-      }
-
-      // (c) `cand` cannot be this answer, so the press is a card choice or a
-      // change of one. Take back what the earlier presses put in FIRST -- this
-      // is the line round two did not have, and without it two card keys ran
-      // together into a number and submitted themselves.
-      race.dropPending()
-      race.takeBackProvisional()
-      picker.choose(digit - 1)
-      if (expected.length > 1 && !race.stalled) {
-        // A single digit is shorter than the answer, so it cannot submit: show
-        // it, held provisional, and Enter still gives it back.
-        race.send({ "kind": "digit", "value": digit })
-        race.provisional = race.entryLength()
-      } else if (!race.stalled) {
-        // One digit expected. Handing it over would submit a wrong answer, so
-        // defer it: on screen, in the child's hands, and one Enter from the
-        // engine.
-        race.pending = String(digit)
-      }
-      return
-    }
-
-    // A digit of the child's own. Any deferred digit is theirs too, and it goes
-    // to the engine first so the keystrokes reach it in the order they were
-    // pressed -- exactly what typing those two digits does with no hand held.
-    race.flushPending()
-    if (race.entryLength() > 0) {
-      // ROUND 5, AND IT COST A STREAK IN SIX RUNS OUT OF SIX.
-      //
-      // This branch used to call `clearProvisional()`, which zeroes the COUNT
-      // and leaves the DIGIT in the field. On `4 x 12 = 48` with a hand held,
-      // `1` chooses card one and prints a provisional `1` (branch (c) below is
-      // the one that put it there); the child then types their answer, `4`,
-      // which is not a card key -- 4 is past the end of a hand of three -- so
-      // it lands here. The `1` stayed, the field became `14`, and a two-digit
-      // answer submits itself the moment it is two digits long: streak to 0,
-      // one `missed`, one attempt, on a question the child answered right.
-      // Reproduced with real key events on seeds 140 to 145; the file's own
-      // claim that "no answer in the tables has become untypable while a hand
-      // is held" was false for every two-digit answer whose first digit is
-      // past the hand.
-      //
-      // Branch (c) has taken the digit back since round two -- but only when
-      // the NEXT key is also a card key, which is the shape every neighbouring
-      // test covers and this one is not.
-      //
-      // What decides it is whether the provisional digits are still part of
-      // the answer being typed. On `2 x 12 = 24` a provisional `2` followed by
-      // `4` IS the answer and must stay, which is why this is a prefix test
-      // and not an unconditional take-back. `takeBackProvisional()` only ever
-      // removes digits a card press put there, so a field of the child's own
-      // digits (`provisional` is 0) is untouched either way.
-      var cand = race.shownEntry + String(digit)
-      var expected = race.expectedAnswer()
-      if (race.provisional > 0
-          && !(expected.length > 0 && expected.indexOf(cand) === 0))
-        race.takeBackProvisional()
-      else
-        race.clearProvisional()
-      picker.reset()
-    }
     race.send({ "kind": "digit", "value": digit })
   }
 
@@ -1830,10 +1446,12 @@ FocusScope {
     // fact, which is a different object further up the screen and is what
     // round four measured instead. The field yields for the frames a crossbar
     // is over it; see `fieldYield` in TrackView.qml and `fieldFace` below.
-    fieldRect: Qt.rect(question.x + fieldBox.x,
-                       question.y + fieldBox.y,
-                       fieldBox.width, fieldBox.height)
-    factRect: race.factInkRect
+    fieldRect: Qt.rect(question.x + answerSlot.x, question.y + answerSlot.y,
+                       answerSlot.width, answerSlot.height)
+    factRect: race.lineGuardRect
+    // The kart the hand is aimed at, ringed for as long as it is. See
+    // `aimedRivalId` below.
+    aimKartId: race.aimedRivalId
     // The one thing this screen listens to the road for: a callout that belongs
     // to an impact, released on the frame the impact lands. See `sayAtImpact`.
     onFxImpactFired: race.releaseSay()
@@ -2121,19 +1739,24 @@ FocusScope {
     minimap.setFinished(flags)
   }
 
-  // ----------------------------------------------------- the fact's ink
+  // ----------------------------------------------------- the line's ink
   //
-  // The probe draws the widest fact in the game at a fixed size and reports the
+  // The probe draws the widest LINE in the game at a fixed size and reports the
   // tight bounding box of the glyphs -- the ink, not the em box. The ratio is
   // the face's own, so the size below follows the shell's font rather than a
   // constant measured once on this Mac. The probe's own size is fixed, so
   // nothing here is circular.
+  //
+  // PIECE F ROUND 7: the widest line is `12 × 12 = 144`, not `12 × 12`. The
+  // fact and the field are one line now (design v4.1, The view), so the width
+  // cap below has to be measured on the whole of what is drawn, or the answer
+  // to the widest fact runs off the right of a narrow screen.
   TextMetrics {
     id: inkProbe
     font.family: Theme.mono
     font.bold: true
     font.pixelSize: 200
-    text: "12 \u00D7 12"
+    text: "12 × 12 = 144"
   }
   readonly property real factInkRatio: inkProbe.tightBoundingRect.height > 0
                                        ? inkProbe.tightBoundingRect.height / 200
@@ -2142,33 +1765,23 @@ FocusScope {
     // A tenth of the screen height in ink, with a hair over it so rounding
     // never lands under the floor.
     var wanted = Math.ceil((race.height * 0.105) / Math.max(0.25, race.factInkRatio))
-    // ... and never so wide that the widest fact runs off the screen.
+    // ... and never so wide that the widest line runs off the screen.
     var widest = inkProbe.advanceWidth > 0
                  ? Math.floor((race.width - race.px(120)) * 200 / inkProbe.advanceWidth)
                  : wanted
-    return Math.max(race.fs(118), Math.min(wanted, widest))
+    return Math.max(race.fs(100), Math.min(wanted, widest))
   }
 
   // The fact's ink AS IT IS ON THE SCREEN NOW: the tight bounding box of the
-  // glyphs currently drawn, in this screen's own coordinates. Two things read
-  // it, and both are the reason it is a live measurement of the item rather
-  // than a constant:
-  //
-  //   * `factGround` below, which is what the fact yields with when a
-  //     road-spanning prop is behind it -- `7 x 8` and `12 x 12` are not the
-  //     same width, so a ground sized off a constant would be the wrong shape
-  //     on most facts;
-  //   * the evidence, which quotes the ink as a fraction of the frame height.
-  //     The design's floor is "never smaller than a tenth of the screen
-  //     height", and a round of this project already reported `font.pixelSize`
-  //     as that number and was caught: the em box carries ascent, descent and
-  //     leading, and this face draws about 0.73 of it.
-  // `tightBoundingRect` is measured from the BASELINE, so its `y` is negative
-  // for anything above it; the Text item's own top is `ascent` above that
-  // baseline. Getting this wrong put the fact's ink at y = 5 on a frame where
-  // the glyphs start at y = 140, which is the kind of number this project has
-  // been caught quoting before -- so the evidence checks it against the pixels
-  // rather than trusting the arithmetic.
+  // glyphs currently drawn, in this screen's own coordinates. `factGround`
+  // below is what the line yields with when a road-spanning prop is behind it,
+  // and the evidence quotes the ink as a fraction of the frame height. The
+  // design's floor is "never smaller than a tenth of the screen height", and a
+  // round of this project already reported `font.pixelSize` as that number and
+  // was caught: the em box carries ascent, descent and leading, and this face
+  // draws about 0.73 of it. `tightBoundingRect` is measured from the BASELINE,
+  // so its `y` is negative for anything above it; the Text item's own top is
+  // `ascent` above that baseline.
   TextMetrics {
     id: factInkNow
     font: factWord.faceFont
@@ -2178,59 +1791,64 @@ FocusScope {
     id: factFace
     font: factWord.faceFont
   }
+  // The fact's own ink: `7 × 8 =`.
   readonly property rect factInkRect: {
     var r = factInkNow.tightBoundingRect
     return Qt.rect(question.x + factWord.x + r.x,
                    question.y + factWord.y + factFace.ascent + r.y,
                    r.width, r.height)
   }
+  // The whole line's ink AS DRAWN: the fact through the last thing on the
+  // answer -- the caret, or the last digit -- one box. This is what the plate
+  // answers for; it tightens and loosens with what is on the line so the
+  // plate is never a slab over an empty third of the sky.
+  readonly property rect lineInkRect: Qt.rect(race.factInkRect.x, race.factInkRect.y,
+                                              (question.x + answerSlot.x
+                                               + Math.max(caretMark.x + caretMark.width,
+                                                          answerWord.width))
+                                              - race.factInkRect.x,
+                                              race.factInkRect.height)
+  // The whole line's RESERVE: the fact through the full answer slot, where the
+  // digits will be. This is what the effect layer's guard band keeps clear,
+  // because the design's rule is about the LINE -- "never over the karts",
+  // "nothing ever covers the fact" -- and a tag pushed under the empty slot
+  // would be under the third digit a moment later.
+  readonly property rect lineGuardRect: Qt.rect(race.factInkRect.x, race.factInkRect.y,
+                                                (question.x + answerSlot.x + answerSlot.width)
+                                                - race.factInkRect.x,
+                                                race.factInkRect.height)
 
-  // -------------------------------------------------- the fact's own ground
+  // -------------------------------------------------- the line's own ground
   //
-  // THE OTHER HALF OF GIVING THE ARCHES BACK.
-  //
-  // The fact is drawn over every prop -- it is declared after the track, so a
+  // The line is drawn over every prop -- it is declared after the track, so a
   // gantry can never cover a glyph -- and what a road-spanning prop takes from
   // it is contrast, not visibility: the gantry's beam is a cream-and-ink
   // chequer and the fact is cream. So for the frames a crossbar is behind the
-  // ink, and only those, the fact gets a ground.
+  // ink, and only those, the line gets a ground. The same plate comes up with a
+  // card's world flash (`track.fxWashOverFact` is the alpha of the light
+  // actually reaching the middle of the frame) and with a Turbo's horizon dip,
+  // and goes back to zero with each. It is BEHIND the ink -- declared before
+  // the line's own Row -- so nothing here covers anything.
   //
-  // It is the floor's own near-black purple, at the alpha the light rule
-  // allows, and it is NOT the round-three vignette coming back: that was a
-  // full-frame 0.55 BLACK wash over the whole sky on every frame of every
-  // race. This is a box the size of the glyphs, in purple, for about a second
-  // a lap, and it is at zero the rest of the time. `race.factInkRect` is the
-  // ink as it is on the screen now, so the ground is the shape of the fact
-  // that is actually there.
-  // PIECE F. The fact's INK box as an item, so a rect dump can print it. It
-  // paints nothing at all -- it is `factInkRect` given a geometry a walk of the
-  // tree can read, and `factInkRect` is what the effect layer's guard band and
-  // the arches' yield are both measured against. A number in a report is not
-  // evidence that a box is where the report says; this is the box.
+  // The INK box as an item, so a rect dump can print it. It paints nothing.
   Item {
     objectName: "factInk"
-    x: race.factInkRect.x
-    y: race.factInkRect.y
-    width: race.factInkRect.width
-    height: race.factInkRect.height
+    x: race.lineInkRect.x
+    y: race.lineInkRect.y
+    width: race.lineInkRect.width
+    height: race.lineInkRect.height
+  }
+  Item {
+    objectName: "lineGuard"
+    x: race.lineGuardRect.x
+    y: race.lineGuardRect.y
+    width: race.lineGuardRect.width
+    height: race.lineGuardRect.height
   }
 
-  //
-  // PIECE F ROUND 2 -- AND FOR EVERY FRAME OF EVERY WORLD FLASH, FOR THE SAME
-  // REASON. A wash is not a crossbar but it does the same thing to the same
-  // glyphs: a blind critic measured the cream fact sitting on a cream-to-pale
-  // bloom through a Turbo's white frame and both of the Pile-Up's amber
-  // flashes, "the largest, most important thing on screen" reduced to a one-
-  // pixel outline at the exact moment a child has to hold the question in their
-  // head. `track.fxWashOverFact` is the alpha of the light actually reaching
-  // the middle of the frame, so the ground comes up with the wash, in step with
-  // it, and goes back to zero with it. The ground is BEHIND the ink -- it is
-  // declared before the fact's own Column, which is the same argument the whole
-  // effect layer's paint order rests on -- so nothing here covers anything.
-  // PIECE F ROUND 3. The plate's own opacity, published so a test can assert
-  // that the seatbelt is fastened on every frame the light is up rather than
-  // asserting that the source contains a multiplier. See
-  // `test_03bb_the_plate_behind_the_fact_is_up_whenever_the_light_is`.
+  // The plate's own opacity, published so a test can assert that the seatbelt
+  // is fastened on every frame the light is up rather than asserting that the
+  // source contains a multiplier.
   readonly property real factGroundAlpha: factGround.opacity
 
   Rectangle {
@@ -2238,96 +1856,98 @@ FocusScope {
     objectName: "factGround"
     visible: opacity > 0.004
     readonly property real wash: track.fxWashOverFact
-    // Three times the wash, capped. The multiplier is not a taste: the plate
-    // has to take back more ground than the wash put on, because the wash also
-    // lifts the plate itself. Measured on the frames, WCAG 2.1 contrast between
-    // the fact's ink and the ground it is on, inside the ink box: 3.47:1 with
-    // nothing happening, 3.32:1 inside a Turbo's white frame with the plate at
-    // 1.5x, and above the resting figure at 3x. The rule the design writes is
-    // that the fact is the most legible thing on screen at every moment; a
-    // number that goes DOWN during the loudest 120 ms of the game fails it.
-    // PIECE F ROUND 6 -- AND THE HORIZON IS THE OTHER THING THAT GETS BEHIND
-    // THE FACT.
-    //
-    // The plate came up for a road-spanning prop and for a full-frame wash, and
-    // those were the two things anybody had measured. A Turbo dips the horizon
-    // by 0.055 of the frame for 400 ms, which lifts the bright half of the sky
-    // into the fact's own box for four times as long as its white frame lasts;
-    // round 6's hit-stop pushed the recovery two strip frames later and the
-    // measurement found the fact at 2.93 : 1 on `turbo` f08, under the 3.07
-    // floor this corpus has held since round two, with the plate at zero. The
-    // dip is a disturbance behind the fact exactly as a gantry is, so the plate
-    // answers it for as long as it lasts. `stretchNow` is Turbo's alone: every
-    // other card reads zero here and nothing about them changes.
+    // Three times the wash, capped. The plate has to take back more ground
+    // than the wash put on, because the wash also lifts the plate itself.
+    // Measured on the frames, WCAG 2.1 contrast between the fact's ink and the
+    // ground it is on: 3.47:1 with nothing happening, 3.32:1 inside a Turbo's
+    // white frame with the plate at 1.5x, and above the resting figure at 3x.
+    // `stretchNow` is Turbo's horizon dip, which lifts the bright half of the
+    // sky into the line's box for 400 ms.
     opacity: Math.max(track.factYield * 0.86,
                       Math.min(0.92, wash * 3.0),
                       track.stretchNow * 0.62)
-    x: race.factInkRect.x - race.px(22)
-    y: race.factInkRect.y - race.px(14)
-    width: race.factInkRect.width + race.px(44)
-    height: race.factInkRect.height + race.px(28)
+    x: race.lineInkRect.x - race.px(22)
+    y: race.lineInkRect.y - race.px(14)
+    width: race.lineInkRect.width + race.px(44)
+    height: race.lineInkRect.height + race.px(28)
     radius: Theme.cornerRadiusSmall
     color: Qt.rgba(0.235, 0.071, 0.157, 0.80)
   }
 
-  // ------------------------------------------------------- fact and field
-  // Design, Pillars: "The question is the track. The fact is the largest thing
-  // on screen at every moment of a race." It is, and it sits above the horizon
-  // so it is never over a kart.
-  Column {
+  // ------------------------------------------------------- the answer line
+  //
+  // Design v4.1, The view: "The fact and the field are one line: `7 × 8 = ▮`,
+  // the equals sign and the answer at the same size as the fact, the caret
+  // blinking in the empty answer, in the upper centre at the largest type on
+  // screen, over the horizon, never over the karts. A separate box below the
+  // fact was read as an empty panel, not as the place to type."
+  //
+  // PIECE F ROUND 7. What stood here was a Column: the fact, and under it a
+  // 214 x 98 dark rectangle with the digits in it and no equals sign. The
+  // maintainer's first finding on the race screen was that the box did not say
+  // it was the answer (`docs/open-questions.md` §5.3.1). The box is gone. The
+  // line is one Row: the fact with its equals sign, then a slot the width of
+  // the widest answer, holding the typed digits and a block caret, all in the
+  // fact's own type and the fact's own keyline treatment (`LitWord`), so the
+  // answer is the same object as the question and not a panel under it.
+  //
+  // THE SLOT IS FIXED WIDTH, on purpose. The Row is centred, so a slot that
+  // grew with the digits would slide the fact left as the child typed. The
+  // slot is as wide as three digits and a caret, and the digits fill it from
+  // the left, so `7 × 8 =` stays exactly where it was for every keystroke.
+  //
+  // WHERE IT SITS. Under the HUD's top row, and clear of the minimap panel:
+  // with the answer on the same line as the fact, the widest line is about
+  // two thirds of a 1080p frame wide, and at the old y = 118 it ran under the
+  // map. The top of the em box is at the map panel's bottom edge plus a
+  // hand's margin, which keeps the whole of the ink in the sky and above the
+  // horizon at every one of the three sizes this game is played at; the frames
+  // in the evidence are the proof, per size.
+  //
+  // THE STALL IS ON THE FIELD. Design v4.1: "the stall after a hit is shown on
+  // the answer field itself, as the bolts overlay the feel section describes,
+  // not as a banner." The `ENGINE HIT · 3s` band that used to sit under the
+  // fact is gone; the four bolts on the answer slot are the whole of it, and
+  // the caret stops while the field is locked.
+  //
+  // THE REVEAL USES THE SAME LINE. A second wrong answer shows `7 × 8 = 56` in
+  // teal for 1500 ms: the fact word takes the revealed fact, the slot takes its
+  // answer in the reveal's tone, and the line the child was typing on is the
+  // line that tells them. Nothing appears anywhere else.
+  Row {
     id: question
-    // Named for the rect dump: the fact and the field are the two boxes the
-    // effect layer's guard band is measured against, and this is the block
-    // that holds them. Its position in `race.children` is also what proves the
-    // fact is painted AFTER the track and therefore over every effect in it.
+    // Named for the rect dump and for `tests/qml/tst_trackview_fx.qml`, which
+    // reads its position in `race.children` to prove the line is painted AFTER
+    // the track and therefore over every effect in it.
     objectName: "factColumn"
     anchors.horizontalCenter: parent.horizontalCenter
-    y: race.px(118)
-    spacing: race.px(14)
+    y: rightHud.y + mapPanel.height + race.px(12)
+    spacing: race.px(28)
 
     // THE FACT IS DRAWN THE WAY THE COUNTDOWN DRAWS IT, AND IT IS THE SAME
-    // OBJECT ONE SECOND APART.
-    //
-    // What stood here was a cream `Text` with `style: Text.Outline` -- Qt's
-    // native hairline, about a pixel wide at any size. What the countdown drew,
-    // off the same string, one second earlier, was a cast shadow, an opaque
-    // keyline six pixels wide and a warm rim on the sun side, and a blind
-    // critic measured why: cream against this sky and this sun is 3.10 : 1
-    // mean and 1.26 : 1 worst, which raw would fail; it reads only because of
-    // the keyline, at 5.32 : 1 mean and 2.57 : 1 worst against the same ground.
-    // The contrast problem was solved on the screen that has one second of it
-    // and left standing on the screen that has the whole race, and a child met
-    // the same sentence in two designs across one cut.
-    //
-    // `ui/parts/LitWord.qml` is that treatment as a part, and this is it. Its
-    // nineteen ink items live in one cached layer, so what the race pays per
-    // frame is one textured quad -- see that file for the measurement.
-    //
-    // The plate below it stays exactly as it was. It answers a DISTURBANCE --
-    // a crossbar, a card's wash, a Turbo's horizon dip -- and comes up and goes
-    // down with it; the keyline answers the sky, which is always there. They
-    // are two different problems and the round that added the plate said so.
+    // OBJECT ONE SECOND APART. `ui/parts/LitWord.qml`: a cast shadow, an
+    // opaque keyline and a warm rim on the sun side, in one cached layer, so
+    // what the race pays per frame is one textured quad.
     LitWord {
       id: factWord
-      anchors.horizontalCenter: parent.horizontalCenter
-      words: (race.human && race.human.currentFact >= 0)
-             ? Engine.factLabel(race.human.currentFact) : ""
+      // Through a reveal the line shows the fact being revealed, which the
+      // engine has already moved past; the moment the reveal clears, the fact
+      // on screen is the engine's.
+      words: reveal.active
+             ? reveal.factLabel + " ="
+             : ((race.human && race.human.currentFact >= 0)
+                ? Engine.factLabel(race.human.currentFact) + " =" : "")
       // The largest type on the screen, and never below a tenth of its height
       // -- measured as INK, which is the only reading of that rule a child can
-      // see. `font.pixelSize` is an em box with ascent, descent and leading in
-      // it; `12 x 12` in this face draws about 0.73 of it. Round one set the em
-      // box to 124 px on a 1080 screen and called the floor met, and the ink on
-      // the frame measured 91 px -- 8.4% of the screen, under the design's
-      // tenth. The size below is derived from the ink the face actually draws,
-      // so the rule holds at every screen size and in any font the shell hands
-      // down.
+      // see. `font.pixelSize` is an em box; `12 x 12` in this face draws about
+      // 0.73 of it, so the size is derived from the ink the face actually
+      // draws, at every screen size and in any font the shell hands down.
       size: race.factPixelSize
       spacing: race.px(6)
-      // The same four numbers the countdown hands it, at this screen's scale.
       drop: race.px(6)
       contour: Math.max(2, race.px(5))
       rimOffset: Math.max(1, Math.round(Math.max(2, race.px(5)) * 0.55))
-      faceTone: Theme.cream
+      faceTone: reveal.active ? reveal.tone : Theme.cream
       shadowTone: Qt.rgba(0.235, 0.07, 0.157, 0.82)
       bodyTone: "#280e27"
       rimTone: "#f0b07a"
@@ -2337,100 +1957,25 @@ FocusScope {
     // child presses go through the engine and come back as `racer.entry`, so
     // there is no text-entry control anywhere in this game.
     Item {
-      id: fieldBox
-      // PIECE F. The two boxes the effect layer's guard band is measured
-      // against, named so `dev/Harness.qml --dump-rects` prints them beside
-      // every effect item's box and the two can be shown not to intersect.
-      // The fact's own box is the INK, not this item, and it is `factInkProbe`
-      // below.
+      id: answerSlot
+      // The box the effect layer's guard band is measured against and the box
+      // `dev/Harness.qml --dump-rects` prints beside every effect item's, so
+      // the two can be shown not to intersect. `TrackView.fieldRect` is this.
       objectName: "answerField"
-      anchors.horizontalCenter: parent.horizontalCenter
-      width: race.px(214)
-      height: race.px(98)
+      // Three digits and a caret, whatever is typed.
+      width: answerProbe.advanceWidth + caretMark.width + race.px(8)
+      height: factWord.height
+      anchors.verticalCenter: parent.verticalCenter
 
-      // THE FIELD WAS A HOLE CUT IN THE SKY.
-      //
-      // `Theme.panelSunken` is the shell background driven to 0.22, which on
-      // the tokyo-night the harness and the VM both hand down is rgb(6, 6, 8):
-      // at 0.92 over a sunset the field measured #08080a on the shipped frame
-      // -- a 214 x 98 near-black rectangle sitting on the horizon, a hand's
-      // width from the sun, in the one part of the picture the direction says
-      // is never black. It is the game layer, not the chrome the plan exempts,
-      // and the light rule applies to it: a dark purple body with a warm rim
-      // on the sun side, which is what every other object in this view has.
-      //
-      // The tone is the floor's own `#3c1228` driven down, so the field reads
-      // as the same material as the road it belongs to rather than as a hole,
-      // and the top edge carries the rim `#f0b07a` the sun would put on it.
-      Rectangle {
-        id: fieldFace
-        anchors.fill: parent
-        radius: Theme.cornerRadiusSmall
-        // THE FIELD YIELDS FOR THE FRAME.
-        //
-        // Plan v2's remedy for road-spanning props against the fixed answer
-        // field, taken as written. `TrackView.fieldYield` is 1 while a gantry
-        // or a roller door's crossbar is over this box, and for that second or
-        // so the FACE goes -- the ground, the border and the sun rim -- while
-        // the digits, the caret and the reveal above stay at full strength.
-        // Nothing the child typed moves or disappears; what goes is the slab
-        // the arch was being sliced by, so the landmark passes over the screen
-        // whole. The floor of 0.06 keeps a whisper of the box on screen so it
-        // never reads as having been deleted.
-        opacity: Math.max(0.06, 1 - track.fieldYield)
-        // 0.74, not opaque: enough of the sunset comes through that the field
-        // reads as smoked glass in front of the sky rather than as a slab cut
-        // out of it, and `Theme.amberGlow` digits at 72 px still stand at more
-        // than five to one against it. Measured on the shipped frame in the
-        // evidence, with the empty field and with four digits in it.
-        color: Qt.rgba(0.157, 0.055, 0.125, 0.74)
-        border.width: 2
-        border.color: reveal.active ? Theme.teal
-                                    : (race.stalled ? Theme.hazard : Theme.focusRing)
-
-        // The field's border going blue to amber as the lock lands. ROUND 2:
-        // this is a WALL-CLOCK animation, the third one on this screen, and it
-        // is the one the external clock did not switch off -- so two runs of
-        // the same strip landed at different points in its 160 ms and the two
-        // `hit` strips came back different bytes, by one part in 255, over the
-        // field's box and nowhere else. A strip that differs run to run is not
-        // evidence. Cut here, like the caret's blink and the callouts' fade.
-        Behavior on border.color {
-          enabled: !race.reducedMotion && !race.externalClock
-          ColorAnimation { duration: 160 }
-        }
-
-        // The rim the one key light puts on the field's upper edge. `#f0b07a`
-        // is the palette's rim tone; it is on the top because the sun is low
-        // and behind, so its light lands on what faces up and away.
-        Rectangle {
-          x: fieldFace.radius
-          y: 2
-          width: parent.width - fieldFace.radius * 2
-          height: Math.max(1, race.px(2))
-          color: Qt.rgba(0.941, 0.690, 0.478, 0.42)
-        }
+      TextMetrics {
+        id: answerProbe
+        font: factWord.faceFont
+        text: "144"
       }
 
-      // ================================================== PIECE M ROUND 2
-      //
-      // THE ANSWER BOX ANSWERS "IS THIS THING ALIVE", AND NOTHING ELSE.
-      //
-      // The one thing on this screen a child will click first is the biggest
-      // box on it, and until now it took no click at all. It still takes no
-      // ACTION: the design forbids free text anywhere in this game, the answer
-      // is one to three digits, and the piece F rubric forbids anything that
-      // covers the fact -- so there is no keypad here and there is not going to
-      // be one. What a click does is put the keyboard in the box and show the
-      // caret, which is exactly `ui/parts/Stepper.qml`'s inert centre face:
-      // the idiom for "the middle of a control takes focus and stops there" is
-      // already established in this game and this is a second use of it.
-      //
-      // `focusOnly` says so in the parity table rather than inventing a key
-      // that does the same thing, because no key does: the keyboard is already
-      // here. What the walk checks instead is that the target names a `stop` --
-      // a focus-only target that focused nothing would be a press that did
-      // nothing at all, which is the defect this whole piece is against.
+      // THE ANSWER BOX ANSWERS "IS THIS THING ALIVE", AND NOTHING ELSE. A click
+      // puts the keyboard here and shows the caret; it takes no action, because
+      // the design forbids free text and there is no keypad (v4.2).
       Clickable {
         id: fieldHit
         objectName: "clickAnswerField"
@@ -2441,9 +1986,6 @@ FocusScope {
         key: ""
       }
 
-      // And it lights, because that is the rule the whole game keeps: if it
-      // lights up when you point at it, you can press it. Only under the
-      // pointer -- no frame taken without a hover is changed by a pixel.
       FocusRing {
         on: fieldHit.hovered
         hover: true
@@ -2452,28 +1994,58 @@ FocusScope {
         gap: 4
       }
 
-      Text {
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        visible: !reveal.active
-        text: race.shownEntry + (caret.on ? "_" : " ")
-        color: Theme.amberGlow
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: race.fs(72)
-        font.letterSpacing: race.px(4)
-      }
+      // The typed digits, or the revealed answer, in the fact's own treatment.
+      // The face is the charge's amber for the child's own digits -- the one
+      // thing on the line the child put there -- and the reveal's teal when
+      // the line is telling them. `x` is what the sputter shakes.
+      Item {
+        id: answerInk
+        x: 0
+        y: 0
+        width: parent.width
+        height: parent.height
 
-      Text {
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        visible: reveal.active
-        text: reveal.text
-        color: reveal.tone
-        font.family: Theme.mono
-        font.bold: true
-        font.pixelSize: race.fs(52)
-        font.letterSpacing: race.px(2)
+        LitWord {
+          id: answerWord
+          x: 0
+          y: 0
+          words: reveal.active ? reveal.answer : race.shownEntry
+          size: race.factPixelSize
+          spacing: race.px(6)
+          drop: race.px(6)
+          contour: Math.max(2, race.px(5))
+          rimOffset: Math.max(1, Math.round(Math.max(2, race.px(5)) * 0.55))
+          faceTone: reveal.active ? reveal.tone : Theme.amberGlow
+          shadowTone: Qt.rgba(0.235, 0.07, 0.157, 0.82)
+          bodyTone: "#280e27"
+          rimTone: "#f0b07a"
+        }
+
+        // THE CARET IS A BLOCK, `▮`, as the design draws it: a bar the height
+        // of a digit's ink, after the last digit, blinking at 1.25 Hz. It goes
+        // while a reveal holds the line and while the field is locked, because
+        // in both states a keystroke would not land here.
+        Rectangle {
+          id: caretMark
+          objectName: "caret"
+          x: answerWord.width + (race.shownEntry.length > 0 ? race.px(10) : 0)
+          // The top of a digit's ink: the baseline is `ascent` down the em box
+          // and the tight box's `y` is measured up from it.
+          y: factFace.ascent + answerCap.tightBoundingRect.y
+          width: Math.max(6, Math.round(race.factPixelSize * 0.16))
+          height: Math.max(8, Math.round(answerCap.tightBoundingRect.height))
+          radius: 2
+          color: Theme.amberGlow
+          visible: caret.on && !reveal.active && !race.stalled
+                   && race.shownEntry.length < 3
+          border.width: Math.max(1, race.px(2))
+          border.color: "#280e27"
+        }
+        TextMetrics {
+          id: answerCap
+          font: factWord.faceFont
+          text: "8"
+        }
       }
 
       // ------------------------------------------------------------ PIECE F
@@ -2482,18 +2054,14 @@ FocusScope {
       // off over the stall duration (2 s, 3 s for a Wrench) so the lock reads
       // as a thing happening, not a bug."
       //
-      // Four bolts, one per corner of the field, spinning and then flying off
-      // as the stall runs out. The stall's length is the ENGINE's -- it comes
-      // off the `hit` event that caused it, and `stalledUntilMs` is the engine's
-      // own deadline -- so the last bolt leaves on the frame the field comes
-      // back, whatever the card was and whatever the rules say next.
-      //
-      // They are at the CORNERS and outside the digits' box on purpose: the
-      // field is the child's, and a lock drawn over the number they typed would
-      // be the third thing this screen has done that hides what a child is
-      // looking at. Under reduced motion they do not spin or fly; they are four
-      // bolts that go out one at a time, which is the same countdown as a state
-      // change rather than as a movement.
+      // Four bolts, one per corner of the answer slot, spinning and then flying
+      // off as the stall runs out. The stall's length is the ENGINE's -- it
+      // comes off the `hit` event that caused it, and `stalledUntilMs` is the
+      // engine's own deadline -- so the last bolt leaves on the frame the field
+      // comes back, whatever the card was and whatever the rules say next.
+      // Sized off the line's type, so on a 156 px line they are bolts and not
+      // specks. Under reduced motion they do not spin or fly; they are four
+      // bolts that go out one at a time.
       Repeater {
         model: 4
 
@@ -2503,46 +2071,64 @@ FocusScope {
           readonly property real mine: Math.max(0, Math.min(1, (u - index * 0.22) / 0.34))
           readonly property real cx: (index % 2 === 0 ? 1 : -1)
           readonly property real cy: (index < 2 ? 1 : -1)
-          readonly property real d: race.px(13)
+          readonly property real d: Math.max(13, Math.round(race.factPixelSize * 0.20))
 
+          objectName: "stallBolt"
           visible: race.stalled && mine < 1
           width: d
           height: d
-          x: (index % 2 === 0 ? race.px(7) : fieldBox.width - d - race.px(7))
+          x: (index % 2 === 0 ? -d * 0.3 : answerSlot.width - d * 0.7)
              + (race.reducedMotion ? 0 : cx * mine * mine * race.px(90))
-          y: (index < 2 ? race.px(7) : fieldBox.height - d - race.px(7))
+          y: (index < 2 ? factFace.ascent + answerCap.tightBoundingRect.y - d * 0.3
+                        : factFace.ascent - d * 0.7)
              + (race.reducedMotion ? 0 : -cy * mine * mine * race.px(70))
           opacity: 1 - mine
           rotation: race.reducedMotion ? 0 : (u * 900 + index * 40)
 
           // A hex head: a square with its corners cut by a rotated square over
-          // it, which is as much of a bolt as thirteen pixels can be.
+          // it, which is as much of a bolt as thirty pixels can be.
           Rectangle {
             anchors.fill: parent
-            radius: 2
+            radius: 3
             color: Theme.hazard
-            border.width: 1
+            border.width: Math.max(1, race.px(2))
             border.color: Qt.rgba(0, 0, 0, 0.55)
           }
           Rectangle {
             anchors.centerIn: parent
             width: parent.width * 0.42
-            height: race.px(2)
+            height: Math.max(2, race.px(3))
             color: Qt.rgba(0, 0, 0, 0.65)
           }
         }
       }
 
+      // The lock itself, under the bolts: a hazard bar the width of the slot
+      // at the baseline, so the locked field is a state a child can see between
+      // bolts and not only four things in motion. Reduced motion keeps it.
+      Rectangle {
+        objectName: "stallBar"
+        visible: race.stalled
+        x: 0
+        y: factFace.ascent + race.px(8)
+        width: answerSlot.width
+        height: Math.max(3, race.px(6))
+        radius: 2
+        color: Theme.hazard
+        opacity: 0.85
+      }
+
       // Design, The answer loop 4: a 500 ms sputter, and nothing else. No
-      // message, no red mark, no reveal -- the field shakes the way an engine
-      // coughs and the streak is gone.
+      // message, no red mark, no reveal -- the digits shake the way an engine
+      // coughs and the streak is gone. The ink shakes; the slot, and so the
+      // fact beside it, does not move.
       SequentialAnimation {
         id: sputter
         running: false
         loops: 4
-        NumberAnimation { target: fieldBox; property: "x"; to: race.reducedMotion ? 0 : -race.px(7); duration: 62 }
-        NumberAnimation { target: fieldBox; property: "x"; to: race.reducedMotion ? 0 : race.px(7); duration: 62 }
-        onFinished: fieldBox.x = 0
+        NumberAnimation { target: answerInk; property: "x"; to: race.reducedMotion ? 0 : -race.px(7); duration: 62 }
+        NumberAnimation { target: answerInk; property: "x"; to: race.reducedMotion ? 0 : race.px(7); duration: 62 }
+        onFinished: answerInk.x = 0
       }
     }
   }
@@ -2564,14 +2150,22 @@ FocusScope {
     onTriggered: caret.on = !caret.on
   }
 
+  // The reveal: the fact being shown and its answer, as two strings, because
+  // the line draws them in two places -- the fact word and the answer slot --
+  // and one string would have to be split again to get there.
   QtObject {
     id: reveal
-    property string text: ""
+    property string factLabel: ""
+    property string answer: ""
+    // What the line reads while it is up, published for the tests and the
+    // harness: `7 × 8 = 56`.
+    readonly property string text: reveal.active ? reveal.factLabel + " = " + reveal.answer : ""
     property color tone: Theme.teal
     property bool active: false
 
-    function show(message, holdMs, colour) {
-      reveal.text = message
+    function show(label, value, holdMs, colour) {
+      reveal.factLabel = label
+      reveal.answer = value
       reveal.tone = colour
       reveal.active = true
       revealHold.interval = holdMs
@@ -2587,158 +2181,65 @@ FocusScope {
     id: revealHold
     onTriggered: {
       reveal.active = false
-      // The field is back. Anything the child pressed into the window it was
+      // The line is back. Anything the child pressed into the window it was
       // gone for is replayed now, against the fact they can finally see.
       race.releaseReveal()
     }
   }
 
-  // ------------------------------------------------------------- callouts
-  Column {
+  // ------------------------------------------------------------- the callout
+  // ONE SLOT, under the line. Newest replaces last; never stacked; never over
+  // the line, because it hangs off the line's own ink box. See `say`.
+  Callout {
+    id: callout
+    objectName: "callout"
     anchors.horizontalCenter: parent.horizontalCenter
-    // PIECE F. The engine-hit band lives on this exact line and is drawn over
-    // the callouts, so `ENGINE HIT · 3s` used to sit on top of `WRENCH ◂ BOLT`
-    // -- the two halves of one event, printed over each other, on the frame a
-    // child most needs to read them. The callouts step down while the band is
-    // up and step back when it goes.
-    y: question.y + question.height + race.px(22)
-       + (race.stalled ? race.px(64) : 0)
-    spacing: race.px(8)
-
-    Repeater {
-      id: calloutSlots
-      model: 3
-
-      Callout {
-        anchors.horizontalCenter: parent.horizontalCenter
-        // PIECE F. The large type Pile-Up reserves needs a box to sit in; every
-        // other callout is the height it always was.
-        height: race.px(big ? 74 : 46)
-        width: implicitWidth
-        holdMs: Engine.CALLOUT_MS
-        // The fade is wall-time, so under an external clock it is a cut. See
-        // `externalClock` above.
-        reducedMotion: race.reducedMotion || race.externalClock
-        // ... and so is the 1.6 s HOLD, which round one missed: whether a
-        // callout was still up at frame 18 of a strip depended on how long the
-        // harness had taken to write seventeen PNGs. Under an external clock
-        // the hold is measured on the effect clock instead.
-        fxNow: race.externalClock ? track.fxClock : -1
-      }
-    }
-  }
-
-  // ------------------------------------------------------- engine-hit band
-  // Design, The answer loop 8: an unblocked Wrench, Pothole or Pile-Up locks
-  // the field for two or three seconds with the engine-hit banner.
-  Rectangle {
-    visible: race.stalled
-    anchors.horizontalCenter: parent.horizontalCenter
-    y: question.y + question.height + race.px(22)
-    width: stallText.implicitWidth + race.px(44)
-    height: race.px(52)
-    radius: Theme.cornerRadiusSmall
-    color: Qt.rgba(0, 0, 0, 0.80)
-    border.width: 2
-    border.color: Theme.hazard
-    z: 6
-
-    Text {
-      id: stallText
-      anchors.centerIn: parent
-      textFormat: Text.PlainText
-      text: "ENGINE HIT  ·  " + (race.human
-            ? Math.max(0, Math.ceil((race.human.stalledUntilMs - race.nowMs) / 1000)) : 0) + "s"
-      color: Theme.hazard
-      font.family: Theme.mono
-      font.bold: true
-      font.pixelSize: race.fs(24)
-      font.letterSpacing: 2
-    }
+    y: race.lineInkRect.y + race.lineInkRect.height + race.px(14)
+    // The large type Pile-Up reserves needs a box to sit in; every other
+    // callout is the height it always was.
+    height: race.px(big ? 74 : 46)
+    width: implicitWidth
+    holdMs: Engine.CALLOUT_MS
+    // The fade is wall-time, so under an external clock it is a cut. See
+    // `externalClock` above.
+    reducedMotion: race.reducedMotion || race.externalClock
+    // ... and so is the 1.6 s HOLD: under an external clock the hold is
+    // measured on the effect clock instead, so a strip is the same bytes twice.
+    fxNow: race.externalClock ? track.fxClock : -1
   }
 
   // --------------------------------------------- charge, and the one picker
   //
-  // ROUND 2 -- ONE PANEL, NOT TWO. This file used to draw its own hand panel
-  // here while `ui/Picker.qml` sat unused beside it, and the two disagreed on
-  // everything that mattered. The inline panel printed `HAND`, three keycaps and
-  // a bare `◂ NAME ▸ ⏎` and taught a child none of the keys; it had no footer
-  // and no way at all to find out that Backspace was the key that saved a
-  // streak. `ui/Picker.qml` prints the keys on every frame, names the effect and
-  // the tier of every card, marks the aim with an arrow rather than a colour,
-  // and says so when a card cannot be spent. The inline panel is gone and this
-  // is the plan's shape: the picker is the panel, and the race screen drives it.
-  //
-  // The race screen keeps every key. The picker's own `Keys` handler is intact
-  // for the harness, but here it never has focus -- `keys` above does -- because
-  // the digit arbitration needs the expected answer and only this file has it.
+  // ONE PANEL. `ui/Picker.qml` is the hand, and the race screen drives it: the
+  // race keeps every key (`keys` above) and calls the panel's `moveHighlight`,
+  // `stepTarget` and `fire`; the panel's own `Keys` handler is the same three
+  // keys for the harness, where it stands alone.
   Picker {
     id: picker
     anchors.fill: parent
     hand: race.hand
     rivals: race.liveRivals
-    entryLength: race.shownEntry.length
     // PIECE F. The panel's three beats -- the deal, the breath and the slam --
     // run on the effect clock, not on a timer of their own, so the hand and the
     // road are the same event and a frame strip catches both.
     fxNow: track.fxClock
     reducedMotion: race.reducedMotion
-    // The override the picker documents: the digits the card press itself put
-    // in the field are not an answer the child is part-way through, so Enter
-    // still spends. A DEFERRED digit is the exception, and it is why this reads
-    // `shownEntry` rather than the engine's entry: that digit might be the
-    // child's answer, so Enter belongs to it until Backspace or Enter settles
-    // it.
-    enterSpends: race.enterSpendsCard() || race.shownEntry.length === 0
-    // ROUND 4. The panel could not print the way back because it was never told
-    // there was one: `enterSpends` alone says "Enter is not yours", which is
-    // what produced `FINISH THE ANSWER FIRST` and nothing else. The parked digit
-    // itself goes down now, so the footer can name Backspace, and say what Enter
-    // would send if the child chose it.
-    pendingDigit: race.pending
     dockWidth: race.px(500)
     dockMargin: race.px(30)
-    // PIECE F. The hand outlives itself for the length of the slam: spending a
-    // card empties the hand on the frame the child presses Enter, so a panel
-    // bound to `hand.length > 0` alone took the cards off the screen before the
-    // beat that shows them going. `picker.slamming` is the panel's own answer
-    // to "am I still drawing the hand that just went", and this binding used to
-    // override it -- the Picker's default already had it right.
+    // The hand outlives itself for the length of the slam: spending a card
+    // empties the hand on the frame the child presses Space, and a panel bound
+    // to `hand.length > 0` alone took the cards off the screen before the beat
+    // that shows them going.
     visible: race.hand.length > 0 || picker.slamming
     onCardUsed: function (index, targetId) {
       race.send({ "kind": "useCard", "index": index, "targetId": targetId })
     }
-    // PIECE M. A mouse touched the hand. Everything the digit arbitration above
-    // holds -- the deferred digit parked in the field, the provisional claim on
-    // digits the card press itself typed -- exists only because `1`, `2` and `3`
-    // are also digits, and a click is not a digit. So a click settles the
-    // ambiguity in the child's favour: the parked digit comes back out of the
-    // field (it was never handed to the engine, so nothing is lost and no
-    // streak is spent) and the provisional claim is retired. Without this, a
-    // child who typed `1` on `2 × 3` and then reached for the mouse would be
-    // left with a `1` in the answer box they never meant to send.
-    onHandTouched: {
-      race.dropPending()
-      race.takeBackProvisional()
-    }
-
-    // PIECE M ROUND 5. The panel's `ESC  BACK` chip is a route to THIS screen's
-    // back-out gesture, so it takes the same function the Escape key and the
-    // printed `ESC` line take, rather than a shorter version of it written on
-    // the panel. The chip is drawn only while a card is chosen, so this can only
-    // ever take the put-the-card-back branch.
-    onBackRequested: race.backOutRequested()
-
-    // PIECE M ROUND 2. The two footer keys that are the ANSWER's, not the
-    // hand's. `⏎  SEND THE ANSWER` and `⏎  ANSWER n` go through `submitKey()`,
-    // which is the one place Enter means something on this screen, and
-    // `⌫  BACK TO THE CARD` through `dropPending()`, which is Backspace's own
-    // branch for a parked digit. Neither is a second copy of the rule: they are
-    // the same two functions the key handler calls, so a click and a press
-    // cannot mean different things.
-    onSubmitRequested: race.submitKey()
-    onUndoDigitRequested: race.dropPending()
   }
+
+  // THE AIMED KART IS RINGED. Design v4.1: "the target's kart is ringed while
+  // it is chosen". The panel says who; the road draws it. "" when nothing is
+  // aimed, which is every moment a targeted card is not highlighted.
+  readonly property string aimedRivalId: (race.handHeld && picker.targeting) ? picker.targetId : ""
 
   // The charge sits directly above the picker's dock, so the two read as one
   // right-hand column and neither is ever drawn over the other.
@@ -2755,11 +2256,9 @@ FocusScope {
     glowFrom: Engine.CHARGE_GLOW_FROM
     // The caption's 1.25 Hz breath is a wall-clock animation, so it is cut
     // under an external clock for the same reason the caret's blink is -- and
-    // ONLY that. ROUND 3: this used to fold the external clock into
-    // `reducedMotion`, which also switched off the twelve-segment burst, and the
-    // burst is a pure function of the effect clock and reproducible. The result
-    // was that no strip, no dump and no test in two rounds of this piece could
-    // photograph the burst, and a blind critic reported it missing.
+    // ONLY that: the twelve-segment burst is a pure function of the effect
+    // clock and reproducible, and folding the external clock into
+    // `reducedMotion` switched it off in every strip for two rounds.
     reducedMotion: race.reducedMotion
     externalClock: race.externalClock
     holdingHand: race.hand.length > 0
@@ -2768,8 +2267,6 @@ FocusScope {
     cellHeight: race.px(24)
     cellGap: race.px(4)
     titleSize: race.fs(14)
-    // The gauge face's padding, on the same scale as the readouts along the
-    // top: the charge is an instrument like the rest and now reads like one.
     padX: race.px(16)
     padY: race.px(12)
     visible: race.state ? race.state.powerupsEnabled : false
@@ -2779,133 +2276,71 @@ FocusScope {
   // Always available, and it says so, because the design's fairness list makes
   // it a promise: "A child can never be trapped on a fact."
   //
-  // PIECE M -- THE TWO THINGS THE RACE DOES THAT ARE NOT TYPING.
-  //
-  // Everything else on this screen is the fact, the field and the road. The two
-  // ACTIONS a child can take that are not an answer are the pit crew and the
-  // way out, both of them keys, and neither had anywhere to click: the maintainer
-  // could open a race with a mouse in his hand and there was not one pixel of it
-  // that did anything. They are laid out where the pit-crew line already stood
-  // and in the same quiet type -- this is the one screen where nothing may
-  // compete with the fact -- and each one calls the exact branch of `keys`
-  // above that its key calls.
-  //
-  // The hint text is unchanged. Design v4.1 asks for these to be drawn as key
-  // caps (`[H] PIT CREW · shows the answer`) and that is piece F's line to
-  // redraw; this piece gives them a target and a hover state and leaves the
-  // words where it found them.
+  // THE TWO THINGS THE RACE DOES THAT ARE NOT TYPING, drawn as KEY CAPS.
+  // Design v4.1, Accessibility: "Key hints in the race are drawn as key caps,
+  // the way the garage draws them: `[H] PIT CREW · shows the answer`". The
+  // maintainer read `H  PIT CREW` as cryptic (`docs/open-questions.md` §5.3.7);
+  // `ui/parts/KeyHint.qml`'s `cap` is the garage's own construction, and the
+  // clause after the mid-dot says what the key does in words a child reads.
+  // Each one calls the exact function its key's branch calls.
   Column {
     anchors.left: parent.left
     anchors.leftMargin: race.px(30)
     anchors.bottom: parent.bottom
     anchors.bottomMargin: race.px(28)
-    // ROUND 5 -- TEN PIXELS, AND THEY ARE THE ONLY PIXELS THIS PIECE MOVES ON
-    // THIS SCREEN.
-    //
     // Two DESTRUCTIVE controls, one above the other, and the lower one abandons
-    // the race. Measured at 1024 x 600 they were 16 px tall and 3 px apart: a
-    // critic's sentence was "he will hit the wrong one", and he is right --
-    // that is a 35 px column holding two irreversible presses. The targets are
-    // 24 px square at minimum now (`ui/parts/KeyHint.qml`), which needs at least
-    // eight pixels between the words or the two hit areas grow into each other
-    // and the pointer is on the one the child is not reading. `test_44` refuses
-    // that overlap; this is the room it needs, floored so it survives the small
-    // window rather than scaling away in it.
-    spacing: Math.max(10, race.px(6))
+    // the race. The targets are 24 px square at minimum (`ui/parts/KeyHint.qml`),
+    // which needs room between the words or the two hit areas grow into each
+    // other and the pointer is on the one the child is not reading.
+    spacing: Math.max(10, race.px(8))
 
     KeyHint {
       id: pitCrewHint
       keys: "H"
       action: "PIT CREW"
+      sub: "shows the answer"
+      cap: true
       textSize: race.fs(17)
       letterSpacing: 2
       padWidth: race.px(16)
       padHeight: race.px(9)
+      idleColor: Theme.text
       name: "Pit crew"
       does: "show the answer and move on"
       key: "H"
       help: "Shows the answer and moves on. The H key does it too."
-      // ROUND 4 -- THIS SPENDS SOMETHING THE CHILD CANNOT GET BACK.
-      //
-      // A critic clicked it three times, sixteen milliseconds apart, and
-      // watched `pitCrewCount` go 0 -> 1 -> 3 with `refusedRepeats` at zero.
-      // The pit crew consumes the question in front of the child, adds to the
-      // count the results screen prints as ANSWERS SHOWN, and feeds the
-      // standings tiebreak in `engine/engine.mjs`. There is no undo, and it is
-      // the OTHER control in this game that stays exactly where it is after it
-      // acts -- so the second half of a double-click always reaches it.
-      //
-      // It was not marked, and `test_19` walks `Clickable.destructive`, so an
-      // unmarked destructive control was not merely untested: it was outside
-      // the test's subject. The declaration is a hand-set boolean and that is
-      // still true; what is new is that a destructive control with no guard now
-      // fails `test_30` rather than passing quietly.
+      // THIS SPENDS SOMETHING THE CHILD CANNOT GET BACK. The pit crew consumes
+      // the question in front of the child, adds to the count the results
+      // screen prints as ANSWERS SHOWN, and feeds the standings tiebreak. There
+      // is no undo, and it stays exactly where it is after it acts -- so the
+      // second half of a double-click always reaches it, and it is guarded.
       destructive: true
       guards: ["pitCrew"]
-      // ROUND 5. Not "the same calls the `H` branch makes" -- THE SAME
-      // FUNCTION. The prose version of this claim was false for a whole round:
-      // it made three calls of four and dropped `clearRevealQueue()`, so a
-      // child who typed at a revealed answer and then CLICKED for help had those
-      // digits replayed into the next fact, where the `H` key dropped them. See
-      // the block above `pitCrewRequested()`.
+      // THE SAME FUNCTION the `H` branch calls, not the same calls: the prose
+      // version of that claim was false for a whole round.
       onTapped: race.pitCrewRequested()
     }
 
-    // PIECE M ROUND 2 -- THE LABEL FOLLOWS THE BEHAVIOUR.
-    //
-    // This control read `ESC  LEAVE` and, with a card chosen, put the card back
-    // instead of leaving. The overload is Escape's own and it is right -- back
-    // one is back one, at every moment of the game -- but on the keyboard the
-    // picker's footer prints `ESC  BACK` while the card is chosen and says so.
-    // The mouse user reads the button, and the button said the other thing. So
-    // the words change with the meaning, and so does the parity table's `does`
-    // column, and so does whether this is a control that throws something away:
-    // putting a card back costs nothing and is not guarded; leaving a race
-    // cannot be undone and is.
     KeyHint {
       id: leaveHint
-      readonly property bool putsCardBack: picker.chosen >= 0
       keys: "ESC"
-      action: leaveHint.putsCardBack ? "BACK" : "LEAVE"
+      action: "LEAVE"
+      cap: true
       textSize: race.fs(17)
       letterSpacing: 2
       padWidth: race.px(16)
       padHeight: race.px(9)
-      name: leaveHint.putsCardBack ? "Put the card back" : "Leave the race"
-      does: leaveHint.putsCardBack ? "put the chosen card back"
-                                   : "go back to the garage"
+      idleColor: Theme.text
+      name: "Leave the race"
+      does: "go back to the garage"
       key: "Escape"
-      // DESTRUCTIVE WHATEVER IT SAYS TODAY, and the repeat sweep is why.
-      //
-      // Three clicks 16 ms apart on `ESC  BACK` put the card back with the
-      // first and LEFT THE RACE with the second: the control changed its
-      // meaning under the pointer, and the half of the double-click nobody
-      // meant to send arrived at the new meaning. A guard that switched off
-      // while the label said BACK would be a guard that was off at exactly the
-      // moment it was needed. This control can leave a race -- sometimes on its
-      // second press -- so it is guarded on every press, and the `does` column
-      // goes on telling the truth about what ONE press does.
+      // Leaving a race cannot be undone. `escape` is the name the Escape key's
+      // branch takes too, so a key and a click inside one double-click interval
+      // are one gesture whichever hand made them.
       destructive: true
-      // ROUND 4. `escape` is the BACK-OUT GESTURE and not this control: the hand
-      // panel's own `ESC  BACK` chip performs the same thing, and so does the
-      // Escape key in the branch above. One name, one guard, three routes --
-      // which is what stops a click here followed by an Escape, an Escape
-      // followed by a click here, or a double-click that walks onto the chip
-      // that took this one's place, from leaving a race the child was in the
-      // middle of. Round three read `leaveHint.guarding` from the key handler to
-      // patch one of those three; this is the fix that note deferred.
-      //
-      // ROUND 5. The pair comes from `picker.backOutGuards`, which is where the
-      // hand panel's own chip and both Escape key handlers read it from: with a
-      // card chosen this press REDRAWS THE HAND FOOTER, so the gesture belongs
-      // to `handFooter` as well, whichever hand performs it.
-      guards: picker.backOutGuards
-      help: leaveHint.putsCardBack
-            ? "Puts the chosen card back. All three cards are still yours."
-              + " The Escape key does it too."
-            : "Back to the garage. The Escape key does it too."
-      // ROUND 5. Escape's own branch, and the same function it calls.
-      onTapped: race.backOutRequested()
+      guards: ["escape"]
+      help: "Back to the garage. The Escape key does it too."
+      onTapped: race.leaveNow()
     }
   }
 }
