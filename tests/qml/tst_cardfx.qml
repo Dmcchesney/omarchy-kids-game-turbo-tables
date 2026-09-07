@@ -109,9 +109,10 @@ TestCase {
     compare(CardFx.BEATS.pothole.dipPx, 2)
     compare(CardFx.BEATS.pothole.bounces, 2)
 
-    // "Pile-Up ... Telegraph 600: the sky flashes amber twice ... hit-stop 120,
-    //  then 300 at half speed"
-    compare(CardFx.BEATS.pileUp.telegraph, 600)
+    // "Pile-Up ... Telegraph 900 (v4.1; was 600): the sky flashes amber twice,
+    //  at 0 and at 450 ... hit-stop 120, then 300 at half speed". The 900 is a
+    //  recorded maintainer decision (docs/open-questions.md, section 4).
+    compare(CardFx.BEATS.pileUp.telegraph, 900)
     compare(CardFx.BEATS.pileUp.hitStop, 120)
     compare(CardFx.BEATS.pileUp.impact, 300)
     compare(CardFx.BEATS.pileUp.slowMo, 0.5)
@@ -139,12 +140,14 @@ TestCase {
   // Design, Accessibility: "nothing flashes faster than 3 Hz". Every repeating
   // thing in this piece is checked against it, in Hz, from its own period.
   function test_04_nothing_in_this_piece_repeats_faster_than_3_hz() {
-    // Pile-Up's "the sky flashes amber twice". Two flashes inside a 600 ms
-    // telegraph would be 3.3 Hz, which is over the cap, so the view spaces them
-    // 340 ms apart. That number lives in ui/TrackView.qml (`fxSkyGap`) and is
-    // asserted against the picture in tst_trackview_fx.qml; here is the rule it
-    // has to satisfy.
-    var skyGap = 340
+    // Pile-Up's "the sky flashes amber twice, at 0 and at 450", with the impact
+    // at 900: no two whole-frame changes within 333 ms. That number lives in
+    // ui/TrackView.qml (`fxSkyGap`) and is asserted against the picture in
+    // tst_trackview_fx.qml; here is the rule it has to satisfy, and the
+    // decision it has to match.
+    var skyGap = 450
+    compare(CardFx.BEATS.pileUp.telegraph - skyGap, 450,
+            "the impact stands 450 after the second swing, as decided")
     verify(1000 / skyGap <= 3.0,
            "the Pile-Up sky flash repeats at " + (1000 / skyGap).toFixed(2) + " Hz")
 

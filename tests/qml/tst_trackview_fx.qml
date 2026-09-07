@@ -1299,6 +1299,111 @@ Item {
       var gap = peaks[1] - peaks[0]
       verify(1000 / gap <= 3.0,
              "and " + gap + " ms apart is " + (1000 / gap).toFixed(2) + " Hz, under the cap")
+      // ROUND 8: the decided numbers, off the screen. Each swing is a 280 ms
+      // bump peaking 140 in, so onsets at 0 and 450 are peaks at 140 and 590;
+      // the impact lands at 900 and nowhere earlier.
+      verify(Math.abs(peaks[0] - 140) <= 10, "the first swing starts at 0: peak " + peaks[0])
+      verify(Math.abs(peaks[1] - 590) <= 10, "the second starts at 450: peak " + peaks[1])
+      compare(gap, 450, "450 apart, as the maintainer decided")
+      verify(track.fxSkyFlash === 0, "and the sky is quiet again before the impact")
+      compare(CardFx.BEATS.pileUp.telegraph, 900, "which lands at 900")
+    }
+
+    // ROUND 8, D3. THE CALLOUT NEVER SITS ON A KART. Round 7's box ended 13,
+    // 8 and 4 px into the far karts' cells at the three sizes, and round 8's
+    // first cut -- a smaller box under the line -- ended 8, 13 and 9 px into
+    // them once the rivals were put where a critic puts them: FAR ahead.
+    // `TrackView.zForDelta` saturates past four questions, so a rival thirty
+    // questions ahead is drawn at a fixed spot just under the horizon (at
+    // 1024x600 its cell's top is above the horizon), and that is the cell the
+    // box has to clear. Rivals are put 8 and 30 questions ahead through the
+    // engine's own position fields, the Pile-Up is played, and on twelve
+    // frames at 60 ms the box is measured against every kart cell that is
+    // drawn, against the horizon, and against the line's ink.
+    function rivalsAhead(questions) {
+      var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
+      var next = stepped.state
+      var qpl = next.questionsPerLap
+      var human = null
+      for (var h = 0; h < next.racers.length; h++)
+        if (next.racers[h].id === next.humanId)
+          human = next.racers[h]
+      var eff = human.lapsComplete * qpl + human.correctInLap + questions
+      for (var r = 0; r < next.racers.length; r++) {
+        if (next.racers[r].id === next.humanId)
+          continue
+        next.racers[r].lapsComplete = Math.floor(eff / qpl)
+        next.racers[r].correctInLap = eff % qpl
+        next.racers[r].questionsNeededThisLap = qpl
+        next.racers[r].finished = false
+      }
+      race.state = next
+    }
+
+    function test_11b_the_pile_up_callout_stays_clear_of_every_kart() {
+      var sizes = [[1920, 1080], [1366, 768], [1024, 600]]
+      var aheads = [8, 30]
+      var worst = 1e9
+      for (var i = 0; i < sizes.length; i++) {
+        for (var a = 0; a < aheads.length; a++) {
+          root.width = sizes[i][0]
+          root.height = sizes[i][1]
+          wait(50)
+          race.seed = 42
+          race.buildRace()
+          preroll()
+          rivalsAhead(aheads[a])
+          race.injectEvent("cardUsed", "pileUp")
+          var label = sizes[i][0] + "x" + sizes[i][1] + " rivals " + aheads[a] + " ahead"
+          var callouts = []
+          root.walk(race, function (item) {
+            if (String(item.objectName) === "callout")
+              callouts.push(item)
+          })
+          compare(callouts.length, 1, label + ": one callout")
+          var callout = callouts[0]
+          verify(callout.big, label + ": the Pile-Up's callout is the big one")
+          verify(callout.showing, label + ": and it is showing: " + callout.text)
+          var horizonY = track.horizon * root.height
+          var kartsSeen = 0
+          // Twelve frames at 60 ms, the strip the critic measured.
+          for (var f = 0; f < 12; f++) {
+            var box = callout.mapToItem(root, 0, 0, callout.width, callout.height)
+            verify(box.y + box.height <= horizonY,
+                   label + " frame " + f + ": the box ends at " + Math.round(box.y + box.height)
+                   + ", under the horizon at " + Math.round(horizonY))
+            verify(box.y + box.height <= race.lineInkRect.y,
+                   label + " frame " + f + ": the box ends at " + Math.round(box.y + box.height)
+                   + ", on the line's ink, which begins at " + Math.round(race.lineInkRect.y))
+            verify(box.y >= 0, label + ": the box is on the screen")
+            root.walk(race, function (item) {
+              var name = String(item.objectName)
+              if (name.indexOf("kart.") !== 0 || !root.drawn(item))
+                return
+              kartsSeen += 1
+              var kart = item.mapToItem(root, 0, 0, item.width, item.height)
+              var clear = kart.y - (box.y + box.height)
+              if (clear < worst)
+                worst = clear
+              verify(!root.overlaps(box, kart),
+                     label + " frame " + f + ": the callout " + JSON.stringify(box)
+                     + " sits on " + name + " " + JSON.stringify(kart))
+            })
+            race.stepClock(60)
+          }
+          verify(kartsSeen >= 12 * 2,
+                 label + ": only " + kartsSeen + " kart cells were drawn across the strip;"
+                 + " the rivals are not on the screen, so nothing was measured")
+          console.log("CALLOUT " + label + ": big box " + JSON.stringify(
+                        callout.mapToItem(root, 0, 0, callout.width, callout.height))
+                      + " horizon y " + Math.round(horizonY)
+                      + " line ink y " + Math.round(race.lineInkRect.y))
+        }
+      }
+      console.log("CALLOUT worst clearance above a kart cell: " + worst + " px")
+      verify(worst >= 3, "the callout clears every kart cell by at least 3 px: " + worst)
+      root.width = 1920
+      root.height = 1080
     }
 
     // ROUND 4 -- THE THIRD BEAT EXISTS AND IT DOES NOT GO OUT.

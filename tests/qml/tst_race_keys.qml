@@ -19,6 +19,16 @@ import "../../engine/engine.mjs" as Engine
 //   Space          fires the highlighted card (nothing with no hand)
 //   Escape         only ever leaves the race
 //
+// PIECE F ROUND 8 adds the rule under the key: the panel REQUESTS a play and
+// the engine's own `cardUsed` is what slams, sounds, resets the highlight and
+// counts as a card played. So Space after the child has finished, Space while
+// the deal is still drawing the cards, and Space on a targeted card with no
+// rival left each change nothing at all and arm no guard (test_24 to test_26);
+// `POWER-UP READY` reads on the charge bar at the deal (test_27); the pit
+// crew's reveal holds digits like the wrong answer's (test_28); browsing the
+// cards keeps the aim (test_29); and a three-digit answer is typed in full on
+// the line with a hand held (test_30, the case round 7 dropped).
+//
 // Every case below is one row of that table, and every row is a claim that
 // fails if the rule is changed: the first case is the strip the plan names --
 // `1` on `2 × 3` with a hand held is a wrong answer and no card -- and it is
@@ -137,6 +147,12 @@ Item {
         guard += 1
       }
       compare(race.hand.length, 3, "a hand of three is held")
+      // ROUND 8: the deal takes 672 ms to draw the cards and Space does
+      // nothing until they are drawn. Every case below that fires starts once
+      // the hand is a hand the child can see; test_25 is the one that presses
+      // Space BEFORE that on purpose.
+      tryVerify(function () { return !race.handPanel.dealing }, 3000,
+                "the deal finished drawing the cards")
     }
 
     // Walk forward with the pit crew until the fact on screen has the answer we
@@ -149,6 +165,11 @@ Item {
         guard += 1
       }
       verify(wanted(tc.answerString()), "reached a fact whose answer fits the shape")
+      // ROUND 8: the pit crew's 1200 ms reveal holds digits exactly as the
+      // wrong answer's does, so a case that types the moment it arrives would
+      // be typing into the queue. Every case starts on a line that is back.
+      tryVerify(function () { return !race.holdsForReveal() }, 3000,
+                "the pit crew's reveal cleared the line")
     }
 
     function streakTo(n) {
@@ -832,6 +853,261 @@ Item {
       verify(!race.injectEvent("fireCard", "1"), "and with no hand it refuses")
     }
 
+    // ---------------------------------------------------------------------
+    // ROUND 8. THE PANEL DOES NOT DECIDE A CARD WAS SPENT; THE ENGINE DOES.
+    // ---------------------------------------------------------------------
+
+    // Mark the child finished, the way `stall()` marks the field locked: a
+    // step through the engine's own reducer, then the one flag. A finished
+    // racer "cannot attack and cannot be attacked".
+    function finishTheChild() {
+      var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
+      var next = stepped.state
+      for (var i = 0; i < next.racers.length; i++) {
+        if (next.racers[i].id === next.humanId)
+          next.racers[i].finished = true
+      }
+      race.state = next
+      verify(race.human.finished, "the child has crossed the line")
+    }
+
+    // Every rival home, so a targeted card has nobody left to aim at.
+    function finishEveryRival() {
+      var stepped = Engine.step(race.state, { "kind": "tick" }, race.clockNow())
+      var next = stepped.state
+      for (var i = 0; i < next.racers.length; i++) {
+        if (next.racers[i].id !== next.humanId)
+          next.racers[i].finished = true
+      }
+      race.state = next
+      compare(race.liveRivals.length, 0, "no rival is left in the fight")
+    }
+
+    function cardsUsedByChild() { return race.human.cardsUsed.length }
+
+    // K9. Space after the child has finished: the hand stays, no slam plays,
+    // no sound plays, nothing counts as played, and no guard is armed. Round 7
+    // slammed, sounded, emitted `cardUsed`, and drew the hand back 570 ms
+    // later when the engine refused.
+    function test_24_space_after_the_finish_fires_nothing_and_says_nothing() {
+      tc.fresh(129)
+      tc.dealHand()
+      tc.finishTheChild()
+      Sfx.logging = true
+      Sfx.clearLog()
+      var before = tc.snap()
+      var armedBefore = JSON.stringify(Actions.armed)
+      var usedBefore = tc.cardsUsedByChild()
+      verify(!race.canFire, "a finished child's hand cannot be fired")
+      tc.press("S")
+      var after = tc.snap()
+      tc.row("K9", "child finished, hand held, Space", "S", before, after)
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "Space after the finish changed the race: " + JSON.stringify(after))
+      compare(after.hand, 3, "K9: the hand stays")
+      compare(root.cardsPlayed, 0, "K9: nothing was played")
+      compare(tc.cardsUsedByChild(), usedBefore, "K9: the engine took no card")
+      verify(!race.handPanel.slamming, "K9: no slam plays")
+      compare(Sfx.log.indexOf("slam"), -1, "K9: no slam sound: " + JSON.stringify(Sfx.log))
+      compare(JSON.stringify(Actions.armed), armedBefore,
+              "K9: a refused Space armed a guard: " + JSON.stringify(Actions.armed))
+      // 700 ms later the hand is still the same three cards, drawn, not re-dealt.
+      wait(700)
+      compare(race.hand.length, 3)
+      verify(!race.handPanel.slamming)
+      // And the panel says why, in the words a screen reader hears.
+      verify(String(race.handPanel.Accessible.description).indexOf("finished") >= 0,
+             "the panel says the race is over for this hand: "
+             + race.handPanel.Accessible.description)
+      verify(race.handPanel.footerText.indexOf("USE") < 0,
+             "and the USE chip is not printed: " + race.handPanel.footerText)
+      Sfx.logging = false
+    }
+
+    // K7. Space while the deal is still drawing the cards does nothing; the
+    // same press once they are drawn fires. Round 7 fired Nitro at dealT = 45 ms
+    // with all three cards under the panel at opacity zero.
+    function test_25_space_during_the_deal_waits_for_the_cards() {
+      tc.fresh(130)
+      tc.streakTo(race.state.streakThreshold - 1)
+      compare(race.hand.length, 0, "no hand yet")
+      Sfx.logging = true
+      Sfx.clearLog()
+      // The twelfth: the hand is dealt on this press and the deal begins.
+      tc.answerNow()
+      compare(race.hand.length, 3, "the twelfth dealt the hand")
+      verify(race.handPanel.dealing, "and the cards are still sliding up: dealT = "
+             + race.handPanel.dealT)
+      var armedBefore = JSON.stringify(Actions.armed)
+      var before = tc.snap()
+      tc.press("S")
+      var after = tc.snap()
+      tc.row("K7", "Space on the frame the hand was dealt", "S", before, after)
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "Space during the deal changed the race: " + JSON.stringify(after))
+      compare(root.cardsPlayed, 0, "K7: nothing fired while the cards were being drawn")
+      compare(race.hand.length, 3, "K7: the hand is intact")
+      verify(!race.handPanel.slamming, "K7: no slam")
+      compare(Sfx.log.indexOf("slam"), -1, "K7: no slam sound")
+      compare(JSON.stringify(Actions.armed), armedBefore, "K7: nothing armed")
+      // The cards arrive; now the same key fires.
+      tryVerify(function () { return !race.handPanel.dealing }, 3000, "the deal finished")
+      tc.press("S")
+      compare(root.cardsPlayed, 1, "K7: Space fires once the cards are drawn")
+      compare(race.hand.length, 0, "and the hand is spent")
+      verify(race.handPanel.slamming, "and the slam is playing -- on the engine's answer")
+      verify(Sfx.log.indexOf("slam") >= 0, "with its sound")
+      Sfx.logging = false
+    }
+
+    // K8. A targeted card with every rival home: Space fires nothing and, unlike
+    // round 7, arms nothing.
+    function test_26_a_stranded_space_arms_no_guard() {
+      tc.fresh(131)
+      tc.dealHand()
+      var slot = tc.targetedSlot()
+      verify(slot >= 0)
+      tc.highlightSlot(slot)
+      tc.finishEveryRival()
+      verify(race.handPanel.strandedTarget, "the card has nobody to aim at")
+      verify(!race.canFire)
+      var armedBefore = JSON.stringify(Actions.armed)
+      var before = tc.snap()
+      tc.press("S")
+      var after = tc.snap()
+      tc.row("K8", "targeted card, every rival finished, Space", "S", before, after)
+      compare(JSON.stringify(after), JSON.stringify(before),
+              "a stranded Space changed the race: " + JSON.stringify(after))
+      compare(root.cardsPlayed, 0, "K8: nothing fired")
+      compare(JSON.stringify(Actions.armed), armedBefore,
+              "K8: a stranded Space armed a guard: " + JSON.stringify(Actions.armed))
+      // A self card in the same hand still fires: the child is not finished.
+      tc.highlightSlot(0)
+      verify(race.canFire, "a self card can still be fired")
+      tc.press("S")
+      compare(root.cardsPlayed, 1)
+    }
+
+    // D2. `POWER-UP READY` reads on the charge bar at the instant of the deal,
+    // although the streak is already back to zero, and stops reading after
+    // the beat. Read off the Text items the bar draws.
+    function chargeTexts() {
+      var out = []
+      var texts = tc.textsOn(race)
+      for (var i = 0; i < texts.length; i++)
+        if (texts[i].indexOf("POWER-UP") >= 0 || texts[i].indexOf("/ 12") >= 0
+            || texts[i].indexOf("HAND HELD") >= 0)
+          out.push(texts[i])
+      return out
+    }
+
+    function test_27_power_up_ready_reads_on_the_charge_bar_at_the_deal() {
+      tc.fresh(132)
+      tc.streakTo(race.state.streakThreshold - 1)
+      verify(tc.chargeTexts().indexOf("POWER-UP READY") < 0,
+             "eleven does not read READY: " + JSON.stringify(tc.chargeTexts()))
+      tc.answerNow()
+      compare(race.hand.length, 3, "the twelfth dealt the hand")
+      compare(race.human.streak, 0, "and the streak is back to zero in the same step")
+      var atDeal = tc.chargeTexts()
+      console.log("CHARGE AT THE DEAL: " + JSON.stringify(atDeal))
+      verify(atDeal.indexOf("POWER-UP READY") >= 0,
+             "the bar reads POWER-UP READY at the deal: " + JSON.stringify(atDeal))
+      verify(atDeal.indexOf("HAND HELD  ·  12") < 0, "and not HAND HELD")
+      // It reads once: gone after the beat, back to the count.
+      tryVerify(function () { return tc.chargeTexts().indexOf("POWER-UP READY") < 0 }, 4000,
+                "the words leave after the beat")
+      verify(tc.chargeTexts().indexOf("0 / 12") >= 0,
+             "and the count is back: " + JSON.stringify(tc.chargeTexts()))
+    }
+
+    // D9. A digit pressed into the pit crew's reveal waits for the line exactly
+    // as one pressed into the wrong answer's does, and is replayed when it
+    // comes back.
+    function test_28_the_pit_crew_reveal_holds_digits_too() {
+      tc.fresh(133)
+      tc.hintUntil(function (a) { return a.length === 2 })
+      tc.pressKey(Qt.Key_H)
+      verify(race.holdsForReveal(), "the pit crew's reveal holds the line")
+      verify(race.revealText.length > 0, "and the line is showing the answer: " + race.revealText)
+      var afterH = tc.snap()
+      var next = tc.answerString()
+      tc.press(next.charAt(0))
+      var held = tc.snap()
+      compare(race.revealQueue.length, 1, "the digit is waiting, not scored")
+      compare(held.attempts, afterH.attempts,
+              "no attempt was recorded against a fact the line is not showing")
+      compare(held.entry, "", "and the field is empty while the line is away")
+      tryVerify(function () { return !race.holdsForReveal() }, 3000, "the line came back")
+      compare(race.revealQueue.length, 0, "the digit was replayed")
+      verify(race.shownEntry === next.charAt(0) || race.human.attemptCount > held.attempts,
+             "and it landed on the fact the line now shows: entry '"
+             + race.shownEntry + "', attempts " + race.human.attemptCount)
+    }
+
+    // D8. Down to the second rival, Right to a self card, Left back: the aim is
+    // where the child put it. Round 7 forgot it on every highlight change.
+    function test_29_browsing_the_cards_keeps_the_aim() {
+      tc.fresh(134)
+      tc.dealHand()
+      var slot = tc.targetedSlot()
+      verify(slot >= 0)
+      tc.highlightSlot(slot)
+      verify(race.handPanel.targeting)
+      tc.press("v")
+      compare(race.handPanel.targetIndex, 1, "Down aims at the second rival")
+      var aimed = race.handPanel.targetId
+      tc.press(">")
+      verify(!race.handPanel.targeting, "Right is on a self card")
+      compare(race.aimedRivalId, "", "and nothing is ringed while it is")
+      tc.press("<")
+      compare(race.handPanel.highlighted, slot, "Left is back on the targeted card")
+      compare(race.handPanel.targetIndex, 1, "and the aim is still the second rival")
+      compare(race.handPanel.targetId, aimed)
+      compare(race.aimedRivalId, aimed, "and the ring is back on it")
+      tc.press("<>")
+      compare(race.handPanel.targetIndex, 1, "round the hand and back, still aimed")
+      compare(root.cardsPlayed, 0)
+    }
+
+    // D12. A three-digit answer with a hand held: three digits, on the line,
+    // scored once on the third, hand intact -- and the same with no hand.
+    function test_30_three_digit_answers_are_typed_in_full_on_the_line() {
+      tc.fresh(135)
+      tc.dealHand()
+      tc.streakTo(1)
+      tc.hintUntil(function (a) { return a.length === 3 })
+      var label = Engine.factLabel(race.human.currentFact)
+      var before = tc.snap()
+      tc.press(before.answer.charAt(0))
+      tc.press(before.answer.charAt(1))
+      var mid = tc.snap()
+      compare(mid.entry, before.answer.substring(0, 2), "two digits are in the field")
+      compare(tc.lineNoCaret(), label + " = " + before.answer.substring(0, 2),
+              "and on the line: " + race.lineText)
+      compare(mid.attempts, before.attempts, "nothing is scored yet")
+      compare(mid.hand, 3, "the hand is intact")
+      tc.press(before.answer.charAt(2))
+      var after = tc.snap()
+      tc.row("D12", "3-digit answer typed in full, hand held", before.answer, before, after)
+      compare(after.streak, before.streak + 1, "D12: accepted as the answer on the third digit")
+      compare(after.attempts, before.attempts + 1, "D12: scored once")
+      compare(after.hand, 3, "D12: the hand was not spent")
+      compare(after.cards - before.cards, 0, "D12: no card was played")
+      compare(after.entry, "", "D12: the field cleared for the next fact")
+
+      // And with no hand.
+      tc.fresh(136)
+      tc.hintUntil(function (a) { return a.length === 3 })
+      var b2 = tc.snap()
+      tc.press(b2.answer)
+      var a2 = tc.snap()
+      tc.row("D12b", "3-digit answer typed in full, no hand", b2.answer, b2, a2)
+      compare(a2.streak, b2.streak + 1, "D12b: accepted")
+      compare(a2.attempts, b2.attempts + 1, "D12b: scored once")
+      compare(a2.hand, 0)
+    }
+
     // The failure mode `pressKey()` exists for, and the reason every other row
     // in this file can be trusted.
     function test_22_a_keystroke_with_the_focus_elsewhere_reaches_nothing() {
@@ -857,6 +1133,7 @@ Item {
 
     function cleanup() {
       race.externalClock = false
+      Sfx.logging = false
       race.forceActiveFocus()
     }
   }

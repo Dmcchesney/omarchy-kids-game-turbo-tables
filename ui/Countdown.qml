@@ -88,6 +88,15 @@ FocusScope {
   // an array of small integers rather than as text so nothing here builds a
   // string, and read by the flow the instant `finished()` fires.
   property var typedAhead: []
+  // The same digits as the line draws them: `5`, `56`, `560`. Built by
+  // appending one small integer at a time, which is what the answer slot's
+  // `LitWord` takes.
+  readonly property string typedText: {
+    var text = ""
+    for (var i = 0; i < countdown.typedAhead.length; i++)
+      text += countdown.typedAhead[i]
+    return text
+  }
 
   function restart() {
     countdown.beat = 0
@@ -285,7 +294,7 @@ FocusScope {
       // problem, and `factYield` is the view's own measurement of how much of
       // one there is. The plate below reads it, so the countdown and the race
       // put the same ground under the same glyphs on the same frame.
-      factRect: countdown.factInkRect
+      factRect: countdown.lineGuardRect
     }
   }
 
@@ -436,9 +445,26 @@ FocusScope {
   // the frame and nothing is claimed about clearance.
   readonly property real typeMargin: countdown.px(30)
   readonly property real typeColumnL: countdown.typeMargin
-  readonly property real typeColumnR: (countdown.archStands
-                                       ? countdown.gantryLeftX
-                                       : countdown.width * 0.5) - countdown.typeMargin
+  // ROUND 8: AND THE LINE'S PLATE BOUNDS IT TOO. The countdown draws the whole
+  // line now -- `7 × 8 = ▮`, the fact through a slot the width of the widest
+  // answer -- centred where the race centres it, and that line is wider than
+  // the fact alone by the slot: 616 px at 1366 x 768 against 350. Its left
+  // edge therefore stands 53 px INSIDE the column GO was fitted to at that
+  // size (77 at 1920 x 1080, 44 at 1024 x 600), and on the GO beat the two
+  // words overlapped. The line cannot move: where it stands is the claim
+  // this screen makes about the cut. So GO is fitted to the sky left of
+  // whichever is nearer, the arch's box or the line's plate, with a `px(12)`
+  // gap to the plate's edge (the arch keeps its `typeMargin`, which is for the
+  // flags' art). The counted beats are single glyphs fitted by height and do
+  // not reach either bound; GO is fitted by width and is smaller for it --
+  // 18% of the frame in this runner's face against 23% before, which is
+  // still over the 21.7% round 2 shipped; `tests/qml/tst_countdown_board.qml`
+  // carries the arithmetic under `test_03`.
+  readonly property real linePlateLeftX: countdown.lineGuardRect.x - countdown.px(22)
+  readonly property real typeColumnR: Math.min((countdown.archStands
+                                                ? countdown.gantryLeftX
+                                                : countdown.width * 0.5) - countdown.typeMargin,
+                                               countdown.linePlateLeftX - countdown.px(12))
   readonly property real typeColumnW: Math.max(24, countdown.typeColumnR - countdown.typeColumnL)
   readonly property real typeColumnX: (countdown.typeColumnL + countdown.typeColumnR) / 2
 
@@ -510,12 +536,14 @@ FocusScope {
   // height in ink; those three lines are copied here on purpose and the round's
   // report measures the two boxes against each other on the shipped frames. A
   // child reading `1 x 6` through the cut sees it not move at all.
+  // ROUND 8: the widest LINE, not the widest fact -- `ui/Race.qml`'s own
+  // probe string -- because the countdown draws the whole line now.
   TextMetrics {
     id: factWidest
     font.family: Theme.mono
     font.bold: true
     font.pixelSize: 200
-    text: "12 × 12"
+    text: "12 × 12 = 144"
   }
   readonly property real factInkRatio: factWidest.tightBoundingRect.height > 0
                                        ? factWidest.tightBoundingRect.height / 200
@@ -546,10 +574,30 @@ FocusScope {
   }
   readonly property rect factInkRect: {
     var r = factInkNow.tightBoundingRect
-    return Qt.rect(factGlyph.x + factWord.x + r.x,
-                   factGlyph.y + factWord.y + factFaceMetrics.ascent + r.y,
+    return Qt.rect(factGlyph.x + line.x + factWord.x + r.x,
+                   factGlyph.y + line.y + factWord.y + factFaceMetrics.ascent + r.y,
                    r.width, r.height)
   }
+  // The whole line's ink AS DRAWN -- the fact through the caret or the last
+  // typed digit -- and its RESERVE, the fact through the full answer slot.
+  // The same two boxes `ui/Race.qml` publishes, for the same two readers: the
+  // plate under the line answers for the ink, and the view's `factRect` keeps
+  // the reserve clear.
+  readonly property rect lineInkRect: Qt.rect(countdown.factInkRect.x, countdown.factInkRect.y,
+                                              (factGlyph.x + line.x + answerSlot.x
+                                               + Math.max(caretMark.x + caretMark.width,
+                                                          answerWord.width))
+                                              - countdown.factInkRect.x,
+                                              countdown.factInkRect.height)
+  readonly property rect lineGuardRect: Qt.rect(countdown.factInkRect.x, countdown.factInkRect.y,
+                                                (factGlyph.x + line.x + answerSlot.x + answerSlot.width)
+                                                - countdown.factInkRect.x,
+                                                countdown.factInkRect.height)
+  // THE LINE, AS IT READS: `7 × 8 = ▮` on the GO beat, `7 × 8 = 5▮` once a
+  // digit has been typed ahead. The same construction as `Race.lineText`, so
+  // the line the child is told to TYPE THE ANSWER on is the line they type on.
+  readonly property string lineText: factWord.words + " " + answerWord.words
+                                     + (caretMark.visible ? "▮" : "")
 
   // What the spec reads back: where this screen's ink actually landed, and the
   // lines it had to clear. `tests/qml/tst_countdown_board.qml` asserts the
@@ -755,20 +803,28 @@ FocusScope {
       enabled: !countdown.reducedMotion
       NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
     }
-    x: countdown.factInkRect.x - countdown.px(22)
-    y: countdown.factInkRect.y - countdown.px(14)
-    width: countdown.factInkRect.width + countdown.px(44)
-    height: countdown.factInkRect.height + countdown.px(28)
+    x: countdown.lineInkRect.x - countdown.px(22)
+    y: countdown.lineInkRect.y - countdown.px(14)
+    width: countdown.lineInkRect.width + countdown.px(44)
+    height: countdown.lineInkRect.height + countdown.px(28)
     radius: Theme.cornerRadiusSmall
     color: Qt.rgba(0.235, 0.071, 0.157, 0.80)
   }
 
+  // ROUND 8: THE LINE, NOT THE FACT. Round 7 drew `7 × 8` here with no
+  // `= ▮`, while the prompt bottom-left said TYPE THE ANSWER and the race a
+  // second later drew `7 × 8 = ▮` -- so the line the child was told to type on
+  // was not yet the line. This is the race's own construction (`ui/Race.qml`,
+  // "the line is one Row"): the fact with its equals sign, then a slot the
+  // width of the widest answer holding the typed-ahead digits and a block
+  // caret, in the fact's own type and treatment. The digits a child types on
+  // the GO beat land in the slot, exactly where they will be a second later.
   Item {
     id: factGlyph
     anchors.horizontalCenter: parent.horizontalCenter
     y: countdown.factTopY
-    width: factWord.width
-    height: factWord.height
+    width: line.width
+    height: line.height
     z: 4
 
     // One expression on every beat rather than two: before GO the fact is drawn
@@ -780,20 +836,90 @@ FocusScope {
       NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
     }
 
-    LitWord {
-      id: factWord
-      words: countdown.factText
-      // The four numbers `ui/Race.qml` hands the same part, at this screen's
-      // scale, so the glyphs on either side of the cut are the same glyphs.
-      size: countdown.factPixelSize
-      spacing: countdown.px(6)
-      drop: countdown.px(6)
-      contour: Math.max(2, countdown.px(5))
-      rimOffset: Math.max(1, Math.round(Math.max(2, countdown.px(5)) * 0.55))
-      faceTone: Theme.cream
-      shadowTone: countdown.inkShadow
-      bodyTone: countdown.inkBody
-      rimTone: countdown.inkRim
+    Row {
+      id: line
+      objectName: "factColumn"
+      x: 0
+      y: 0
+      spacing: countdown.px(28)
+
+      LitWord {
+        id: factWord
+        words: countdown.factText + " ="
+        // The four numbers `ui/Race.qml` hands the same part, at this screen's
+        // scale, so the glyphs on either side of the cut are the same glyphs.
+        size: countdown.factPixelSize
+        spacing: countdown.px(6)
+        drop: countdown.px(6)
+        contour: Math.max(2, countdown.px(5))
+        rimOffset: Math.max(1, Math.round(Math.max(2, countdown.px(5)) * 0.55))
+        faceTone: Theme.cream
+        shadowTone: countdown.inkShadow
+        bodyTone: countdown.inkBody
+        rimTone: countdown.inkRim
+      }
+
+      // The slot: three digits and a caret, whatever is typed, so `7 × 8 =`
+      // never slides as digits arrive.
+      Item {
+        id: answerSlot
+        objectName: "answerField"
+        width: answerProbe.advanceWidth + caretMark.width + countdown.px(8)
+        height: factWord.height
+        anchors.verticalCenter: parent.verticalCenter
+
+        TextMetrics {
+          id: answerProbe
+          font: factWord.faceFont
+          text: "144"
+        }
+        TextMetrics {
+          id: answerCap
+          font: factWord.faceFont
+          text: "8"
+        }
+
+        LitWord {
+          id: answerWord
+          x: 0
+          y: 0
+          words: countdown.typedText
+          size: countdown.factPixelSize
+          spacing: countdown.px(6)
+          drop: countdown.px(6)
+          contour: Math.max(2, countdown.px(5))
+          rimOffset: Math.max(1, Math.round(Math.max(2, countdown.px(5)) * 0.55))
+          faceTone: Theme.amberGlow
+          shadowTone: countdown.inkShadow
+          bodyTone: countdown.inkBody
+          rimTone: countdown.inkRim
+        }
+
+        // The block caret, as the race draws it, blinking at the race's 1.25 Hz
+        // from the GO beat; a steady block under reduced motion.
+        Rectangle {
+          id: caretMark
+          objectName: "caret"
+          x: answerWord.width + (countdown.typedAhead.length > 0 ? countdown.px(10) : 0)
+          y: factFaceMetrics.ascent + answerCap.tightBoundingRect.y
+          width: Math.max(6, Math.round(countdown.factPixelSize * 0.16))
+          height: Math.max(8, Math.round(answerCap.tightBoundingRect.height))
+          radius: 2
+          color: Theme.amberGlow
+          visible: caretBlink.on && countdown.typedAhead.length < 3
+          border.width: Math.max(1, countdown.px(2))
+          border.color: countdown.inkBody
+        }
+        Timer {
+          id: caretBlink
+          property bool on: true
+          interval: 400
+          repeat: true
+          running: countdown.visible && countdown.go && !countdown.reducedMotion
+          onRunningChanged: if (!running) caretBlink.on = true
+          onTriggered: caretBlink.on = !caretBlink.on
+        }
+      }
     }
   }
 
@@ -885,41 +1011,10 @@ FocusScope {
     }
   }
 
-  // ------------------------------------------------ the type-ahead readout
-  //
-  // What the child has typed on the GO beat, under the fact, so the keys
-  // visibly land instead of vanishing. Empty until something is pressed.
-  Row {
-    id: aheadRow
-    anchors.horizontalCenter: parent.horizontalCenter
-    y: Math.round(countdown.factInkRect.y + countdown.factInkRect.height + countdown.px(28))
-    spacing: countdown.px(10)
-    visible: countdown.go && countdown.typedAhead.length > 0
-    z: 5
-
-    Repeater {
-      model: countdown.typedAhead
-
-      Rectangle {
-        width: countdown.px(52)
-        height: countdown.px(70)
-        radius: Theme.cornerRadiusSmall
-        color: Qt.rgba(0.157, 0.055, 0.153, 0.94)
-        border.width: 2
-        border.color: Theme.cream
-
-        Text {
-          anchors.centerIn: parent
-          textFormat: Text.PlainText
-          text: String(modelData)
-          color: Theme.cream
-          font.family: Theme.mono
-          font.bold: true
-          font.pixelSize: countdown.fs(48)
-        }
-      }
-    }
-  }
+  // ROUND 8: the type-ahead readout that stood here -- a row of boxed digits
+  // under the fact -- is gone. The digits are drawn in the line's own answer
+  // slot (`answerWord` above), which is where the race draws them a second
+  // later.
 
   // ------------------------------------------------------------ the footer
   //

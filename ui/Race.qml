@@ -1,6 +1,7 @@
 import QtQuick
 import "parts"
 import "parts/Circuit.js" as Circuit
+import "parts/CardFx.js" as CardFx
 import "../engine/engine.mjs" as Engine
 
 // The race.
@@ -116,7 +117,7 @@ FocusScope {
   // cue reaches its impact, which is the same frame the hit-stop, the flash and
   // the victim's reaction fire on. Nothing is swallowed and nothing is
   // invented: the engine is still the only authority, and the most this can
-  // ever defer a number by is one card's telegraph (600 ms, the Pile-Up's).
+  // ever defer a number by is one card's telegraph (900 ms, the Pile-Up's).
   //
   // It is the same shape as `pendingPasses` below, which defers a pass until
   // the karts have visibly crossed, and for the same reason: a HUD that
@@ -507,8 +508,16 @@ FocusScope {
         }
         break
       case "pitCrew":
-        if (e.racerId === me)
+        if (e.racerId === me) {
           reveal.show(Engine.factLabel(e.fact), String(e.answer), 1200, Theme.teal)
+          // ROUND 8: held exactly as the wrong answer's reveal is. Round 7 let
+          // digits through this window on the grounds that `H` was the
+          // child's own request, and a critic typed `1 0` at `9 × 12` while
+          // the line still read `9 × 1 = 9`: the digits were scored against a
+          // fact the line was not showing, which is the one thing the hold
+          // exists to prevent.
+          race.revealHolds = true
+        }
         break
       // ------------------------------------------------------------ PIECE F
       //
@@ -525,7 +534,12 @@ FocusScope {
       // wound up. The cue now owns the schedule; this line only starts it.
       case "cardUsed":
         if (e.racerId === me) {
-          picker.reset()
+          // ROUND 8: THIS IS THE FRAME THE SLAM STARTS ON. The panel asked
+          // (`playRequested` -> `useCard`), the engine has taken the hand, and
+          // only now does the panel play the sound, fly the cards off and say
+          // `cardUsed`. A request the engine refused never reaches this line
+          // and nothing on the panel moves for it.
+          picker.accept(e.targetId)
           var label = Engine.CARDS[e.card].label.toUpperCase()
           say(e.targetId === "" ? label : label + " ▸ " + nameOf(e.targetId),
               Theme.amber, e.card === "pileUp")
@@ -635,7 +649,7 @@ FocusScope {
   //
   // WHAT IT DOES NOW. It puts the race into the situation the strip is about
   // and then lets the REAL RULES run: `race.send({ kind: "useCard", ... })`,
-  // which is the identical call `ui/Picker.qml`'s `onCardUsed` makes when the
+  // which is the identical call the panel's `playRequested` makes when the
   // child presses Space. Every event the strip reacts to is then the engine's
   // own `cardUsed`, `hit`, `blocked`, `swap`, `lapComplete` and `passed`. The
   // lap counter really moves, the place really changes, the hand really
@@ -792,8 +806,21 @@ FocusScope {
       var slot = Math.max(1, Math.min(3, parseInt(name || "1", 10)))
       if (race.hand.length < slot)
         return false
-      while (picker.highlighted !== slot - 1)
+      // ROUND 8: BOUNDED. A highlight that cannot move (a critic's mutation
+      // killed `moveHighlight` and this loop spun for eight minutes) is a
+      // refusal, not a hang: three Rights reach any slot of a three-card hand.
+      for (var presses = 0; presses < race.hand.length && picker.highlighted !== slot - 1; presses++)
         picker.moveHighlight(1)
+      if (picker.highlighted !== slot - 1)
+        return false
+      if (!race.canFire) {
+        console.log("Race: fireCard refused -- " + (picker.dealing
+                    ? "the deal is still drawing the cards (use a preroll past "
+                      + Math.ceil(CardFx.HAND.dealMs * 1.6) + " ms)"
+                    : (picker.finished ? "the child has finished"
+                       : "the highlighted card cannot be fired")))
+        return false
+      }
       return race.fireKey()
     }
     return false
@@ -1183,7 +1210,15 @@ FocusScope {
   // fire the highlighted card. With no hand held it does nothing at all, and
   // nothing on screen changes -- `tests/qml/tst_race_keys.qml` asserts that
   // with a fingerprint of the race, not with an absence of an event.
+  //
+  // `handHeld` is whether the arrows have a hand to move over; `canFire` is
+  // whether Space has anything to do, and it is the panel's own list of
+  // reasons (still dealing, nobody to aim at, the child finished, a slam
+  // playing). ROUND 8: `fireKey` reads `canFire` BEFORE it takes the repeat
+  // guard, so a press that could fire nothing arms nothing and the child's
+  // next press is not refused for it.
   readonly property bool handHeld: race.hand.length > 0 && !picker.slamming
+  readonly property bool canFire: race.handHeld && picker.canFire
 
   Item {
     id: keys
@@ -1302,7 +1337,7 @@ FocusScope {
   // take and nothing is armed: a press that could not fire anything must not
   // refuse the child's next press either.
   function fireKey() {
-    if (!race.handHeld)
+    if (!race.canFire)
       return false
     if (!Actions.take(picker.fireGuards, "key"))
       return false
@@ -1341,11 +1376,11 @@ FocusScope {
   // child pressed them one beat later, and nothing is scored against a
   // question they were not being shown.
   //
-  // The pit crew's reveal is deliberately NOT held. `H` is the child's own
-  // request to be shown the answer and move on; holding their next keystroke
-  // would put a 1.2 s wall in front of a key they pressed on purpose. Only the
-  // reveal a wrong answer imposes takes the line away from a child who was in
-  // the middle of using it.
+  // The pit crew's reveal is held the same way (round 8). Round 7 let digits
+  // through it on the grounds that `H` was the child's own request, and the
+  // digits were scored against a fact the line was not showing. Whoever took
+  // the line away, a key pressed at `7 × 8 = 56` is not an answer to the fact
+  // behind it.
   property bool revealHolds: false
   property var revealQueue: []
 
@@ -2188,16 +2223,38 @@ FocusScope {
   }
 
   // ------------------------------------------------------------- the callout
-  // ONE SLOT, under the line. Newest replaces last; never stacked; never over
+  // ONE SLOT, at the line. Newest replaces last; never stacked; never over
   // the line, because it hangs off the line's own ink box. See `say`.
   Callout {
     id: callout
     objectName: "callout"
     anchors.horizontalCenter: parent.horizontalCenter
-    y: race.lineInkRect.y + race.lineInkRect.height + race.px(14)
+    // ROUND 8: NEVER ON A KART, AND SO ABOVE THE LINE. Round 7 hung the slot
+    // UNDER the line (ink bottom + 14, a 74 px box for the Pile-Up's type) and
+    // a blind critic found it 13 / 8 / 4 px into the far karts at 1920x1080 /
+    // 1366x768 / 1024x600. The room under the line is not there to be had:
+    // `TrackView.zForDelta` saturates, so a rival far ahead is drawn at a
+    // fixed distance just under the horizon, and its cell's top measures
+    // 447 / 310 / 237 px against a line whose ink ends at 387 / 275 / 210 --
+    // 60 / 35 / 27 px of room, at 1024x600 the cell's top is ABOVE the
+    // horizon, and the smallest box this type reads in (46 px, 33 / 26 at the
+    // two smaller sizes) does not fit under the line with any gap at all at
+    // 1366x768 or 1024x600. Round 8's first cut (ink bottom + 10, a 58 px box)
+    // measured 8 / 13 / 9 px INTO those cells with rivals 30 questions ahead.
+    //
+    // Nothing is ever drawn in the sky between the HUD and the line -- the
+    // karts are all under the horizon and the line is 176 / 125 / 94 px below
+    // the HUD's plates -- so the slot hangs off the TOP of the line's ink
+    // instead: box bottom = ink top - 10. It is still one slot at the line,
+    // still never over the road, and it is a departure from design v4.1's
+    // "under the fact line" made for the reason above and named in the
+    // round's report. `tests/qml/tst_trackview_fx.qml` test_11b puts rivals 8
+    // and 30 questions ahead at all three sizes and measures the box against
+    // every kart cell, the horizon and the line's ink.
+    y: race.lineInkRect.y - race.px(10) - height
     // The large type Pile-Up reserves needs a box to sit in; every other
     // callout is the height it always was.
-    height: race.px(big ? 74 : 46)
+    height: race.px(big ? 58 : 46)
     width: implicitWidth
     holdMs: Engine.CALLOUT_MS
     // The fade is wall-time, so under an external clock it is a cut. See
@@ -2219,6 +2276,15 @@ FocusScope {
     anchors.fill: parent
     hand: race.hand
     rivals: race.liveRivals
+    // ROUND 8: the engine answers. `fire()` asks, `useCard` goes to the rules,
+    // and the `cardUsed` branch of `handleEvents` calls `accept()` when they
+    // say yes. A finished racer cannot attack, and the panel is told so rather
+    // than left to find out from a refusal.
+    hosted: true
+    finished: race.human ? race.human.finished === true : false
+    onPlayRequested: function (index, targetId) {
+      race.send({ "kind": "useCard", "index": index, "targetId": targetId })
+    }
     // PIECE F. The panel's three beats -- the deal, the breath and the slam --
     // run on the effect clock, not on a timer of their own, so the hand and the
     // road are the same event and a frame strip catches both.
@@ -2231,9 +2297,6 @@ FocusScope {
     // to `hand.length > 0` alone took the cards off the screen before the beat
     // that shows them going.
     visible: race.hand.length > 0 || picker.slamming
-    onCardUsed: function (index, targetId) {
-      race.send({ "kind": "useCard", "index": index, "targetId": targetId })
-    }
   }
 
   // THE AIMED KART IS RINGED. Design v4.1: "the target's kart is ringed while

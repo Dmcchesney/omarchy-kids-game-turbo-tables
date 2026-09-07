@@ -28,6 +28,37 @@ Item {
   readonly property bool glowing: value >= glowFrom
   readonly property color tone: ready ? Theme.amberGlow : (glowing ? Theme.amber : Theme.teal)
 
+  // ROUND 8 -- THE WORDS WERE GONE FROM THE GAME.
+  //
+  // "The charge bar ... reads POWER-UP READY at twelve", and the deal beat:
+  // "the twelve segments burst into three cards ... and POWER-UP READY reads
+  // once." `ready` is `value >= segments`, and `value` is the streak -- which
+  // the engine takes back to zero IN THE SAME STEP that deals the hand. So on
+  // every frame anyone ever photographed the caption under a fresh hand read
+  // `0 / 12`, and the one path to `ready` (a streak of twelve while already
+  // holding a hand) printed `HAND HELD · 12` instead. Round 7 deleted the
+  // callout that used to say it and wrote that this bar prints it; a blind
+  // critic found 0 matches for READY in every dump.
+  //
+  // The word is latched to the DEAL now: `burstNow()` -- the call the race
+  // makes on `handDealt` -- starts `readyBorn`, and the caption reads
+  // POWER-UP READY for `readyMs` on the effect clock, which is the callout's
+  // own 1.6 s and long enough to read across a room. It is information, so
+  // reduced motion keeps it (only the breath below goes); and it is the
+  // effect clock, so a strip shows it on the same frames every run.
+  //
+  // AND IT READS FOR THE HAND IT ANNOUNCED. The bar outlives a race -- the
+  // screen rebuilds the rules under it and keeps the bar -- so a deal 1.2 s
+  // before a fresh race would otherwise still be printing READY over that
+  // race's first answers (`tests/qml/tst_race_keys.qml` test_27 caught it at
+  // eleven). The word is gated on `holdingHand`: the deal is the only thing
+  // that puts a hand in the child's hand, and when the hand goes, so does
+  // the word.
+  property real readyBorn: -1e9
+  readonly property real readyMs: 1600
+  readonly property bool readyWord: holdingHand
+                                    && fxNow - readyBorn >= 0 && fxNow - readyBorn < readyMs
+
   // THE CAPTION DREW STRAIGHT ONTO THE ROAD, AND THE ROAD IS A GOLD KERB.
   //
   // `POWER-UP CHARGE` and `n / 12` are grey-lavender strings at 0.8 alpha with
@@ -71,7 +102,10 @@ Item {
   readonly property real burst: (reducedMotion || fxNow - burstBorn > burstMs)
                                 ? 0
                                 : 1 - Math.max(0, Math.min(1, (fxNow - burstBorn) / burstMs))
-  function burstNow() { bar.burstBorn = bar.fxNow }
+  function burstNow() {
+    bar.burstBorn = bar.fxNow
+    bar.readyBorn = bar.fxNow
+  }
 
   // ROUND 3 -- AND THE BURST HAD NEVER BEEN SEEN BY ANYBODY.
   //
@@ -213,9 +247,11 @@ Item {
     textFormat: Text.PlainText
     x: bar.padX
     y: bar.padY + caption.height + 6 + bar.cellHeight + 6
-    text: bar.ready ? (bar.holdingHand ? "HAND HELD  ·  " + bar.value : "POWER-UP READY")
-                    : (bar.value + " / " + bar.segments)
-    color: bar.ready ? Theme.amberGlow : Theme.textLabel
+    text: bar.readyWord ? "POWER-UP READY"
+                        : (bar.ready ? (bar.holdingHand ? "HAND HELD  ·  " + bar.value
+                                                        : "POWER-UP READY")
+                                     : (bar.value + " / " + bar.segments))
+    color: (bar.ready || bar.readyWord) ? Theme.amberGlow : Theme.textLabel
     font.family: Theme.mono
     font.bold: true
     font.pixelSize: bar.titleSize
@@ -224,7 +260,7 @@ Item {
     // Design, Accessibility: "nothing flashes faster than 3 Hz". This is a
     // 1.25 Hz breath, and reduced motion removes it entirely.
     SequentialAnimation on opacity {
-      running: bar.ready && !bar.reducedMotion && !bar.externalClock
+      running: (bar.ready || bar.readyWord) && !bar.reducedMotion && !bar.externalClock
       loops: Animation.Infinite
       NumberAnimation { from: 1.0; to: 0.45; duration: 400; easing.type: Easing.InOutSine }
       NumberAnimation { from: 0.45; to: 1.0; duration: 400; easing.type: Easing.InOutSine }

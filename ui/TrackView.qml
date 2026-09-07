@@ -3889,7 +3889,7 @@ Item {
   //
   // The design's telegraph is "a shadow grows on the road AHEAD OF THE TARGET,
   // and a stack of tyres, barrels and crates tumbles in from the top of the
-  // frame", and the impact is 600 ms later. What the strips showed instead was
+  // frame", and the impact is 900 ms later. What the strips showed instead was
   // the wall arriving at the CAMERA, in the child's own lane, from f05 -- five
   // frames BEFORE anything happened to anybody -- because the debris was
   // pinned to a point on the circuit the moment the card was played and the
@@ -4891,14 +4891,18 @@ Item {
                                      ? 0
                                      : CardFx.easeOut(CardFx.phase(cueT, cueBeats.telegraph))
                                        * CardFx.BEATS.turbo.edgeDarken
-  // Pile-Up's "the sky flashes amber twice" through its 600 ms telegraph.
+  // Pile-Up's "the sky flashes amber twice" through its 900 ms telegraph.
   //
-  // TWICE IN 600 ms IS 3.3 Hz AND THE DESIGN'S CAP IS 3. The accessibility rule
-  // -- "nothing flashes faster than 3 Hz" -- is not negotiable against a beat
-  // description, so the two flashes are spaced `skyGap` = 340 ms peak to peak,
-  // which is 2.94 Hz. The second one runs 20 ms past the telegraph and into the
-  // impact, which is where a wind-up wants to end anyway.
-  readonly property real fxSkyGap: 340
+  // ROUND 8, AND THE NUMBER IS THE MAINTAINER'S. Design v4.1: "the sky flashes
+  // amber twice, at 0 and at 450, so the two swings sit more than 333 ms apart
+  // and the impact flash at 900 stands alone; no two noticeable changes of the
+  // whole frame within 333 ms of each other, which is the 3 Hz rule read the
+  // way it is meant." `fxSkyGap` is the second swing's onset; each swing is a
+  // 280 ms bump, so the second is over by 730 and the impact at 900 is the
+  // third change, 450 after the second's onset (2.22 Hz). Round 7 shipped 340
+  // inside a 600 ms telegraph, which was the pre-decision number
+  // (docs/open-questions.md, section 4, resolved 2026-09-05).
+  readonly property real fxSkyGap: 450
   // How hard the amber goes. Round one's pair measured +50% on whole-frame mean
   // luma against a base of 81; the design's own accessibility rule is a cap on
   // RATE, but a blind critic's note on both builds was that a third is enough

@@ -340,11 +340,15 @@ var BEATS = {
     dropPx: 0.018,
     dropMs: 420,
   },
-  // "Pile-Up (one rival +15, legendary)": telegraph 600 with the sky flashing
-  // amber twice, hit-stop 120, then 300 at half speed while the kart spins a
-  // full turn.
+  // "Pile-Up (one rival +15, legendary)": telegraph 900 (v4.1; was 600) with
+  // the sky flashing amber twice, at 0 and at 450, so the impact flash at 900
+  // stands alone; hit-stop 120, then 300 at half speed while the kart spins a
+  // full turn. The 900 and the 450 are a recorded maintainer decision
+  // (docs/open-questions.md, section 4): no two whole-frame changes within
+  // 333 ms of each other. The second swing's onset lives in ui/TrackView.qml
+  // as `fxSkyGap`.
   pileUp: {
-    telegraph: 600,
+    telegraph: 900,
     hitStop: 120,
     // 300 at half speed, then the spin settles
     impact: 300,

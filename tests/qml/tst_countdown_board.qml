@@ -263,6 +263,19 @@ Item {
     // over round 2's 21.7%, which is the number this had to keep. So the counted
     // beats are floored at 0.25 and GO at 0.20, and the gap between the two
     // floors is a face, not a slack.
+    //
+    // ROUND 8 MOVED GO'S FLOOR TO 0.17, AND HERE IS WHAT MOVED IT. The
+    // countdown draws the whole line now -- `7 × 8 = ▮`, centred where the
+    // race centres it -- and the line is wider than the fact by the answer
+    // slot: its left edge stands 53 px inside GO's old column at 1366 x 768
+    // (77 at 1920 x 1080), and `test_02` caught the two words overlapping. The
+    // line cannot move, so GO is fitted to the sky left of the line's plate
+    // (`Countdown.typeColumnR`) and measures 18.6% here at 1366 x 768 and
+    // 18.5% at 1920 x 1080 against 22.9% before. In the shipped face, which
+    // lays GO out narrower, the same column gives 18.6 x 28.9 / 22.9 = 23.5%,
+    // still over the 21.7% round 2 shipped. That is the number this floor has
+    // to keep, and it keeps it; what it gives up is GO being within a point of
+    // `1`, which the round's report says in so many words.
     function test_03_the_type_is_still_the_size_the_documents_ask_for() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
@@ -271,7 +284,7 @@ Item {
         for (var b = 0; b < 4; b++) {
           countdown.beat = b
           var ink = countdown.beatInkBottomY - countdown.beatInkTopY
-          var floor = (b === 3) ? 0.20 : 0.25
+          var floor = (b === 3) ? 0.17 : 0.25
           verify(ink >= root.height * floor,
                  label + " beat " + countdown.beatWord + ": the numeral's ink is "
                  + Math.round(ink) + " px, which is "
@@ -910,6 +923,74 @@ Item {
       verify(deck.length > 0)
       compare(countdown.factText, Engine.factLabel(deck[0]),
               "the fact drawn behind GO is the question the race asks first")
+    }
+
+    // ROUND 8, D10. The first fact is drawn as the LINE -- `7 × 8 = ▮`, the
+    // race's own construction -- so the line the child is told to TYPE THE
+    // ANSWER on is the line they will type on. Read off the items that draw
+    // it, and off the pixels: the caret is amber on the line and nothing else
+    // in the sky is.
+    function named(name) {
+      var found = []
+      function walk(item) {
+        if (!item)
+          return
+        if (String(item.objectName) === name)
+          found.push(item)
+        var kids = item.children
+        for (var i = 0; kids && i < kids.length; i++)
+          walk(kids[i])
+      }
+      walk(countdown)
+      return found
+    }
+
+    // The caret blinks on a 400 ms timer from the GO beat, as the race's does,
+    // so the line reads `7 × 8 = ▮` and `7 × 8 = ` by turns; the words are
+    // compared with the caret struck, and the pixels are read the moment it
+    // is on.
+    function lineNoCaret() { return String(countdown.lineText).replace("▮", "") }
+
+    function test_13_the_first_fact_is_drawn_as_the_answer_line() {
+      tc.sizeTo(1920, 1080)
+      countdown.restart()         // test_11 leaves a typed `5` behind on purpose
+      tc.holdTheBeat(3)
+      tc.wait(320)                // the line and its plate fade in over 220 ms
+      var fact = countdown.factText
+      compare(tc.lineNoCaret(), fact + " = ",
+              "the countdown's line reads as the race's: " + countdown.lineText)
+      var caret = tc.named("caret")
+      compare(caret.length, 1, "one caret on the line")
+      tryVerify(function () { return caret[0].visible }, 1500, "the caret blinks on")
+      verify(String(countdown.lineText).indexOf("▮") > 0, "and the line reads it: " + countdown.lineText)
+      var field = tc.named("answerField")
+      compare(field.length, 1, "one answer slot on the line")
+      // The slot stands to the right of the fact's ink, on the same line.
+      var slot = field[0].mapToItem(countdown, 0, 0, field[0].width, field[0].height)
+      verify(slot.x >= countdown.factInkRect.x + countdown.factInkRect.width,
+             "the slot follows the fact: slot x " + slot.x + ", fact ink ends "
+             + (countdown.factInkRect.x + countdown.factInkRect.width))
+      verify(countdown.lineGuardRect.width > countdown.factInkRect.width,
+             "and the line's reserve runs through it")
+      // Typed ahead, the digits land in the slot and the line reads them.
+      countdown.forceActiveFocus()
+      keyClick(Qt.Key_5)
+      compare(countdown.typedAhead.length, 1)
+      compare(tc.lineNoCaret(), fact + " = 5", "a typed digit sits on the line: " + countdown.lineText)
+      keyClick(Qt.Key_Backspace)
+      compare(tc.lineNoCaret(), fact + " = ", "and Backspace takes it back")
+      // The pixels: the caret's amber is on the screen inside the slot, read
+      // on a frame the blink has it on.
+      var c = caret[0].mapToItem(countdown, 0, 0, caret[0].width, caret[0].height)
+      tryVerify(function () { return caret[0].visible }, 1500, "the caret blinks on")
+      var img = grabImage(countdown)
+      var amber = tc.countTone(img, Math.floor(c.x), Math.floor(c.y),
+                               Math.ceil(c.x + c.width), Math.ceil(c.y + c.height),
+                               Theme.amberGlow, 24).count
+      verify(amber > 20, "the caret is drawn in the slot: " + amber + " amber pixels in "
+             + JSON.stringify(c))
+      countdown.beat = 0
+      countdown.restart()
     }
   }
 }

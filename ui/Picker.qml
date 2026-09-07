@@ -42,6 +42,35 @@ import "../engine/engine.mjs" as Engine
 // `highlighted`, `targeting` and `targetId` back, and hands `targetId` to the
 // track so the aimed kart is ringed. The `Keys` handler below is the same
 // three keys, so the panel is a complete screen on its own in the harness.
+//
+// PIECE F ROUND 8 -- THE PANEL DOES NOT DECIDE A CARD WAS SPENT. THE ENGINE
+// DOES.
+//
+// Round 7's `fire()` played the slam sound, copied the hand into the fly-off,
+// reset the highlight and emitted `cardUsed` on its own say-so, and only THEN
+// did the race screen ask the engine. A blind critic pressed Space after the
+// child had crossed the line: the slam played, the engine refused (a finished
+// racer cannot attack), and 570 ms later the three cards were drawn back on
+// the panel. The same shape let Space spend a hand the child had not yet seen
+// (the cards were still under the panel at opacity zero) and armed the repeat
+// guard for a press that fired nothing.
+//
+// So `fire()` now REQUESTS a play -- `playRequested(index, targetId)` -- and
+// keeps a copy of what it asked for. Nothing on the panel changes until the
+// host calls `accept()`, which it does from the engine's own `cardUsed` event
+// and from nowhere else: that is where the slam starts, the sound plays, the
+// highlight goes home and `cardUsed` is emitted. A request the engine does not
+// take is a request that never happened on screen. `canFire` is the whole list
+// of reasons a request would be pointless -- the hand still being dealt, a
+// targeted card with nobody left to aim at, the child already finished, the
+// slam already playing -- and both Space handlers read it BEFORE they take the
+// repeat guard, so a refused press arms nothing.
+//
+// STANDING ALONE there is no engine to answer. `hosted` is false, and `fire()`
+// accepts its own request on the spot, because the harness's panel has to be
+// able to show its slam and the mouse suite counts `cardUsed` off it. The race
+// screen sets `hosted: true`, and from then on the panel never accepts a play
+// the rules did not.
 FocusScope {
   id: picker
 
@@ -144,7 +173,7 @@ FocusScope {
                    "keyRoute": ["down"],
                    "guards": [],
                    "help": "Aims at the next rival. Up and down do it too." })
-    if (!picker.strandedTarget)
+    if (!picker.strandedTarget && !picker.finished)
       hints.push(picker.useHint(picker.targeting ? "USE" : "USE IT"))
     return hints
   }
@@ -176,6 +205,13 @@ FocusScope {
     else if (act === "use")
       picker.fire()
   }
+
+  // The `SPACE  USE IT` chip is a click target, and a click on it while the
+  // hand is still being dealt would take the repeat guard for a press that
+  // fires nothing -- the same defect as the key's, by the other hand. The chip
+  // is disabled for exactly the moments `canFire` is false and stays printed,
+  // so the footer does not reflow under the pointer.
+  readonly property bool useChipEnabled: picker.canFire
 
   // ======================================================== PIECE F: FEEL
   //
@@ -256,6 +292,25 @@ FocusScope {
   // True when the highlighted card can never be spent as things stand.
   readonly property bool strandedTarget: needsTarget && picker.rivals.length === 0
 
+  // EVERY REASON A REQUEST WOULD BE POINTLESS, in one predicate, read by both
+  // Space handlers before the repeat guard is taken. The engine would refuse
+  // each of these; the panel refuses first, so nothing on screen pretends.
+  //
+  //   slamming   a hand is already flying off
+  //   dealing    the cards are still sliding up under the panel: a child who
+  //              has learned "Space fires" and taps it as the twelfth answer
+  //              lands must not spend a hand blind
+  //   finished   the child has crossed the line
+  //   the highlight is past the end of the hand
+  //   a targeted card with nobody left to aim at
+  readonly property bool canFire: picker.hand.length > 0
+                                  && !picker.slamming
+                                  && !picker.dealing
+                                  && !picker.finished
+                                  && picker.highlighted >= 0
+                                  && picker.highlighted < picker.hand.length
+                                  && !(picker.needsTarget && picker.targetId.length === 0)
+
   readonly property string targetId: (picker.targeting
                                       && targetIndex >= 0 && targetIndex < rivals.length)
                                      ? String(rivals[targetIndex].id) : ""
@@ -263,8 +318,28 @@ FocusScope {
                                         && targetIndex >= 0 && targetIndex < rivals.length)
                                        ? String(rivals[targetIndex].name) : ""
 
-  // index is the position in the hand, 0 to 2. targetId is "" for a card that
-  // needs no rival.
+  // ROUND 8. The host answers requests; see the file comment. False on a panel
+  // standing alone, where `fire()` is its own engine.
+  property bool hosted: false
+
+  // The host's racer has crossed the line. A finished racer "cannot attack and
+  // cannot be attacked", so the hand it still holds is a hand it cannot play,
+  // and the panel says so rather than firing into a refusal.
+  property bool finished: false
+
+  // What `fire()` asked for, kept until the engine answers: the hand as it was
+  // (the engine empties `hand` in the same step that says yes, and the slam
+  // needs the three cards to draw) and which slot was fired. -1 while nothing
+  // is asked.
+  property var pendingHand: []
+  property int pendingIndex: -1
+
+  // The request. index is the position in the hand, 0 to 2. targetId is "" for
+  // a card that needs no rival. The host sends `useCard` to the engine with it.
+  signal playRequested(int index, string targetId)
+
+  // The answer. Emitted from `accept()` -- on the engine's `cardUsed`, or on
+  // the spot when the panel stands alone -- and never from `fire()` itself.
   signal cardUsed(int index, string targetId)
 
   visible: picker.hand.length > 0 || picker.slamming
@@ -282,20 +357,29 @@ FocusScope {
   Accessible.role: Accessible.Pane
   Accessible.name: "Power-up hand"
   Accessible.description: "Left and right highlight a card. "
-    + (picker.targeting
-       ? "Up and down pick a rival. Space uses it on " + picker.targetName + "."
-       : (picker.strandedTarget
-          ? "There is no rival left to aim at, so this card cannot be used."
-          : "Space uses it."))
+    + (picker.finished
+       ? "You have finished the race, so the hand cannot be used."
+       : (picker.targeting
+          ? "Up and down pick a rival. Space uses it on " + picker.targetName + "."
+          : (picker.strandedTarget
+             ? "There is no rival left to aim at, so this card cannot be used."
+             : "Space uses it.")))
     + " Using a card costs the whole hand."
 
   // Put the highlight on one card, from a click or from the arrows landing
   // there. Choosing costs nothing and is never guarded.
+  //
+  // ROUND 8: THE AIM BELONGS TO THE HAND, NOT TO THE CARD. Round 7 put the aim
+  // back on the nearest rival every time the highlight moved, so a child who
+  // aimed a Wrench at Piston, glanced Right at the Nitro and came back Left
+  // found the ring on Bolt again. The aim now stays where the child put it
+  // across every highlight change; it goes home on a deal (`reset`) and is
+  // clamped when a rival crosses the line (`onRivalsChanged`), and at no other
+  // time.
   function highlight(index) {
     if (index < 0 || index >= picker.hand.length)
       return
     picker.highlighted = index
-    picker.targetIndex = 0
   }
 
   function moveHighlight(delta) {
@@ -338,30 +422,51 @@ FocusScope {
     picker.targetIndex = 0
   }
 
-  // SPACE. True when the card was actually spent. Three reachable states are
-  // refused rather than fired into an engine refusal with nothing on screen
-  // changing: the slam already playing, a highlight past the end of the hand,
-  // and a targeted card with every rival home.
+  // SPACE. True when a play was REQUESTED -- not spent. Every state in which
+  // the engine would refuse is refused here first (`canFire`), with nothing on
+  // screen changing and nothing armed. What the panel keeps is a copy of the
+  // hand and the slot, for the slam the engine's answer will start.
   function fire() {
-    if (picker.slamming)
-      return false
-    if (picker.highlighted < 0 || picker.highlighted >= picker.hand.length)
-      return false
-    if (picker.needsTarget && picker.targetId.length === 0)
+    if (!picker.canFire)
       return false
     var index = picker.highlighted
     var target = picker.needsTarget ? picker.targetId : ""
-    // Keep the hand that is about to be taken away, and which card of it was
+    picker.pendingHand = picker.hand.slice()
+    picker.pendingIndex = index
+    if (!picker.hosted) {
+      // No engine to ask. The panel standing alone is its own rules.
+      picker.accept(target)
+      return true
+    }
+    picker.playRequested(index, target)
+    return true
+  }
+
+  // THE ENGINE SAID YES. Called by the host on its `cardUsed` event for the
+  // child's own play. Only a play this panel asked for gets the slam: a card
+  // the harness injects straight into the engine (`--inject cardUsed:wrench`)
+  // arrives here with nothing pending, and the panel goes back to where a hand
+  // starts without pretending a child pressed anything.
+  function accept(targetId) {
+    var index = picker.pendingIndex
+    var asked = picker.pendingHand
+    picker.pendingHand = []
+    picker.pendingIndex = -1
+    if (index < 0) {
+      picker.reset()
+      return
+    }
+    // Keep the hand that has just been taken away, and which card of it was
     // fired, so the slam and the fly-off have something to draw.
-    picker.slamHand = picker.hand.slice()
+    picker.slamHand = asked
     picker.slamChosen = index
     picker.slamBorn = picker.fxNow
     // "the chosen card enlarges for 150, then slams down". The sound is the
-    // slam's: highlighting costs nothing and says nothing.
+    // slam's: highlighting costs nothing and says nothing, and a request the
+    // engine refused says nothing either.
     Sfx.play("slam")
     picker.reset()
-    picker.cardUsed(index, target)
-    return true
+    picker.cardUsed(index, targetId === undefined ? "" : String(targetId))
   }
 
   Keys.onPressed: function (event) {
@@ -378,8 +483,14 @@ FocusScope {
       return
     }
     if (event.key === Qt.Key_Space) {
-      // The same guard the `SPACE  USE IT` chip declares, so a click on the
-      // chip and this key inside one double-click interval are one gesture.
+      // A press that could not fire anything takes no guard: the child's next
+      // press must not be refused for it. Then the same guard the `SPACE  USE
+      // IT` chip declares, so a click on the chip and this key inside one
+      // double-click interval are one gesture.
+      if (!picker.canFire) {
+        event.accepted = true
+        return
+      }
       if (!Actions.take(picker.fireGuards, "key")) {
         event.accepted = true
         return
@@ -514,6 +625,17 @@ FocusScope {
             // A click highlights, exactly as the arrows do. Dead while the hand
             // is flying off.
             onTapped: picker.tapCard(cardSlot.slot)
+
+            // ROUND 8: NOT A CLICK TARGET WHILE IT IS BEING DEALT. The same
+            // rule as Space's and the `USE IT` chip's, by the third hand: a
+            // card still sliding up under the panel is a card the child has
+            // not seen. It is also what keeps the pointer honest during the
+            // slide -- the cards come up from under the footer's chips, and
+            // Qt hands the hover to the chip on top even while that chip is
+            // disabled, so a card mid-deal under the pointer could not report
+            // it. `tests/qml/tst_mouse_parity.qml` test_32 sweeps the race
+            // screen the moment it is shown and found exactly that.
+            enabled: !picker.dealing
 
             // The deal: up from the bottom right.
             y: picker.reducedMotion ? 0
@@ -704,6 +826,7 @@ FocusScope {
             guards: modelData.guards !== undefined ? modelData.guards : []
             destructive: modelData.destructive === true
             help: modelData.help
+            enabled: modelData.act !== "use" || picker.useChipEnabled
             onTapped: picker.footerAct(modelData.act)
           }
         }
