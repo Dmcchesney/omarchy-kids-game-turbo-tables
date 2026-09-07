@@ -408,7 +408,22 @@ Item {
       return seen
     }
 
-    /** Drawn at all: an invisible ancestor hides a visible child. */
+    /**
+     * Drawn at all: an invisible ancestor hides a visible child.
+     *
+     * AND THE CHAIN HAS TO REACH THE SCREEN. A delegate a `Repeater` has just
+     * discarded -- the picker's footer is rebuilt from `footerHints` the moment
+     * `SPACE  USE IT` acts, and every chip in it is a new object -- is still a
+     * readable item until the event loop deletes it, with no parent and its
+     * own `visible` flag untouched. Qt 6.11 happens to report that item as
+     * `visible: false`; Qt 6.4 reports it `visible: true`, and this walk ran off
+     * the top of the detached subtree and called it drawn. Measured in
+     * Ubuntu 24.04's Qt 6.4.2: `test_19` read `usable()` as true for a chip that
+     * was no longer in any tree, asked why it refused nothing, and failed --
+     * the two presses it was asking about had landed on the empty panel next
+     * to the chip that replaced it. An item is on the screen when walking up
+     * from it arrives at the screen, and not otherwise.
+     */
     function drawn(item, screen) {
       var node = item
       while (node && node !== screen.parent) {
@@ -416,7 +431,16 @@ Item {
           return false
         node = node.parent
       }
-      return true
+      return node === screen.parent
+    }
+
+    /** Usable, and with the point actually inside its box as drawn now. */
+    function underPoint(item, screen, at) {
+      if (!suite.usable(item, screen))
+        return false
+      var box = item.mapToItem(root, 0, 0, item.width, item.height)
+      return at.x >= box.x && at.x < box.x + box.width
+             && at.y >= box.y && at.y < box.y + box.height
     }
 
     /**
@@ -1774,7 +1798,14 @@ Item {
           // guard has to have refused the two that followed, and saying so is
           // the difference between "the screen did not change" and "the press
           // was refused".
-          if (hit !== null && suite.usable(hit, list[s].item) && hit.destructive) {
+          // "STILL UNDER THE POINTER" IS READ OFF THE TREE AS IT IS NOW, not off
+          // the object that was pressed. The picker's `SPACE  USE` chip survives
+          // its first press only as a dying object: the footer is rebuilt
+          // around it, the new `USE IT` chip lands 112 px to the left, and
+          // presses two and three fall on the panel between. That is a control
+          // that went away with the hand it spent, which is what the count
+          // below is for -- not a control that refused nothing.
+          if (hit !== null && hit.destructive && suite.underPoint(hit, list[s].item, at)) {
             verify(hit.refusedRepeats >= 1,
                    list[s].name + ": \"" + label + "\" was still under the pointer for"
                    + " the second and third press and refused none of them. It accepted "
@@ -3320,19 +3351,75 @@ Item {
         focusPark.forceActiveFocus(Qt.OtherFocusReason)
         mouseMove(root, 0, 0)
         suite.settleFrame()
-        var idle = grabImage(screen)
         var targets = suite.clickTargetsIn(screen)
-        for (var i = 0; i < targets.length; i++) {
-          var hit = targets[i]
-          if (!suite.usable(hit, screen))
-            continue
+        var swept = []
+        for (var t = 0; t < targets.length; t++) {
           // A BARRIER IS NOT A CONTROL AND MUST NOT LIGHT. It exists to swallow
           // a press -- it is the thing that makes the one question in the game
           // modal -- and a scrim that lit up under the pointer would be telling
           // the child the opposite of what the question is telling them.
           // `test_22` holds the same rule for a sign.
-          if (hit.barrier === true)
-            continue
+          if (suite.usable(targets[t], screen) && targets[t].barrier !== true)
+            swept.push(targets[t])
+        }
+        // THE RENDERER IS WARMED BEFORE THE SCREEN IS PHOTOGRAPHED, AND THE
+        // POINTER IS WHAT WARMS IT.
+        //
+        // Measured in Ubuntu 24.04's Qt 6.4.2 software renderer, which is what
+        // CI runs: the first time other text in the same font is repainted --
+        // a hint's colour turning under the pointer, or a new glyph drawn in
+        // that font anywhere, even off the window -- the countdown's numeral
+        // and the race's fact line are rasterised again, and 855 and 847 of
+        // their anti-aliased rim pixels come back one value different. It
+        // happens once and stays, three idle frames in a row never show it, it
+        // depends on WHICH text repaints (the race's answer box warms nothing;
+        // its `H  PIT CREW` hint does), and Qt 6.11 -- the Mac, and the Omarchy
+        // VM -- never does it at all. A cold idle frame compared with the first
+        // hover frame therefore reported the numeral, 630 px above the control,
+        // as a hover leak. That is the renderer's glyph state, and a child
+        // cannot see a value of one.
+        //
+        // So every control is hovered and left once, with nothing photographed,
+        // before the idle frame is taken, and the sweep then measures each
+        // against a frame the renderer has already settled on. One hover is
+        // not enough: the race's answer box warms nothing and its `H  PIT CREW`
+        // hint warms the fact line, and each control's text warms its own part
+        // of the frame. The claim is unchanged: something inside the control
+        // changes, nothing outside it does.
+        //
+        // WHAT THE WARM-UP GIVES UP, EXACTLY. A hover that lights something on
+        // its FIRST visit and never puts it back is in the idle frame too, and
+        // nothing measured in pixels can tell it from the renderer's own first
+        // pass, because the pointer's history is the one thing both respond
+        // to. Round four's cold sweep caught that case by accident of order --
+        // the next control's diff saw it -- and this one does not; a mutation
+        // that latches the hint's wash on passes here. `test_32` holds the
+        // `hovered` flag itself on every state, and every hover picture in
+        // `ui/` is painted off that flag, so a latch would have to be new state
+        // written for the purpose. What the warm-up made of the cold frame is
+        // printed, so a renderer that moves more than a rim shows in the log
+        // rather than being absorbed by it -- and the sweep closes with one
+        // more comparison: after the pointer has visited every control and
+        // left, the screen is its idle frame again, on every state and not
+        // only on the garage (`test_20`). That is the half of "and never puts
+        // it back" that a warmed frame can still hold.
+        var cold = grabImage(screen)
+        for (var w = 0; w < swept.length; w++) {
+          var warm = suite.centreOf(swept[w])
+          mouseMove(root, warm.x, warm.y)
+          suite.settleFrame()
+          mouseMove(root, 0, 0)
+          suite.settleFrame()
+        }
+        var idle = grabImage(screen)
+        var warmed = suite.diff(cold, idle)
+        if (warmed.count > 0)
+          console.log(list[s].name + ": the renderer changed " + warmed.count
+                      + " pixels at " + suite.boxText(warmed) + " on the first pass of"
+                      + " the pointer and left them; the sweep measures against the"
+                      + " warmed frame")
+        for (var i = 0; i < swept.length; i++) {
+          var hit = swept[i]
           checked += 1
           if (hit.objectName === "clickKeyHint")
             hintsSwept += 1
@@ -3352,6 +3439,11 @@ Item {
           mouseMove(root, 0, 0)
           suite.settleFrame()
         }
+        var left = suite.diff(idle, grabImage(screen))
+        compare(left.count, 0,
+                list[s].name + ": after the pointer visited every control and left, "
+                + left.count + " pixels at " + suite.boxText(left) + " are not as the"
+                + " idle frame drew them. Something a hover changed stayed changed.")
       }
       root.width = wasWidth
       root.height = wasHeight

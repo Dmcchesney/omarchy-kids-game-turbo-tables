@@ -130,6 +130,18 @@ jobs:
   # pixels differ between a hover ring and a focus ring", which is a ring 4 px
   # wide around a 400 x 120 box on any renderer.
   #
+  # AND THE TWO HALVES DID NOT QUITE CANCEL. The first run of this job on
+  # noble's Qt 6.4.2 failed `test_23` on the countdown: its software renderer
+  # rasterises the numeral again, one value different along the rim, the first
+  # time other text in the same font is repainted -- which the hover is -- and
+  # keeps it. Reproduced in a container built from this job's own package
+  # list; Qt 6.11 never does it. The sweep now hovers once before it takes its
+  # idle frame, so both halves are taken after the renderer has settled; the
+  # test file says what that gives up. `test_19` failed in the same run for a
+  # reason that was the test's alone: a delegate the picker's footer had just
+  # discarded still read as drawn on 6.4, and the walk asked it why it refused
+  # two presses that had never reached it.
+  #
   # ROUND 5 -- THE JOB COULD NOT HAVE RUN, AND NOT FOR THE REASON ROUND 4 GUESSED.
   # Round 4 wrote: "If the first run fails in `Install Qt 6 QML`, the fix is a
   # package name and nothing else." A critic checked every package against the
