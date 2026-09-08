@@ -171,6 +171,9 @@ export const NOT_THE_PLUGIN: Exemption[] = [
   { match: "tsconfig.json", why: "compiler configuration" },
   { match: ".gitignore", why: "git configuration" },
   { match: "README.md", why: "the document under test; treating it as evidence for itself is the circularity round 2 broke" },
+  { match: "CONTRIBUTING.md", why: "how to help; prose for people, never loaded by the shell" },
+  { match: "SECURITY.md", why: "how to report a problem privately; prose, never loaded" },
+  { match: "CODE_OF_CONDUCT.md", why: "the community's conduct rules; prose, never loaded" },
   { match: "NOTICE", why: "attribution prose" },
   { match: "LICENSE", why: "licence text" },
 ];

@@ -352,6 +352,9 @@ Turbo Tables is a Tier 1 spoke of the Omarchy Kids Mode hub: solo, offline, no p
 
 The plugin never collects anything about a child.
 
+Helping out, playing with a child and reporting back, and reporting a problem privately are
+described in [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
 There is no name field, no free text, no telemetry, no analytics, no crash reporting, no dates in the
 save file, and nothing that leaves the machine.
 

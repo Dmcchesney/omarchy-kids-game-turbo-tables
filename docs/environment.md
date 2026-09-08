@@ -74,6 +74,24 @@ Verified results on 2026-09-02:
 - `omarchy-shell shell toggle`: exit 0; the Turbo Tables bootstrap overlay rendered.
 - `grim`: exit 0; produced a visually verified 1920×1200 overlay PNG with SHA-256 `b04d26dc46221426d3fe41a251aec7afdd531eb4a476882cbf37b9bc3068d016`.
 
+## On an Omarchy machine, without the Mac or the VM
+
+Everything above is the maintainer's setup: a Mac with the plugin 9p-mounted into an Omarchy VM.
+A contributor on Omarchy itself needs none of it. Clone the repository into the third-party plugin
+directory, enable it, and every save reloads the plugin in the running shell:
+
+```sh
+git clone https://github.com/Dmcchesney/omarchy-kids-game-turbo-tables.git \
+  ~/.config/omarchy/plugins/io.github.dmcchesney.turbo-tables-solo
+omarchy plugin enable io.github.dmcchesney.turbo-tables-solo
+qs log -p /usr/share/omarchy/shell --tail 100
+```
+
+The checks need `nodejs` (24 or later, which runs the TypeScript tools directly) and
+`qt6-declarative`, which provides `qml` and `qmltestrunner`, both from the Arch repositories.
+`npm run check`, the two `qmltestrunner` suites and the harness commands in CONTRIBUTING.md then
+run unchanged. Blender is only needed to rebake sprites and is never needed to work on the game.
+
 ## Bellringer source
 
 Both required source paths are reachable on this Mac:

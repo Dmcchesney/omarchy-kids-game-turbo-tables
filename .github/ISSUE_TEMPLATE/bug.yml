@@ -1,0 +1,39 @@
+name: 🐛 Bug
+description: Something the game did that it should not have.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you pressed or clicked, on which screen, and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: input
+    id: screen
+    attributes:
+      label: Screen size
+      placeholder: "1366x768"
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The `version` in manifest.json, or `git -C ~/.config/omarchy/plugins/io.github.dmcchesney.turbo-tables-solo log -1 --oneline`.
+  - type: textarea
+    id: log
+    attributes:
+      label: Shell log
+      description: Anything mentioning turbo-tables in `qs log -p /usr/share/omarchy/shell --tail 200`.
+      render: text
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Confirmation
+      options:
+        - label: There are no identifying details about a child here, including in any screenshot.
+          required: true

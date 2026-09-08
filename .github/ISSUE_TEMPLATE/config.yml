@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 Report a security problem privately
+    url: https://github.com/Dmcchesney/omarchy-kids-game-turbo-tables/security/advisories/new
+    about: Anything that would let this plugin do more than its README says. See SECURITY.md.
+  - name: 🧩 The Omarchy Kids Mode hub
+    url: https://github.com/markcuda/omarchy-kids-mode
+    about: Research, planning and the other spokes. Ideas about Kids Mode itself go there.
+  - name: 🗨️ Omarchy Discord
+    url: https://omarchy.org/discord
+    about: Real-time chat with the Omarchy community; find the kids-mode channel.
