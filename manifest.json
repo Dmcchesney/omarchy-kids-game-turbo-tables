@@ -3,10 +3,13 @@
   "id": "io.github.dmcchesney.turbo-tables-solo",
   "name": "Turbo Tables",
   "version": "0.1.0",
-  "author": "Don McChesney",
-  "description": "Times-table kart sprint. Solo, offline, ages 7 to 11.",
+  "author": "Dmcchesney",
+  "description": "Times-table kart racing: twelve laps for the twelve tables, three rivals, and a power-up hand earned by a clean streak. Solo, offline, keyboard and mouse, ages 7 to 11.",
   "license": "MIT",
-  "kinds": ["overlay", "bar-widget"],
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
   "keepLoaded": true,
   "entryPoints": {
     "overlay": "TurboTables.qml",

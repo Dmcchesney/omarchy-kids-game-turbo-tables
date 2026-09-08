@@ -7,21 +7,294 @@ on:
 permissions:
   contents: read
 
+env:
+  # scripts/security-baseline*.mjs are imported from this checkout by
+  # npm run scan. Pinned so a marketplace change can never silently alter what
+  # this repository is measured against; bump it deliberately.
+  MARKETPLACE_REPOSITORY: https://github.com/omacom/omarchy-plugin-marketplace.git
+  MARKETPLACE_COMMIT: 9c59dd37f4b203ba92dbdc69eeb98aa853579146
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      # actions/checkout v5.0.0
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      # actions/setup-node v4.4.0. No cache: caching would want a lockfile, and
+      # nothing may be installed into this checkout.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
-      - run: npm test
-      - run: npm run check:types
-      - run: npm run check:boundary
-      - run: npm run check:bundle
-      - name: Marketplace security baseline
+
+      - name: Pin the marketplace security baseline
         run: |
-          git clone --quiet https://github.com/omacom/omarchy-plugin-marketplace.git ../omarchy-plugin-marketplace
-          git -C ../omarchy-plugin-marketplace checkout --quiet 9c59dd37f4b203ba92dbdc69eeb98aa853579146
-          npm run scan
+          set -euo pipefail
+          git init --quiet "${{ runner.temp }}/omarchy-plugin-marketplace"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" remote add origin "$MARKETPLACE_REPOSITORY"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" fetch --quiet --depth 1 origin "$MARKETPLACE_COMMIT"
+          git -C "${{ runner.temp }}/omarchy-plugin-marketplace" checkout --quiet FETCH_HEAD
+          test "$(git -C "${{ runner.temp }}/omarchy-plugin-marketplace" rev-parse HEAD)" = "$MARKETPLACE_COMMIT"
+
+      - name: Engine rules
+        run: npm test
+
+      - name: Types
+        run: npm run check:types
+
+      - name: Boundary, hygiene and manifest
+        run: npm run check:boundary
+
+      # PIECE M ROUND 3. No .qml file may print a key hint as a string: a key
+      # printed on a screen is a promise that pressing it does something, and
+      # `ui/parts/KeyHint.qml` is the only thing that may make one. The runtime
+      # oracle in dev/Harness.qml finds hints by asking the component, and this
+      # is what keeps that honest -- a rule about what may be WRITTEN, which is
+      # not a guess about what a string means. It is here because nothing in
+      # this workflow runs qmltestrunner or the parity walk.
+      - name: A printed key is a component, not a string
+        run: npm run check:keyhints
+
+      # Fails when engine/engine.mjs is not the current build of src/engine, so
+      # a src/engine change cannot land without its rebuilt bundle.
+      - name: Committed bundle is not stale
+        run: npm run check:bundle
+
+      # The car sprite sheets under assets/karts/ are baked on the Mac by
+      # Blender (npm run sprites) and committed with a SHA-256 manifest. This
+      # verifies every sheet and meta file against that manifest and never
+      # rebakes: a model change cannot land without its sheets, and an edited
+      # sheet cannot land at all.
+      - name: Committed car sheets match their manifest
+        run: npm run check:sprites
+      - name: Prop kit manifest
+        run: npm run check:props
+
+      # Asserts the four safety invariants -- no network code, no process or
+      # shell execution, no free-text entry or name field, no stored dates --
+      # against every file in the repository except a printed allow-list, and
+      # against every .qml file with no exception. Then: README.md has to
+      # disclose each of them, may not claim the opposite of one, and each of
+      # its present-tense capability claims has to have code (not a comment)
+      # behind it. The README is the document a parent reads; this is the gate
+      # behind it, and src/tools/check-readme.ts states what it cannot check.
+      - name: Safety invariants, and README claims against the repository
+        run: npm run check:readme
+
+      - name: Marketplace security baseline
+        env:
+          TURBO_TABLES_MARKETPLACE: ${{ runner.temp }}/omarchy-plugin-marketplace
+        run: npm run scan
+
+      - name: Nothing was installed into the checkout
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e node_modules
+          test ! -e package-lock.json
+
+  # =========================================================================
+  # PIECE M ROUND 4 -- THE ENUMERATION IS RUN BY SOMETHING NOW.
+  # =========================================================================
+  #
+  # A critic put this more sharply than the comment it replaces did. The whole
+  # architectural argument of piece M is "enumeration rather than assertion, so a
+  # control nobody thought about cannot pass unnoticed" -- and until this job,
+  # every one of those enumerations existed only as something a person ran by
+  # hand on one Mac. An enumeration that no automated gate ever runs is an
+  # assertion again: it is a thing somebody remembered to do. The one piece-M
+  # gate that WAS in CI, `check:keyhints`, is the one the critic escaped three
+  # times out of four in five minutes.
+  #
+  # WHAT IS RUN HERE, AND WHAT IS NOT. The mouse suite and the parity walk on
+  # every screen and on two states a screen has to be DRIVEN into: 42 cases and
+  # nine walks, which is every assertion the piece rests on. The other nine
+  # QML files -- the track-view effects, the countdown board, the car sprites --
+  # are NOT run here on purpose: forty-four of their cases compare rendered
+  # pixels against numbers tuned on the maintainer's Mac, and a Linux runner
+  # rasterises with llvmpipe. Turning those red on a renderer difference would
+  # teach the next builder to ignore this job, which is the failure mode that
+  # matters more than the coverage. They stay a hand run until somebody has
+  # compared the two renderers deliberately.
+  #
+  # ROUND 5 -- AND THE SAME ARGUMENT, APPLIED TO THIS JOB. A critic asked why the
+  # renderer exclusion above was not applied to the mouse suite, which does grab
+  # frames. Because the two are different comparisons. Those nine files compare a
+  # frame against a NUMBER somebody wrote down on this Mac; the four cases in the
+  # mouse suite that rasterise (`test_20`, `test_21`, `test_23`, `test_24`)
+  # compare a frame against ANOTHER FRAME OF THE SAME SCREEN taken on the same
+  # machine seconds apart, with only the pointer moved. A different font, a
+  # different rasteriser and a different anti-aliaser all appear in both halves
+  # and cancel. The one absolute number among them is `test_24`'s "more than 50
+  # pixels differ between a hover ring and a focus ring", which is a ring 4 px
+  # wide around a 400 x 120 box on any renderer.
+  #
+  # AND THE TWO HALVES DID NOT QUITE CANCEL. The first run of this job on
+  # noble's Qt 6.4.2 failed `test_23` on the countdown: its software renderer
+  # rasterises the numeral again, one value different along the rim, the first
+  # time other text in the same font is repainted -- which the hover is -- and
+  # keeps it. Reproduced in a container built from this job's own package
+  # list; Qt 6.11 never does it. The sweep now hovers once before it takes its
+  # idle frame, so both halves are taken after the renderer has settled; the
+  # test file says what that gives up. `test_19` failed in the same run for a
+  # reason that was the test's alone: a delegate the picker's footer had just
+  # discarded still read as drawn on 6.4, and the walk asked it why it refused
+  # two presses that had never reached it.
+  #
+  # ROUND 5 -- THE JOB COULD NOT HAVE RUN, AND NOT FOR THE REASON ROUND 4 GUESSED.
+  # Round 4 wrote: "If the first run fails in `Install Qt 6 QML`, the fix is a
+  # package name and nothing else." A critic checked every package against the
+  # Ubuntu noble file lists and it is wrong twice over. All ten install; the RUN
+  # steps were the problem.
+  #
+  #   * `qt6-declarative-dev-tools` puts `qmltestrunner` at
+  #     `/usr/lib/qt6/bin/qmltestrunner`, NOT on `PATH`. `/usr/bin/qmltestrunner`
+  #     on Ubuntu comes from `qtchooser`, which without a configured Qt 6 conf
+  #     fails with "could not find a Qt installation".
+  #   * That package ships NO `qml` binary at all. The Qt 6 launcher is in
+  #     `qml-qt6`, which was not installed; the `qml` package on noble is Qt 5.
+  #
+  # So: the missing package is added, the directory is put on `PATH`, and every
+  # run step names the binary by its full path anyway. There is still no Linux on
+  # this Mac to try it on, so the step below LOOKS FOR the two binaries first and
+  # fails with the `dpkg -L` listing and the remedy rather than with
+  # "command not found" three steps later.
+  qml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # actions/checkout v5.0.0
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Install Qt 6 QML
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qt6-declarative-dev-tools \
+            qml-qt6 \
+            qml6-module-qtqml \
+            qml6-module-qtqml-workerscript \
+            qml6-module-qtquick \
+            qml6-module-qtquick-window \
+            qml6-module-qtquick-shapes \
+            qml6-module-qtquick-templates \
+            qml6-module-qtquick-controls \
+            qml6-module-qttest \
+            libgl1 libegl1
+
+      # ROUND 5. FIND THE BINARIES BEFORE ANYTHING NEEDS THEM, and say exactly
+      # what is missing if they are not there. `qmltestrunner` and the Qt 6 `qml`
+      # launcher both live in `/usr/lib/qt6/bin` on Ubuntu and neither is on
+      # `PATH`; a job that discovers that in its third step discovers it as
+      # "command not found", which is what sent round 4 looking at the package
+      # list instead of at the paths.
+      - name: Locate the Qt 6 binaries
+        run: |
+          set -euo pipefail
+          echo "/usr/lib/qt6/bin" >> "$GITHUB_PATH"
+          echo "--- /usr/lib/qt6/bin"
+          ls -1 /usr/lib/qt6/bin || true
+          if [ ! -x /usr/lib/qt6/bin/qmltestrunner ]; then
+            echo "qmltestrunner is not at /usr/lib/qt6/bin/qmltestrunner."
+            echo "It ships in qt6-declarative-dev-tools; that package contains:"
+            dpkg -L qt6-declarative-dev-tools | grep '/bin/' || true
+            exit 1
+          fi
+          if [ ! -x /usr/lib/qt6/bin/qml ]; then
+            echo "The Qt 6 qml launcher is not at /usr/lib/qt6/bin/qml."
+            echo "It ships in qml-qt6, NOT in qt6-declarative-dev-tools and NOT in"
+            echo "the qml package, which on noble is Qt 5. qml-qt6 contains:"
+            dpkg -L qml-qt6 | grep '/bin/' || true
+            exit 1
+          fi
+          /usr/lib/qt6/bin/qmltestrunner -help >/dev/null 2>&1 \
+            || echo "note: qmltestrunner -help returned non-zero; the run steps will say more"
+
+      # Headless, and stated rather than assumed: there is no display on a
+      # runner, and the maintainer's own rule on his Mac is that a Qt process
+      # never opens a window. One command, two ways of saying it, so a missing
+      # `-platform` argument cannot fall back to a real surface.
+      - name: The mouse suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          /usr/lib/qt6/bin/qmltestrunner -platform offscreen -import dev/imports \
+            -input tests/qml/tst_mouse_parity.qml
+
+      # The parity walk itself, on every screen the game has. It exits non-zero
+      # when a click target names no key, when a declared control or a Tab stop
+      # has no click target under it, when a printed key on the screen cannot be
+      # pressed, when a destructive control names no guard, when a mouse handler
+      # that is not a Clickable exists anywhere in the tree, or -- round 5 -- when
+      # a control that does something a child cannot undo is smaller than
+      # 24 x 24 px.
+      #
+      # ROUND 5 -- AT THREE WINDOW SIZES, because the size rule is the one that
+      # only bites at the small end. Every number in the piece was taken at
+      # 1920 x 1080 until a critic walked 1024 x 600 and found both of the race's
+      # destructive controls at 16 px tall. Twenty-one walks at about a second and
+      # a half each.
+      - name: The parity walk, on every screen
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          for size in 1920x1080 1366x768 1024x600; do
+            for screen in Game Garage Settings Picker Countdown Race Results; do
+              echo "--- $screen at $size"
+              /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+                --screen "$screen" --size "$size" --print-controls
+            done
+          done
+
+      # ROUND 5. AND THE TWO STATES A SCREEN HAS TO BE DRIVEN INTO.
+      #
+      # A critic named both as walked by nothing at all, and he was right about
+      # both.
+      #
+      #   `--screen Race` opens with no hand, so CI's Race walk never saw a card,
+      #   an aim chip or the panel's footer -- the most interesting controls on
+      #   the busiest screen in the game were in no table. Measured on this Mac:
+      #   the bare walk finds 7 click targets and the hand walk finds 10, and the
+      #   three it adds are the three cards.
+      #
+      #   `--screen Settings` opens on a readable save file. The screen a PARENT
+      #   meets when the file is corrupt is the one with `START A NEW SAVE FILE`
+      #   live on it, and that is the only way out of a quarantined save. It was
+      #   in the plain walk's table all along -- with `enabled` reading `no` and a
+      #   height of 0. Measured: `--quarantine` turns that row live and takes the
+      #   screen from 8 declared controls and 8 focus stops to 9 and 9.
+      #
+      # The third state the critic named -- a race with a card CHOSEN -- is not
+      # here, and not because it does not matter. `--do click:card 1` cannot
+      # reach it: the deal slides the cards up over 570 ms of the effect clock and
+      # a drive step is one turn of the event loop, so the click lands before the
+      # cards exist ("NO SUCH CLICK TARGET", driven here). It is walked by
+      # `tests/qml/tst_mouse_parity.qml`'s `Picker, card chosen` state, which
+      # deals a hand by answering twelve facts, and by `test_31` and `test_36` in
+      # a real race. Making the harness wait for a deal is the harness's fix and
+      # is written up in the round's report rather than faked here.
+      - name: The parity walk, in the states a screen must be driven into
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          set -euo pipefail
+          echo "--- Settings, quarantined save file"
+          /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+            --screen Settings --quarantine --print-controls
+          echo "--- Race, a hand dealt"
+          /usr/lib/qt6/bin/qml -platform offscreen -I dev/imports dev/Harness.qml -- \
+            --screen Race --warmup 11 --inject handDealt --print-controls
+
+      - name: Nothing was installed into the checkout
+        if: always()
+        run: |
+          set -euo pipefail
+          test ! -e node_modules
+          test ! -e package-lock.json

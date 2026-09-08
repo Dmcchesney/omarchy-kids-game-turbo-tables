@@ -1,20 +1,30 @@
+// Bundle parity: engine/engine.mjs must be the build output of src/engine at
+// this exact working-tree state. The build settings are not repeated here;
+// they are imported from esbuild.config.mjs, which npm run build also uses.
+
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import {
+  entryPoint,
+  esbuildFlags,
+  esbuildPackage,
+  outFile,
+  repositoryRoot,
+  runEsbuild,
+} from "../../esbuild.config.mjs";
 
-const root = resolve(import.meta.dirname, "../..");
-const committed = await readFile(resolve(root, "engine/engine.mjs"), "utf8");
-const result = spawnSync("npx", [
-  "--yes", "esbuild@0.28.2", "src/engine/index.ts",
-  "--bundle", "--format=esm", "--platform=neutral", "--target=es2016",
-], { cwd: root, encoding: "utf8" });
+const committed = await readFile(resolve(repositoryRoot, outFile), "utf8");
+const result = runEsbuild();
 
 if (result.status !== 0) {
-  console.error(result.stderr);
+  if (result.stderr) console.error(result.stderr);
+  console.error(`Could not rebuild ${outFile} from ${entryPoint}.`);
   process.exitCode = result.status ?? 2;
 } else if (result.stdout !== committed) {
-  console.error("engine/engine.mjs is stale; run npm run build.");
+  console.error(`${outFile} is stale relative to ${entryPoint}; run npm run build and commit the result.`);
   process.exitCode = 1;
 } else {
-  console.log("Bundle parity check passed.");
+  console.log(
+    `Bundle parity check passed: ${outFile} matches ${entryPoint} rebuilt with ${esbuildPackage} ${esbuildFlags.join(" ")}.`,
+  );
 }

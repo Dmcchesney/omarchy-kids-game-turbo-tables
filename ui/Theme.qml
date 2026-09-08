@@ -1,0 +1,446 @@
+pragma Singleton
+import QtQuick
+
+// The theme adapter. Layer 2 reads only this; it never reaches the shell.
+//
+// The top block is what the shell owns: five palette roles, three menu-surface
+// roles, the font family and base size, the corner radius and the spacing
+// scale. Every one has a default here, chosen so that a screen loaded with
+// nothing bound still renders, and every one is a plain writable property so
+// that layer 3 can bind it to the live theme and the development harness can
+// assign a snapshot of a real theme's values.
+//
+// The second block is the game's own constants -- Garage Grid's amber and
+// teal, the eight kart paints, the three rival colours. The design fixes
+// these; they are layered on top of whatever theme the child is running and
+// deliberately do not move with it.
+//
+// The third block derives everything the screens actually ask for from the
+// two above.
+QtObject {
+  id: theme
+
+  // ---------------------------------------------------------------- shell
+  // Defaults are the stock Omarchy dark values. Layer 3 overwrites them from
+  // the live theme; the harness overwrites them from a captured one.
+  property color background: "#1a1b26"
+  property color foreground: "#a9b1d6"
+  property color accent: "#7aa2f7"
+  property color urgent: "#f7768e"
+  property color muted: "#414868"
+
+  property color menuBackground: "#1a1b26"
+  property color menuText: "#a9b1d6"
+  property color menuBorder: "#a9b1d6"
+
+  // The fontconfig alias the shell hands down, and the concrete family it
+  // resolves to. Bind text to `mono`: it prefers the resolved name and falls
+  // back to the alias, so a machine where the alias works still gets it.
+  property string fontFamily: "monospace"
+  property string resolvedFontFamily: ""
+  property int fontBaseSize: 12
+
+  // Hyprland's decoration:rounding, mirrored by the shell. It is 0 on a stock
+  // install, and a garage of square-cornered cards is not the design. So the
+  // shell radius is a floor the theme may raise, never the radius itself.
+  property int shellCornerRadius: 0
+  property real spacingScale: 1.0
+
+  // ------------------------------------------------------- game constants
+  // Design, "Visual style": ground is near-black from the theme's darkest
+  // background, light is warm amber, shadow is dark teal, chrome is the
+  // theme's accent.
+  readonly property color amber: "#f5a524"
+  readonly property color amberDeep: "#a8690f"
+  readonly property color amberGlow: "#ffd489"
+  readonly property color teal: "#39b3ad"
+  readonly property color tealDeep: "#12454a"
+  readonly property color lime: "#86e06a"
+  readonly property color limeDeep: "#1d3a18"
+  readonly property color cream: "#f2e6c4"
+  readonly property color hazard: "#d8a12a"
+  // ROUND-9, PIECE 3. The amber's own deep ember: the same hue, four stops of
+  // value down. It exists because a FILLED control in `amber` at the size the
+  // primary action needs carries a quarter of the frame's light -- measured,
+  // 23.8 % of the luminous mass on 4.8 % of the area, against a sun disc at
+  // 3.5 % -- and a picture with one key light cannot have its brightest object
+  // be a button. The amber stays on the border, the glyph and the focus state,
+  // where the same hue costs a few thousand pixels instead of a hundred
+  // thousand. WCAG relative luminance 0.087 against `amber`'s 0.464; cream on
+  // it measures 6.2:1.
+  readonly property color emberDeep: "#8f3d15"
+
+  // PROTOTYPE: "Golden Hour at the Pit". The palette sampled off the Omarchy
+  // Quattro wallpaper -- one low sun behind-right of the subject, a magenta
+  // sky, purple shadows. Added for the proposal branch; nothing above is
+  // renamed, and the design's amber, cream and teal keep their roles (teal
+  // is now the door-frame accent only). If the direction is adopted these
+  // move into docs/design.md as Visual Style v3; if not, they go with the
+  // branch.
+  readonly property color duskSkyTop: "#5e1a50"
+  readonly property color duskSkyMid: "#a4337b"
+  readonly property color duskSkyHot: "#c24073"
+  readonly property color duskHorizon: "#d75d6b"
+  readonly property color duskSun: "#efcb72"
+  readonly property color duskSunEdge: "#f0956e"
+  readonly property color duskHillFar: "#bc405f"
+  readonly property color duskHillNear: "#8e2c50"
+  readonly property color duskGround: "#3c1228"
+  readonly property color duskShadow: "#5f255e"
+  readonly property color duskRim: "#f0b07a"
+  readonly property color duskNeon: "#ff4fa3"
+  readonly property color duskInk: "#280e27"
+
+  // ADDED IN PIECE 3, ROUND 7, and added rather than substituted: `ground`,
+  // `panel`, `panelRaised` and `panelSunken` below are untouched, so every
+  // screen that has not been re-run under v3 renders exactly as it did.
+  //
+  // The design's Visual style names the ground "near-black purple #3c1228".
+  // The derived `ground` below is the theme's own background driven to 34% --
+  // on stock Omarchy that is #090911, a cold neutral near-black, and it is
+  // what made a 1920x1080 garage frame read as a dark desktop panel with a
+  // small lit window cut in it rather than as a room at golden hour. These
+  // five are the same surface stack in the bar's family, with #3c1228 itself
+  // as the raised card. They are fixed rather than derived for the reason the
+  // block above them is fixed: the design settles the game's palette and it
+  // deliberately does not move with the child's theme. The chrome ON these
+  // surfaces -- the accent, the focus ring, the text roles, the hairlines --
+  // is still the theme's and is unchanged.
+  // ROUND-8, AND THE WHOLE OF THE ROUND. Round seven set this stack at
+  // #1e0816 / #2e0f21 / #3c1228 / #170510: warm, and still near-black. The
+  // frame that came out of it measured mean HSV value 0.273 and mean WCAG
+  // luminance 0.0701 against the bar's 0.575 and 0.1540, with 42.8% of the
+  // picture below luminance 0.01 -- chrome TINTED toward the sunset rather
+  // than LIT by it. Every one of those four is raised here, and the design's
+  // own ground `#3c1228` is now the SUNKEN step rather than the brightest,
+  // so the darkest surface on the screen is the colour the design names as
+  // the game's ground instead of two steps under it.
+  //
+  // The ceiling is arithmetic, not taste. The theme's foreground `#a9b1d6`
+  // has relative luminance 0.447, so a background may reach luminance 0.0604
+  // before full-strength theme text drops under 4.5:1, and 0.0155 -- the
+  // design's own `#3c1228` -- before text at the v1 roles' 0.72 alpha does.
+  // Raising the surfaces past that point therefore costs the alpha hierarchy,
+  // not the contrast floor: the garage's muted text goes to full strength and
+  // takes its hierarchy from size, weight and hue instead. `duskTextQuiet`
+  // below is the one step that is still an alpha, and it is measured.
+  readonly property color duskPage: "#4a1734"
+  readonly property color duskSurface: "#5a1d3e"
+  readonly property color duskSurfaceRaised: "#632043"
+  readonly property color duskSurfaceSunken: "#3c1228"
+  // A hairline and a rule that belong to the room rather than to the desktop:
+  // warm, low-alpha, and used only where an edge is catching the sun.
+  readonly property color duskEdgeWarm: Qt.rgba(duskRim.r, duskRim.g, duskRim.b, 0.22)
+  // The sun on a panel's door-side edge. The room's key does not stop at the
+  // bay's frame: every card on this screen is an object in the same room, so
+  // the edge that faces the opening catches the same `#f0b07a` the crates and
+  // the dais rim catch, and the edge that faces away carries the purple.
+  readonly property color duskLitEdge: Qt.rgba(duskRim.r, duskRim.g, duskRim.b, 0.55)
+  readonly property color duskDarkEdge: Qt.rgba(0.10, 0.02, 0.09, 0.55)
+  // The room's own light on a chrome surface: what a panel's fill runs to on
+  // the side that faces the door.
+  readonly property color duskSurfaceLit: "#7a2a52"
+  // Supporting text on these surfaces. Not `textLabel`/`textDisabled`: those
+  // are 0.80 and 0.72 alpha and are shared with four screens this round does
+  // not touch, so they keep the values that made them measure 5.69:1 and
+  // 4.86:1 there. 0.92 is what clears 4.5:1 on `duskSurface`, and it is the
+  // only alpha step the garage still uses for text.
+  readonly property color duskTextQuiet: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.92)
+
+  // PIECE 3. WHAT A PRESSABLE THING LOOKS LIKE WHEN NOBODY IS POINTING AT IT.
+  //
+  // The maintainer played this screen and said the buttons did not let a mouse
+  // click them. They did -- twenty-seven targets, all live, all with a hover
+  // state, all proved by `--print-controls`. What he could not see was which
+  // things were pressable BEFORE he pressed them, because a stepper arrow and
+  // a CHANGE chip at rest were a chevron in a 5 %-alpha box on a hairline, and
+  // the eye reads that as printing. Reach was solved; discovery was not.
+  //
+  // These two are the resting look of a control on the garage's dusk surfaces:
+  // a face one step PROUD of the card it sits on, and an edge bright enough to
+  // read as a moulding rather than a rule. The hover accent, the focus ring and
+  // the hairline for things that are NOT controls are all unchanged, so the
+  // three states stay three: printed, pressable, and pointed at.
+  // MEASURED, NOT PICKED. The face has to do two jobs that pull against each
+  // other: stand proud of `duskSurface` (#5a1d3e), and carry `text` at the
+  // design's 4.5:1 floor, because the CHANGE chip's own word sits on it. At
+  // #7c2f59 the step was a comfortable 1.43x and the word measured 4.13:1 --
+  // a control that announced itself and could not be read. #6a2650 is 1.19x
+  // the card and 4.96:1 under the word, and the white top edge below is what
+  // pays back the value the face gave up: an edge catching the light is what
+  // makes a face read as proud, and it costs no contrast at all.
+  readonly property color duskPressFace: "#6a2650"
+  readonly property color duskPressEdge: Qt.rgba(1, 1, 1, 0.26)
+
+  // Eight paints, in the order the swatch grid reads them: two rows of four.
+  readonly property var paints: ["#e0483a", "#ee8b3a", "#f2c93c", "#6dc94a",
+                                 "#3f7fe0", "#9a55d6", "#e05fb0", "#d8dbe0"]
+  readonly property var paintNames: ["RED", "ORANGE", "YELLOW", "GREEN",
+                                     "BLUE", "PURPLE", "PINK", "SILVER"]
+
+  // Six car bodies. The names are what the stall caption reads out, and they
+  // are the six archetypes design v3 names, in the sheet order below: piece C
+  // shipped with v1's names still here, so index 3 -- a saloon -- was captioned
+  // BUGGY on the dais. The caption has to name the shape the child is looking at.
+  readonly property var bodyNames: ["COUPE", "HATCH", "WEDGE",
+                                    "SALOON", "BUGGY", "PICKUP"]
+
+  // ---------------------------------------------------- the car sheets
+  // PIECE C. Every car on every screen is a cell of a baked sprite sheet,
+  // `assets/karts/<body>/<paint>.png`, and these two lists are the piece C
+  // contract's file names in the order of the two indices above: body 0 is
+  // `coupe`, paint 7 is `white`. bodyNames above is the same six in the same
+  // order, upper-cased for the caption; paintNames keeps SILVER where the file
+  // says white, because that is the word on the swatch a child already knows.
+  readonly property var bodySheetNames: ["coupe", "hatch", "wedge",
+                                         "saloon", "buggy", "pickup"]
+  readonly property var paintSheetNames: ["red", "orange", "yellow", "green",
+                                          "blue", "purple", "pink", "white"]
+  // Where the sheets live. A plain writable property so the development
+  // harness can point every CarSprite at a stand-in set of sheets with one
+  // assignment; the plugin never writes it.
+  property url carSheetRoot: Qt.resolvedUrl("../assets/karts/")
+
+  // ---------------------------------------------------- the prop kit
+  // The twenty-five baked roadside and effect sprites of `docs/prop-kit.md`,
+  // one indexed PNG per prop at `assets/props/<name>.png`. `ui/parts/PropMeta.js`
+  // is the layer-2 mirror of their cells, views, anchors and bounds, and
+  // `ui/parts/EffectSprite.qml` is the one item that draws a cell. Writable for
+  // the same reason `carSheetRoot` is -- so the harness can point the whole kit
+  // somewhere else with one assignment -- and the plugin never writes it.
+  property url propSheetRoot: Qt.resolvedUrl("../assets/props/")
+
+
+  // ------------------------------------------------------- the sound cues
+  // PIECE F. One PCM WAV per cue under `assets/sfx/`, synthesised by
+  // `src/tools/bake-sfx.py`; `ui/parts/Sfx.qml` is the table that says which
+  // cue belongs to which event. Writable for the same reason the two sheet
+  // roots are, and the plugin never writes it.
+  property url sfxRoot: Qt.resolvedUrl("../assets/sfx/")
+
+  function bodySheetName(index) {
+    return bodySheetNames[((index % bodySheetNames.length) + bodySheetNames.length) % bodySheetNames.length]
+  }
+
+  function paintSheetName(index) {
+    return paintSheetNames[((index % paintSheetNames.length) + paintSheetNames.length) % paintSheetNames.length]
+  }
+
+  // ------------------------------------------------------- the one camera
+  // ROUND-6. The kart and the floor it stands on are drawn by two different
+  // files, and until now they were drawn by two different cameras. A critic
+  // put the number on it: solving the sprite's own published basis gave an
+  // apparent pitch of about 31 degrees, while a least-squares fit of the
+  // turntable's rim (486 points, rms 0.35 px) gave 23.96 -- the dais was
+  // drawn 27 px flatter than the kart's projection required, 77 times the
+  // fit residual. Two cameras in one picture is why the kart read as
+  // composited onto the dais rather than standing on it.
+  //
+  // These four numbers are now the ONLY camera in the garage. The v1 live
+  // sprite took its projection from them and GarageStall still derives the
+  // turntable from them, so the plinth is the one a critic measured. The
+  // car on it is now a baked sheet cell (piece C); the sheet's own stall
+  // camera is fixed by the bake, and these numbers describe the dais.
+  // Nothing here is a colour or a theme value; it lives in Theme because
+  // Theme is the one module both files already import.
+  readonly property real kartYawDeg: 22
+  readonly property real kartPitchDeg: 25
+  // Distance to the picture plane, in model units, and the height of the
+  // point the camera is aimed at above the floor. Both are what makes the
+  // far side of the kart smaller than the near side.
+  readonly property real kartFocal: 190
+  readonly property real kartAimHeight: 13
+
+  // A horizontal circle of model radius `r` centred on the point where the
+  // kart's wheels touch the floor, projected by that camera, in the kart
+  // sprite's own view-box units:
+  //
+  //   a   the semi-axis across the screen
+  //   b   the semi-axis down the screen
+  //   dy  how far the ellipse's CENTRE falls below the contact point
+  //
+  // `dy` is not a fudge. Under a projection with a finite focal length the
+  // near arc of a floor circle is closer to the camera than the far arc, so
+  // it swings further from the contact point than the far arc does, and the
+  // projected ellipse's centre is not the projection of the circle's centre.
+  // A dais drawn as an ellipse centred on the kart's wheels is therefore
+  // wrong even if its axis ratio is right.
+  //
+  // Closed form, derived from the projection rather than fitted. With
+  // A = f sin(pitch) + aimHeight cos(pitch) and q = f^2 - r^2:
+  //
+  //   a = r f / sqrt(q)      b = r f A / q      dy = r^2 A / q
+  //
+  // It reproduces a 1440-point conic fit of the same circle to five decimal
+  // places, and as f grows it collapses to the orthographic answer
+  // b/a -> sin(pitch), dy -> 0, which is the check that it is the right
+  // formula and not a coincidence.
+  function groundEllipse(r) {
+    var f = kartFocal
+    var A = f * Math.sin(kartPitchDeg * Math.PI / 180)
+            + kartAimHeight * Math.cos(kartPitchDeg * Math.PI / 180)
+    var q = f * f - r * r
+    if (q <= 0 || r <= 0)
+      return { a: 0, b: 0, dy: 0 }
+    return { a: r * f / Math.sqrt(q), b: r * f * A / q, dy: r * r * A / q }
+  }
+
+  // The apparent pitch of a floor circle of radius `r` under that camera, in
+  // degrees: asin(b/a). It is NOT kartPitchDeg -- the perspective divide and
+  // the camera's height above the floor both steepen it, and it grows with
+  // the circle. This is the number a critic measures off the frame, so it is
+  // the number this file publishes.
+  function groundPitchDeg(r) {
+    var e = groundEllipse(r)
+    return e.a > 0 ? Math.asin(Math.min(1, e.b / e.a)) * 180 / Math.PI : 0
+  }
+
+  // The three rivals of the design's AI table, in fixed order.
+  readonly property var rivalNames: ["BOLT", "PISTON", "GASKET"]
+  readonly property var rivalPaints: [2, 4, 3]
+  readonly property var rivalNumbers: [21, 34, 55]
+
+  // WHICH CAR A SEAT IS, IN ONE PLACE.
+  //
+  // PIECE 5, ROUND 3. Two screens now stand a field on the start grid -- the
+  // race and the countdown one second before it -- and the three tables above
+  // are only half of what "which car is BOLT" means: the other half is the
+  // `(seat - 1)` indexing and the `(seat + 1) % 6` body, which `ui/Race.qml`
+  // held privately. A second screen copying those two expressions is how the
+  // countdown's field would come to be a different field from the race's, in
+  // the same way its ground came to be a different ground. So the seat answers
+  // for itself, here, beside the tables it reads.
+  //
+  // Seat 0 is the child, whose car is the save file's and not this file's.
+  function rivalFace(seat) {
+    var i = Math.max(0, seat - 1) % rivalNames.length
+    return { "name": rivalNames[i],
+             "paint": paint(rivalPaints[i]),
+             "number": rivalNumbers[i],
+             // The six bodies, in seat order, skipping the coupe the child's
+             // own car defaults to.
+             "body": (seat + 1) % 6 }
+  }
+  readonly property var levelNames: ["ROOKIE", "PRO", "CHAMPION"]
+
+  // --------------------------------------------------------------- derived
+  readonly property string mono: resolvedFontFamily.length > 0 ? resolvedFontFamily : fontFamily
+
+  // Ground. The design asks for near-black taken from the theme's darkest
+  // background, and for it to stay dark under a light theme, so the page is
+  // the theme background driven most of the way to black rather than a
+  // hard-coded hex: a themed near-black instead of a generic one.
+  readonly property color ground: Qt.rgba(background.r * 0.34, background.g * 0.34, background.b * 0.34, 1)
+  readonly property color panel: Qt.rgba(background.r * 0.55, background.g * 0.55, background.b * 0.60, 1)
+  readonly property color panelRaised: Qt.rgba(background.r * 0.78, background.g * 0.78, background.b * 0.84, 1)
+  readonly property color panelSunken: Qt.rgba(background.r * 0.22, background.g * 0.22, background.b * 0.26, 1)
+
+  // Four text roles, and the alphas are set by contrast rather than by taste.
+  // Against this screen's darkest surfaces the menu text composites to about
+  // 9.1:1 at full strength, so 0.80 lands a label near 5.9:1 and 0.72 lands a
+  // disabled control near 5.4:1 -- both clear of the 4.5:1 the design's
+  // accessibility section requires of body text. The previous 0.62 measured
+  // 4.05 to 4.18:1 and failed. `textFaint` is not a text role: it is the dot
+  // separator and the unlit lamp ring, and nothing readable uses it.
+  readonly property color text: menuText
+  readonly property color textBright: Qt.lighter(menuText, 1.32)
+  readonly property color textLabel: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.80)
+  readonly property color textDisabled: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.72)
+  readonly property color textFaint: Qt.rgba(menuText.r, menuText.g, menuText.b, 0.38)
+
+  readonly property color line: Qt.rgba(menuBorder.r, menuBorder.g, menuBorder.b, 0.16)
+  readonly property color lineStrong: Qt.rgba(menuBorder.r, menuBorder.g, menuBorder.b, 0.30)
+  readonly property color focusRing: accent
+  readonly property color focusFill: Qt.rgba(accent.r, accent.g, accent.b, 0.14)
+  readonly property color selectedFill: Qt.rgba(accent.r, accent.g, accent.b, 0.20)
+
+  // PIECE M -- WHAT A CONTROL LOOKS LIKE UNDER THE POINTER.
+  //
+  // The mouse needs an answer to a question the keyboard never asks: "is the
+  // thing under the pointer a control at all?" A child moving a mouse across
+  // this game has to be able to find that out BEFORE pressing, so every click
+  // target lights while the pointer is over it.
+  //
+  // It is the accent, because that is what the rest of the game already means
+  // by "the thing you are on" -- the focus ring is `accent` and so is the
+  // selection fill -- and it is deliberately WEAKER than both: hover is a
+  // pointer passing over, focus is where the keyboard stands, and if the two
+  // read the same then moving a mouse across a screen looks like eight
+  // controls all being focused at once. Half the ring's alpha and two thirds
+  // of the fill's, measured to sit between "nothing" and the focus ring rather
+  // than beside either.
+  readonly property color hoverRing: Qt.rgba(accent.r, accent.g, accent.b, 0.52)
+  readonly property color hoverFill: Qt.rgba(accent.r, accent.g, accent.b, 0.09)
+
+  // PIECE M -- `panel` AT 0.55 OVER `ground`, ALREADY COMPOSED.
+  //
+  // Settings and Results each stand one Panel across the whole window at
+  // `Qt.rgba(panel.r, panel.g, panel.b, 0.55)`, over a Rectangle filled with
+  // `ground` and nothing else. At 1080p that is a 1888 x 1048 per-pixel alpha
+  // blend, every frame, to produce a colour that never varies -- the backdrop
+  // under it is a constant, so the composite is a constant too.
+  //
+  // This is that constant: source-over of `panel` at 0.55 onto an opaque
+  // `ground`, which for an opaque backdrop is exactly
+  // `src * a + dst * (1 - a)` per channel. It is written here rather than as a
+  // literal at the two call sites so a retinted desktop moves it with the rest
+  // of the theme, and so the arithmetic exists once.
+  //
+  // It is NOT a general-purpose role: it is only the same pixels while the
+  // thing underneath is `ground`. Both callers fill their root with `ground`
+  // and draw nothing between; anything else has to compose its own.
+  // The alpha is 140/255 rather than 0.55 because that is the number the
+  // renderer actually used: a QColor holds eight bits per channel, so
+  // `Qt.rgba(r, g, b, 0.55)` becomes an alpha BYTE of round(0.55 x 255) = 140.
+  //
+  // IT DID NOT CLOSE THE LAST STEP, and saying so is the point of writing it
+  // down. Measured both ways over the whole 1920 x 1080 frame, the composite
+  // still differs from Qt's own blend by at most ONE 255th of a channel, on 30%
+  // of the settings frame and 85% of the results frame, with 0.55 and with
+  // 140/255 alike -- Qt's raster path rounds through premultiplied integers and
+  // this expression rounds once at the end. One 8-bit step is below the
+  // quantisation the frame is stored in, so nothing on either screen looks
+  // different; the frame diff in this round's report states the bound rather
+  // than claiming the frames are byte-identical, because they are not.
+  readonly property real panelAlpha: 140 / 255
+  readonly property color panelOnGround:
+      Qt.rgba(panel.r * panelAlpha + ground.r * (1 - panelAlpha),
+              panel.g * panelAlpha + ground.g * (1 - panelAlpha),
+              panel.b * panelAlpha + ground.b * (1 - panelAlpha), 1)
+
+  readonly property int cornerRadius: Math.max(10, shellCornerRadius)
+  readonly property int cornerRadiusSmall: Math.max(6, shellCornerRadius)
+
+  // The shell's space() with the same rounding rule, so a themed spacing
+  // scale moves the garage the same way it moves the rest of the desktop.
+  function space(px) {
+    var n = Number(px) * spacingScale
+    if (!isFinite(n) || n <= 0)
+      return 0
+    return Math.max(1, Math.round(n))
+  }
+
+  // The type scale, in the shell's multipliers off the shell's base size.
+  function fontPx(mult) {
+    return Math.max(1, Math.round(fontBaseSize * mult))
+  }
+
+  function paint(index) {
+    return paints[((index % paints.length) + paints.length) % paints.length]
+  }
+
+  function paintName(index) {
+    return paintNames[((index % paints.length) + paints.length) % paints.length]
+  }
+
+  function bodyName(index) {
+    return bodyNames[((index % bodyNames.length) + bodyNames.length) % bodyNames.length]
+  }
+
+  // Foreground that stays legible on a filled paint swatch or number plate.
+  function ink(onColor) {
+    var c = onColor
+    var luminance = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+    return luminance > 0.55 ? Qt.rgba(0.04, 0.04, 0.05, 1) : Qt.rgba(1, 1, 1, 1)
+  }
+}

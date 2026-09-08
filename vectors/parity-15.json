@@ -1,0 +1,265 @@
+{
+  "note": "The bellringer's threshold of 15 and the literal expectations transcribed from internal/bellringerruntime/service_test.go. firstThreeHands comes from TestPowerupAwardsFollowDeterministicEightPowerSchedule's expectedAwards; initiatorBefore and every perCard row come from TestAllEightPowerupsReturnAuthoritativePositionsAndImpacts's table; shieldBlock comes from TestShieldBlocksAndIsConsumedByNextAttack. These are Go's numbers, copied by hand, and tests/vectors.test.ts asserts THIS engine against them. Two things in this file are not Go's: the garage-name column, which is the design's Powerups table, and attackerPositionAfterFifteenAnswers.effectiveProgressDerived, which Go does not compute at all and which is derived here from Go's own triple by the design's effective-progress formula (1 x 12 + 3 - (12 - 12) = 15).",
+  "provenance": {
+    "file": "internal/bellringerruntime/service_test.go",
+    "repository": "/Users/don/Developer/LiveClassBackend",
+    "tests": [
+      "TestPowerupAwardsFollowDeterministicEightPowerSchedule",
+      "TestAllEightPowerupsReturnAuthoritativePositionsAndImpacts",
+      "TestShieldBlocksAndIsConsumedByNextAttack"
+    ],
+    "transcribedByHand": true,
+    "generatedByThisEngine": false
+  },
+  "threshold": 15,
+  "bellringerSchedule": [
+    "FuelBoost",
+    "GravityWell",
+    "Lightning",
+    "BlackHole",
+    "Shield",
+    "Supernova",
+    "Turbo",
+    "Wormhole"
+  ],
+  "firstThreeHands": [
+    {
+      "handNumber": 1,
+      "bellringerHand": [
+        "FuelBoost",
+        "GravityWell",
+        "Lightning"
+      ],
+      "hand": [
+        "nitro",
+        "oilSlick",
+        "wrench"
+      ]
+    },
+    {
+      "handNumber": 2,
+      "bellringerHand": [
+        "BlackHole",
+        "Shield",
+        "Supernova"
+      ],
+      "hand": [
+        "pothole",
+        "rollCage",
+        "pileUp"
+      ]
+    },
+    {
+      "handNumber": 3,
+      "bellringerHand": [
+        "Turbo",
+        "Wormhole",
+        "FuelBoost"
+      ],
+      "hand": [
+        "turbo",
+        "towHook",
+        "nitro"
+      ]
+    }
+  ],
+  "attackerPositionAfterFifteenAnswers": {
+    "lapsComplete": 1,
+    "correctInLap": 3,
+    "questionsNeededThisLap": 12,
+    "effectiveProgressDerived": 15
+  },
+  "perCard": [
+    {
+      "card": "nitro",
+      "bellringerName": "FuelBoost",
+      "target": "",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 8
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 12
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": -4,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "oilSlick",
+      "bellringerName": "GravityWell",
+      "target": "",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 15
+      },
+      "impactCount": 2,
+      "appliedQuestionDelta": 3,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "wrench",
+      "bellringerName": "Lightning",
+      "target": "target",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 17
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": 5,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "pothole",
+      "bellringerName": "BlackHole",
+      "target": "target",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 20
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": 8,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "rollCage",
+      "bellringerName": "Shield",
+      "target": "",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 12
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": 0,
+      "rollCagesAfter": 1
+    },
+    {
+      "card": "pileUp",
+      "bellringerName": "Supernova",
+      "target": "target",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 27
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": 15,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "turbo",
+      "bellringerName": "Turbo",
+      "target": "",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 2,
+        "correctInLap": 1,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 12
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": -10,
+      "rollCagesAfter": 0
+    },
+    {
+      "card": "towHook",
+      "bellringerName": "Wormhole",
+      "target": "target",
+      "initiatorBefore": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "initiatorAfter": {
+        "lapsComplete": 0,
+        "correctInLap": 0,
+        "questionsNeededThisLap": 12
+      },
+      "targetAfter": {
+        "lapsComplete": 1,
+        "correctInLap": 3,
+        "questionsNeededThisLap": 12
+      },
+      "impactCount": 1,
+      "appliedQuestionDelta": 0,
+      "rollCagesAfter": 0
+    }
+  ],
+  "shieldBlock": {
+    "attackerPowerup": "Lightning",
+    "shieldAbsorbed": true,
+    "appliedQuestionDelta": 0,
+    "targetShieldCountAfter": 0,
+    "targetQuestionsNeededThisLap": 12
+  }
+}

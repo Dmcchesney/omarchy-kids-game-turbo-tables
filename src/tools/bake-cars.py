@@ -1,0 +1,978 @@
+"""Bake one low-poly rally car body to its two turnarounds, headless.
+
+  blender -b --python bake-cars.py -- --body coupe --paint e0483a --out DIR
+      [--px 4] [--only stall:0,road:3] [--silhouette]
+
+The script IS the model: no .blend is read or written. Every part is a
+primitive with a bevel modifier, flat-shaded, lit by one warm sun from
+behind-right and a cool purple fill, rendered on transparent film with EEVEE.
+Palette banding, outline and the pixel grid are applied afterwards by
+pxart.py, so the render here stays clean and un-quantised.
+
+Stance, the thing a silhouette is made of: every closed body stands on its
+tyres. The body slab floats at RIDE above the ground, the tyres stand proud of
+the arch flares, and each arch is a real hole -- a cylinder booleaned out of
+the slab, the flare, the sill and the livery band, with a dark well box behind
+it -- so a tyre sits IN an opening with air under the sills, not under a bump.
+Judge a body as a black cut-out (--silhouette) before judging its paint.
+
+Glasshouse, the thing a CAR is made of: every closed body has a window band
+with its own tone, pillars in body colour standing in it, and a dark beltline
+moulding under it. Rounds 1-3 had none of that. The windows were painted
+2a1030, three units from the outline ink 280e27, so the quantiser sent every
+window pixel to the outline colour: glass and outline were the same black, the
+roof floated as a lid over a hole, and 34 to 50 % of the top third of the
+coupe, the hatch and the saloon was the line that draws the car. The bar's own
+read at small size comes from its interior -- the black window band, the lamp
+pods, the arch flares -- not from its edge, which as a pure cut-out is one
+black block. So does ours now.
+
+Rim: the paint material carries a warm rim term, an emission of the ramp's
+highlight step on faces whose world normal points up-and-right (RIM_DIR), so
+the single-segment chamfers along the sun-side top edges land in the palette's
+highlight step instead of clipping back to the swatch. It is world-space, so
+it stays on the screen's upper-right at every yaw and never on the underside.
+That term lights facets. The EDGE is pxart.outline()'s job: it draws the
+sunward third of the ring in the highlight step instead of the ink, so the
+line around the car breaks where the sun is. Golden hour is an edge, not a
+facet, and a uniform ink ring is neither.
+
+Output, per run:
+
+  DIR/stall-{0..7}.png, DIR/road-{0..7}.png
+      the eight yaws (i x 45 degrees about vertical) from each camera, rendered
+      at --px times the contract's 192x128 cell with the car's ground-centre at
+      a FIXED image point (GROUND, below), so a cell is a plain box-downscale
+      of a render and every yaw of every body shares one anchor.
+  DIR/meta.json
+      the number rects, tail-lamp centres and the ground anchor, in cell
+      pixels at scale 1.0, computed from the projected bounds of the roundel
+      and plate objects -- never by eye. A rect is visible only when its panel
+      faces the lens squarely enough for two digits AND a ray from the lens to
+      its centre reaches it (nothing of the car in the way).
+
+--silhouette renders every material flat black with no lights, no world and
+no contact shadow: the cut-out test.
+
+Two cameras, both fixed while the car turns:
+  stall  off the rear-right shoulder at a little above wheel-hub height, the
+         bar's eye level, so tyres, arches and the air under the sills carry
+         the silhouette (garage, roster, countdown)
+  road   directly behind, a little above the roof line (the track)
+Column 0 is the car facing +Y, its rear to both cameras.
+
+The number is NOT baked. Roundels and the rear plate are cream and blank.
+"""
+import json
+import math
+import os
+import sys
+
+import bpy
+from bpy_extras.object_utils import world_to_camera_view
+from mathutils import Vector
+
+# pxart.py is the one source of the paint ramp. No __pycache__ next to it: the
+# boundary check allows no binary but .png, .wav and .qsb anywhere in the tree.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pxart import hex2rgb, paint_ramp  # noqa: E402
+
+# ------------------------------------------------------------------ args
+argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+
+
+def arg(k, d):
+    return argv[argv.index(k) + 1] if k in argv else d
+
+
+BODY = arg("--body", "coupe")
+PAINT = arg("--paint", "e0483a").lstrip("#")
+OUT = arg("--out", "/tmp/bake")
+PX = int(arg("--px", "4"))          # render at PX times the 1.0-scale cell
+ONLY = arg("--only", "")            # "stall:0,road:3" renders just those frames
+SILHOUETTE = "--silhouette" in argv
+RIM = float(arg("--rim", "1.0"))     # rim mix factor on a full rim face; 0 turns the term off
+YAWS = 8
+CELL_W, CELL_H = 192, 128           # the contract's scale-1.0 cell
+# Where the car's ground-centre (world origin) sits in the cell, per camera, as
+# a fraction of the cell from the left and from the BOTTOM. The consumer anchors
+# a cell at bottom-centre; the lowest pixel of a cell is the contact shadow
+# under the rear bumper, which from an elevated camera projects well below the
+# car's centre -- 40-odd px at scale 1.0 from the stall camera. meta.json's
+# "ground" records the origin's cell pixel so a consumer can correct for it.
+GROUND = {"stall": (0.5, 0.24), "road": (0.5, 0.20)}
+os.makedirs(OUT, exist_ok=True)
+
+
+def srgb_to_linear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def rgb(h, a=1.0):
+    """A hex swatch as Blender wants it: colour sockets are LINEAR. Feeding
+    them sRGB bytes (the prototype did) re-encodes on output and every colour
+    comes back lighter and washed -- red as salmon. Under the Standard view
+    transform a face lit at exactly 1.0 now renders as exactly its swatch."""
+    return tuple(srgb_to_linear(int(h[i:i + 2], 16) / 255) for i in (0, 2, 4)) + (a,)
+
+
+def hexof(c):
+    return "%02x%02x%02x" % tuple(c)
+
+
+# ------------------------------------------------------------------ scene
+bpy.ops.wm.read_factory_settings(use_empty=True)
+sc = bpy.context.scene
+sc.render.engine = "BLENDER_EEVEE"
+sc.render.resolution_x = CELL_W * PX
+sc.render.resolution_y = CELL_H * PX
+sc.render.resolution_percentage = 100
+sc.render.film_transparent = True
+sc.render.image_settings.file_format = "PNG"
+sc.render.image_settings.color_mode = "RGBA"
+sc.render.image_settings.compression = 15
+sc.view_settings.view_transform = "Standard"
+sc.view_settings.look = "None"
+# Pinned for reproducibility: a fixed sample count, no reprojection, no
+# ray tracing. The two-bake check in bake-sprites.ts is the proof; if it ever
+# fails, these are the knobs.
+sc.eevee.taa_render_samples = 16
+sc.eevee.use_taa_reprojection = False
+sc.eevee.use_raytracing = False
+sc.eevee.use_shadows = True
+sc.eevee.shadow_ray_count = 2
+sc.eevee.shadow_step_count = 4
+sc.render.use_motion_blur = False
+world = bpy.data.worlds.new("dusk")
+sc.world = world
+world.use_nodes = True
+bg = world.node_tree.nodes["Background"]
+bg.inputs[0].default_value = rgb("5e1a50")
+bg.inputs[1].default_value = 0.0 if SILHOUETTE else 0.25
+
+root = bpy.data.objects.new("car", None)
+sc.collection.objects.link(root)
+
+# The paint's own four-step ramp, the same numbers pxart quantises to, so a
+# part painted in the ramp's shadow step lands on that step and keeps the hue.
+RAMP = paint_ramp(PAINT)
+PAINT_SHADE = hexof(RAMP[1])
+PAINT_HIGH = hexof(RAMP[3])
+# Light paints (white, yellow) get the contrasting livery: a dark band with a
+# cream stripe, so the livery does not vanish into the paint.
+_pr, _pg, _pb = (int(PAINT[i:i + 2], 16) / 255 for i in (0, 2, 4))
+LIGHT_PAINT = 0.2126 * _pr + 0.7152 * _pg + 0.0722 * _pb > 0.70
+# World-space direction of the rim: up, to the viewer's right and a little
+# toward the far side, for both cameras (screen-right is +X for the road
+# camera and +X+Y for the stall; the far side is +Y for both): a low sun
+# behind-right of the car, the bar's. Never the underside, never the near
+# or left edges.
+RIM_DIR = Vector((0.55, 0.45, 0.70)).normalized()
+
+
+# ------------------------------------------------------------------ materials
+def mat(name, color, rough=1.0, emit=None, strength=0.0, rim=False):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nodes, links = m.node_tree.nodes, m.node_tree.links
+    p = nodes["Principled BSDF"]
+    p.inputs["Base Color"].default_value = rgb(color)
+    p.inputs["Roughness"].default_value = rough
+    p.inputs["Specular IOR Level"].default_value = 0.2
+    if SILHOUETTE:
+        p.inputs["Base Color"].default_value = (0, 0, 0, 1)
+        p.inputs["Specular IOR Level"].default_value = 0.0
+        return m
+    if emit:
+        p.inputs["Emission Color"].default_value = rgb(emit)
+        p.inputs["Emission Strength"].default_value = strength
+    if rim and RIM > 0:
+        # Rim term: dot(world-space normal, RIM_DIR) mapped 0.74..0.84 -> 0..RIM
+        # is the factor of a Mix Shader between the lit surface and a plain
+        # Emission of the ramp's highlight step, so a rim pixel IS the highlight
+        # step whatever the key does to that face (additive light on a lit
+        # chamfer overshoots to cream or a neutral on the light paints). A
+        # 45-degree chamfer between the roof and the right flank sits at 0.88,
+        # the roof-to-far-edge chamfer at 0.81; the roof and the flanks at 0.70
+        # and below, so only the edges catch it.
+        g = nodes.new("ShaderNodeNewGeometry")
+        dot = nodes.new("ShaderNodeVectorMath")
+        dot.operation = "DOT_PRODUCT"
+        dot.inputs[1].default_value = RIM_DIR
+        links.new(g.outputs["Normal"], dot.inputs[0])
+        ramp = nodes.new("ShaderNodeMapRange")
+        ramp.inputs["From Min"].default_value = 0.70
+        ramp.inputs["From Max"].default_value = 0.84
+        ramp.inputs["To Min"].default_value = 0.0
+        ramp.inputs["To Max"].default_value = RIM
+        ramp.clamp = True
+        links.new(dot.outputs["Value"], ramp.inputs["Value"])
+        em = nodes.new("ShaderNodeEmission")
+        em.inputs["Color"].default_value = rgb(PAINT_HIGH)
+        em.inputs["Strength"].default_value = 1.0
+        mix = nodes.new("ShaderNodeMixShader")
+        links.new(ramp.outputs["Result"], mix.inputs["Fac"])
+        links.new(p.outputs["BSDF"], mix.inputs[1])
+        links.new(em.outputs["Emission"], mix.inputs[2])
+        links.new(mix.outputs["Shader"], nodes["Material Output"].inputs["Surface"])
+    return m
+
+
+M = {
+    "paint": mat("paint", PAINT, 0.85, rim=True),
+    # the paint's own shadow step, for a cage or floor that must stay the
+    # paint's hue without being a lit panel
+    "shade": mat("shade", PAINT_SHADE, 0.9),
+    "livery": mat("livery", "f2e6c4", 0.9),
+    "stripe": mat("stripe", "3c1228", 0.9),
+    # Glass is EMITTED, not lit. Rounds 1-3 gave the windows a base colour of
+    # 2a1030 and let the key light decide: a near-vertical window faces neither
+    # the sun nor the fill, so it came back at three units from the outline ink
+    # 280e27 and the quantiser sent it there. Glass and outline were the same
+    # black, so the roof floated as a lid over a hole. An emission at exactly
+    # the palette's glass tone under the Standard view transform renders as
+    # exactly that tone at every yaw, which is what a window band is in pixel
+    # art: a flat dark shape, not a shaded surface. `glass_lit` is the screens,
+    # one step up, because a windscreen catches the sky and a door window does
+    # not.
+    "glass": mat("glass", "000000", 1.0, "343a52", 1.0),
+    "glass_lit": mat("glass_lit", "000000", 1.0, "4d5573", 1.0),
+    # The beltline moulding under the glass: the hard line where the
+    # greenhouse stops and the body starts.
+    "belt": mat("belt", "1a1b26", 0.9),
+    "tyre": mat("tyre", "1a1220", 1.0),
+    "rim": mat("rim", "6b7291", 0.7),
+    "trim": mat("trim", "2a2b3d", 0.8),
+    "chrome": mat("chrome", "a9b1d6", 0.5),
+    "cage": mat("cage", "414868", 0.7),
+    # Lamps: a black base and emission at exactly 1.0 under the Standard view
+    # transform, so a lamp pixel IS its colour and does not blow out to white.
+    "head": mat("head", "000000", 1.0, "ffd489", 1.0),
+    "tail": mat("tail", "000000", 1.0, "f01a1a", 1.0),
+    "glow": mat("glow", "000000", 1.0, "ffb3a0", 1.0),
+    "ink": mat("ink", "1a1220", 1.0),
+}
+# Livery: cream band with a dark stripe on most paints; on light paints the
+# band is dark and the stripe cream, so it still reads. Roundels stay cream
+# (the contract) and get a dark ring so the disc is a disc on every paint.
+BAND, BAND_STRIPE = (M["stripe"], M["livery"]) if LIGHT_PAINT else (M["livery"], M["stripe"])
+# The contact shadow: a flat purple disc, blended. pxart flattens every pixel
+# whose alpha is below its cut to one purple tone at half alpha, so only the
+# rendered alpha matters here: EEVEE writes a material alpha of 0.30 as about
+# 130/255 on transparent film (measured; the film encodes alpha non-linearly),
+# well under pxart's cut of 200 and well over its floor of 24.
+shadow_mat = bpy.data.materials.new("shadow")
+shadow_mat.use_nodes = True
+sp = shadow_mat.node_tree.nodes["Principled BSDF"]
+sp.inputs["Base Color"].default_value = rgb("5f255e")
+sp.inputs["Alpha"].default_value = 0.30
+sp.inputs["Roughness"].default_value = 1.0
+for attr, val in (("surface_render_method", "BLENDED"), ("blend_method", "BLEND")):
+    try:
+        setattr(shadow_mat, attr, val)
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------ parts
+ARCHED = []     # parts the arch cutters are booleaned out of
+CUTTERS = []    # the cutter objects, hidden from render
+
+
+def _finish(o, name, material, bevel, seg=2):
+    o.name = name
+    if material is not None:
+        o.data.materials.append(material)
+    if bevel:
+        b = o.modifiers.new("bevel", "BEVEL")
+        b.width = bevel
+        b.segments = seg
+        b.limit_method = "ANGLE"
+    for poly in o.data.polygons:
+        poly.use_smooth = False
+    o.parent = root
+    return o
+
+
+def box(name, size, loc, material, bevel=0.06, rot=(0, 0, 0), seg=2, cut=False):
+    """An axis-aligned block. size=(x,y,z) full extents; rot in radians.
+    seg=1 is a flat 45-degree chamfer, the face the rim term lands on.
+    cut=True: the arch cutters are subtracted from it."""
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+    o = bpy.context.active_object
+    o.scale = size
+    o.rotation_euler = rot
+    _finish(o, name, material, bevel, seg)
+    if cut:
+        ARCHED.append(o)
+    return o
+
+
+def chamfered(name, size, loc, material, bevel=0.22, rot=(0, 0, 0), cut=False):
+    """A body panel: one flat 45-degree chamfer, wide enough to be a 4-px face at
+    scale 1.0 so the rim survives the quantiser and the despeckle."""
+    return box(name, size, loc, material, bevel=bevel, rot=rot, seg=1, cut=cut)
+
+
+def cyl(name, r, depth, loc, material, verts=14, rot=(0, math.pi / 2, 0), bevel=0.0, scale=(1, 1, 1)):
+    bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=r, depth=depth, location=loc, rotation=rot)
+    o = bpy.context.active_object
+    o.scale = scale
+    return _finish(o, name, material, bevel)
+
+
+def wheel(loc, r=0.42, w=0.30, knobbly=False):
+    """A tyre as a short cylinder with a two-tone rim. Knobbly: two coarse
+    decagons half a step apart give a toothed outline."""
+    if knobbly:
+        cyl("tyre", r, w, loc, M["tyre"], verts=10, bevel=0.03)
+        cyl("tyre_k", r * 0.94, w * 1.08, loc, M["tyre"], verts=10, rot=(0, math.pi / 2, math.pi / 10), bevel=0.02)
+    else:
+        cyl("tyre", r, w, loc, M["tyre"], verts=14, bevel=0.03)
+    cyl("rim", r * 0.6, w * 1.06, loc, M["rim"], verts=10)
+    cyl("hub", r * 0.24, w * 1.12, loc, M["trim"], verts=8)
+
+
+def wheels(xs, ys, r, w=0.30, knobbly=False):
+    for y in ys:
+        for x in xs:
+            wheel((x, y, r), r, w, knobbly)
+
+
+def arches(xs, ys, r, ride, hole=0.16, inner=0.30):
+    """Cut a wheel opening for every (x, y): a cylinder of radius r + hole about
+    the axle, booleaned out of every ARCHED part after the body is built, and a
+    dark well box behind the tyre, from the sill floor up, so the opening reads
+    as a hollow with the tyre in it. xs are the tyre CENTRES; the cutter spans
+    from well inside the body to well outside the flare."""
+    for y in ys:
+        for x in xs:
+            s = 1 if x > 0 else -1
+            bpy.ops.mesh.primitive_cylinder_add(vertices=32, radius=r + hole, depth=1.4, location=(x, y, r), rotation=(0, math.pi / 2, 0))
+            c = bpy.context.active_object
+            c.name = "cutter"
+            c.parent = root
+            c.hide_render = True
+            CUTTERS.append(c)
+            wx = abs(x) - inner / 2 - 0.02
+            box("well", (inner, 2 * (r + hole) + 0.10, 2 * r + hole - ride + 0.06),
+                (s * wx, y, (ride + 2 * r + hole + 0.06) / 2), M["ink"], bevel=0.0)
+
+
+def cut_arches():
+    for o in ARCHED:
+        for c in CUTTERS:
+            b = o.modifiers.new("arch", "BOOLEAN")
+            b.operation = "DIFFERENCE"
+            b.solver = "EXACT"
+            b.object = c
+
+
+def livery(x_half, y0, length, z, height=0.42):
+    """A cream door panel BETWEEN the arch openings, with a dark stripe along
+    its lower edge, proud of the flank by a few centimetres.
+
+    Rounds 1-3 ran this band the whole length of the flank and put it in the
+    arch cutters' way, at exactly wheel height. What survived the boolean was
+    two stubs, and the roundel's ring covered most of what was left: on a
+    chromatic 192 cell the entire cream count was 407 pixels, all of it plate
+    and roundel, and a critic recorded the livery as absent on all seven
+    chromatic paints. This panel is NOT cut. Each body passes the gap between
+    its own two openings, so nothing needs to be booleaned away, and the panel
+    fills the flank from the sill to the shoulder instead of being a stripe at
+    hub height."""
+    for s in (-1, 1):
+        box("livery", (0.06, length, height), (s * x_half, y0, z), BAND, bevel=0.0)
+        box("stripe", (0.06, length, 0.07), (s * (x_half + 0.004), y0, z - height / 2 + 0.05), BAND_STRIPE, bevel=0.0)
+
+
+def glasshouse(width, spans, z, height, pillars=(), tone="glass"):
+    """The side window band: one dark window per (y0, y1) span, with the
+    cabin's own paint standing between them as the pillars.
+
+    `width` is a little wider than the cabin, so the glass shows on both
+    flanks; a pillar box is wider again, so a pillar is never a recess that
+    the quantiser can fill in. `pillars` are (y, thickness) posts in body
+    colour. A pillar is 0.18 to 0.22 deep, which is 2 to 3 cell px at the 96
+    cell (the roster slot, where a child picks a car) and 5 to 6 at the 192
+    (the garage dais and the countdown).
+
+    Without this the greenhouse was one uninterrupted slot and the roof had
+    nothing holding it to the body."""
+    for y0, y1 in spans:
+        box("glass", (width, y1 - y0, height), (0, (y0 + y1) / 2, z), M[tone], bevel=0.02)
+    for y, thick in pillars:
+        box("pillar", (width + 0.06, thick, height + 0.02), (0, y, z), M["paint"], bevel=0.02)
+
+
+def beltline(width, y0, y1, z, height=0.06):
+    """The dark moulding along the bottom of the glass: the hard step where a
+    smaller box stops sitting on a bigger one."""
+    box("belt", (width, y1 - y0, height), (0, (y0 + y1) / 2, z), M["belt"], bevel=0.0)
+
+
+def roundels(x_half, y, z, r=0.30):
+    """Cream roundels, one per door. No dark ring any more: the door panel
+    under them is cream on the seven chromatic paints, so a ringed disc read
+    as a porthole punched in the door -- a critic called the round-3 version a
+    blank cream egg, and a ring only made the egg an outlined egg. Flush and
+    unringed, the roundel is simply the lighter part of a cream door and the
+    number lands on it, which is what the bar does. On the light paints the
+    panel is dark and the cream disc shows on its own. Named for
+    meta.json: this object IS the number panel at four of eight stall yaws and
+    six of eight road yaws, so its radius is a legibility constraint, not a
+    taste one -- under about 0.28 the projected rect drops below the two-digit
+    floor and the number disappears from those yaws. It is nearly flush with
+    the door panel now instead of standing 0.03 proud of it, so it is a
+    marking on a door rather than a boss on a flank."""
+    for s, name in ((-1, "roundel_L"), (1, "roundel_R")):
+        # Squashed to 0.80 of its height: a full circle of the radius the
+        # number needs is taller than the flank is deep, and the part that
+        # overhung read as a cream bump on the door's edge. The WIDTH -- the
+        # dimension the two digits actually need -- is untouched.
+        cyl(name, r, 0.04, (s * (x_half + 0.042), y, z), M["livery"], verts=20, scale=(0.80, 1, 1))
+
+
+def plate(y, z, w=0.90, h=0.30):
+    """The blank rear number panel. Rally-sized: a two-digit number has to be
+    legible from the road camera at scale 1.0, about 30x10 cell px."""
+    box("plate", (w, 0.04, h), (0, y, z), M["livery"], bevel=0.0)
+
+
+def lamps_front(y, z, spread, w=0.38, h=0.24):
+    box("head_l", (w, 0.08, h), (-spread, y, z), M["head"], bevel=0.0)
+    box("head_r", (w, 0.08, h), (spread, y, z), M["head"], bevel=0.0)
+
+
+def tail_bar(y, z, w=1.64, h=0.26):
+    """A wide red bar with a pale glow strip through it. On a red car the bar
+    itself vanishes into the paint -- f01a1a is 109.8 from the red swatch,
+    the closest of the eight paints -- so the pale strip is the only thing
+    that still reads as a lamp, and it is half the bar's height rather than a
+    third so that it is at least one pixel at the 48 cell on every body."""
+    box("tail", (w, 0.08, h), (0, y, z), M["tail"], bevel=0.0)
+    box("tail_glow", (w * 0.90, 0.10, h * 0.50), (0, y - 0.005, z), M["glow"], bevel=0.0)
+
+
+def tail_blocks(y, z, spread, w=0.36, h=0.36):
+    """Two square lamp blocks, one each side of the plate: the hatch's tail."""
+    for s, name in ((-1, "tail_l"), (1, "tail_r")):
+        box(name, (w, 0.08, h), (s * spread, y, z), M["tail"], bevel=0.0)
+        box("tail_glow", (w * 0.66, 0.10, h * 0.46), (s * spread, y - 0.005, z), M["glow"], bevel=0.0)
+
+
+def tail_wrap(y, z, x_half, w=1.84, h=0.24, depth=0.32):
+    """A thin full-width bar that turns the corner onto both quarters: the
+    coupe's tail."""
+    tail_bar(y, z, w=w, h=h)
+    for s in (-1, 1):
+        box("tail_side", (0.08, depth, h), (s * x_half, y + depth / 2 + 0.02, z), M["tail"], bevel=0.0)
+
+
+def contact_shadow(sx, sy, y0=0.0):
+    """A flat purple ellipse the size of the footprint, nudged a little toward
+    the front-left, away from the sun, so a sliver shows past the sun-away
+    side. Parented to the car so it turns with it. Absent from a silhouette."""
+    if SILHOUETTE:
+        return None
+    sh = cyl("shadow", 1.0, 0.02, (-0.10, y0 + 0.14, 0.01), None, verts=28, rot=(0, 0, 0))
+    sh.scale = (sx, sy, 1.0)
+    sh.data.materials.append(shadow_mat)
+    return sh
+
+
+# Car faces +Y. Units: roughly metres. Every body differs below the beltline:
+# wheelbase, ride height, arch size, overhang and tyre radius are all its own.
+# Each closed body: slab from RIDE up, flares over cut arches, tyres 0.08-0.10
+# proud of the flares, sills at the slab's floor between the arches.
+# ---------------------------------------------------------------------------
+def body_coupe():
+    """Boxy 80s Group B coupe: long bonnet, upright cabin, blistered arches,
+    a lip spoiler, a thin wraparound tail bar. Wheelbase 2.6, ride 0.44,
+    tyre 0.42."""
+    ride, r = 0.52, 0.47
+    # The flank is 0.60 deep, not 0.44: the arch flares were already 0.62 and
+    # the slab they blister out of was shallower than they were, so the door
+    # roundel -- which has to stay big enough to hold two digits, it is the
+    # number panel at four of eight stall yaws -- had its top third hanging in
+    # air above the shoulder. That is what made it read as a bright cream egg
+    # rather than a decal. Now it sits on bodywork, on a cream door panel.
+    chamfered("body", (2.16, 4.10, 0.54), (0, 0.0, ride + 0.27), M["paint"], cut=True)
+    chamfered("nose", (2.10, 1.20, 0.26), (0, 1.50, ride + 0.60), M["paint"], cut=True)
+    chamfered("deck", (2.10, 1.10, 0.26), (0, -1.50, ride + 0.60), M["paint"])
+    # The cabin is 0.10 lower than it was and the body 0.20 wider: the handoff
+    # claimed "the coupe wider and lower against a narrower, taller saloon"
+    # and it was false on the stall camera, where the coupe measured 129x64
+    # against the saloon's 134x65. A Group B coupe is a wide car on a wide
+    # track under a low roof; this makes the sentence true where the game
+    # draws it.
+    chamfered("cabin", (1.46, 1.86, 0.54), (0, -0.20, ride + 0.86), M["paint"], bevel=0.14)
+    beltline(1.52, -1.13, 0.73, ride + 0.68)
+    glasshouse(1.50, [(-0.98, -0.36), (-0.14, 0.52)], ride + 0.84, 0.26, pillars=[(-0.25, 0.22)])
+    box("glass_f", (1.22, 0.26, 0.24), (0, 0.76, ride + 0.82), M["glass_lit"], bevel=0.0, rot=(math.radians(-50), 0, 0))
+    box("glass_r", (1.24, 0.30, 0.22), (0, -1.16, ride + 0.80), M["glass"], bevel=0.0, rot=(math.radians(50), 0, 0))
+    for x in (-1.0, 1.0):
+        chamfered("arch_f", (0.30, 1.30, 0.62), (x * 1.09, 1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
+        chamfered("arch_r", (0.30, 1.30, 0.62), (x * 1.09, -1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
+        box("sill", (0.12, 2.20, 0.12), (x * 1.10, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+    livery(1.105, 0.0, 1.28, ride + 0.27, height=0.50)
+    box("wing", (2.12, 0.30, 0.09), (0, -2.00, ride + 0.74), M["paint"], bevel=0.02)
+    box("bumper_f", (2.18, 0.20, 0.22), (0, 2.08, ride + 0.11), M["trim"], bevel=0.04)
+    box("bumper_r", (1.96, 0.20, 0.22), (0, -2.08, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (1.10, 0.05, 0.18), (0, 2.09, ride + 0.36), M["ink"], bevel=0.0)
+    lamps_front(2.11, ride + 0.36, 0.70)
+    tail_wrap(-2.09, ride + 0.58, 1.07, h=0.30)
+    plate(-2.10, ride + 0.38)
+    roundels(1.105, -0.10, ride + 0.27, r=0.31)
+    arches((-1.24, 1.24), (1.30, -1.30), r, ride)
+    wheels((-1.24, 1.24), (1.30, -1.30), r, w=0.36)
+    contact_shadow(1.40, 2.25)
+
+
+def body_hatch():
+    """Hot hatch: short, tall cabin, a vertical tailgate with a high square
+    rear window, a roof spoiler and two square tail blocks. Wheelbase 2.2,
+    ride 0.44, tyre 0.40."""
+    ride, r = 0.52, 0.45
+    chamfered("body", (1.84, 3.50, 0.60), (0, 0.0, ride + 0.30), M["paint"], cut=True)
+    chamfered("nose", (1.78, 0.90, 0.26), (0, 1.25, ride + 0.62), M["paint"], cut=True)
+    chamfered("cabin", (1.50, 2.30, 0.60), (0, -0.45, ride + 0.90), M["paint"], bevel=0.12)
+    chamfered("tailgate", (1.64, 0.22, 0.78), (0, -1.66, ride + 0.66), M["paint"], bevel=0.06, rot=(math.radians(4), 0, 0))
+    beltline(1.56, -1.60, 1.15, ride + 0.83)
+    glasshouse(1.54, [(-1.42, -0.78), (-0.56, 0.52)], ride + 0.98, 0.24, pillars=[(-0.67, 0.22)])
+    box("glass_f", (1.24, 0.36, 0.22), (0, 0.66, ride + 0.96), M["glass_lit"], bevel=0.0, rot=(math.radians(-46), 0, 0))
+    box("glass_r", (1.32, 0.08, 0.44), (0, -1.79, ride + 0.94), M["glass"], bevel=0.0, rot=(math.radians(4), 0, 0))
+    box("spoiler", (1.58, 0.34, 0.07), (0, -1.66, ride + 1.26), M["paint"], bevel=0.02)
+    for x in (-1.0, 1.0):
+        chamfered("arch_f", (0.28, 1.20, 0.60), (x * 0.93, 1.10, ride + 0.30), M["paint"], bevel=0.12, cut=True)
+        chamfered("arch_r", (0.28, 1.20, 0.60), (x * 0.93, -1.10, ride + 0.30), M["paint"], bevel=0.12, cut=True)
+        box("sill", (0.12, 1.80, 0.12), (x * 0.95, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+    livery(0.945, 0.0, 0.92, ride + 0.30, height=0.52)
+    box("bumper_f", (1.90, 0.20, 0.22), (0, 1.72, ride + 0.11), M["trim"], bevel=0.04)
+    box("bumper_r", (1.66, 0.20, 0.22), (0, -1.72, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (1.00, 0.05, 0.18), (0, 1.73, ride + 0.36), M["ink"], bevel=0.0)
+    lamps_front(1.75, ride + 0.36, 0.58, w=0.34, h=0.26)
+    tail_blocks(-1.82, ride + 0.62, 0.62)
+    plate(-1.78, ride + 0.38, w=0.84)
+    roundels(0.945, -0.05, ride + 0.30, r=0.29)
+    arches((-1.08, 1.08), (1.10, -1.10), r, ride)
+    wheels((-1.08, 1.08), (1.10, -1.10), r, w=0.36)
+    contact_shadow(1.24, 1.90)
+
+
+def body_wedge():
+    """Group B wedge: low splitter nose, mid cabin, huge rear wing on tall
+    posts, bigger rear tyres. Wheelbase 2.55, ride 0.40, tyres 0.42/0.47."""
+    ride = 0.50
+    chamfered("body", (1.96, 4.40, 0.58), (0, 0.0, ride + 0.29), M["paint"], cut=True)
+    chamfered("nose", (1.88, 1.70, 0.30), (0, 1.35, 0.86), M["paint"], rot=(math.radians(10), 0, 0), cut=True)
+    chamfered("cabin", (1.42, 1.60, 0.42), (0, -0.30, 1.06), M["paint"], bevel=0.12)
+    beltline(1.48, -1.10, 0.50, 1.00)
+    glasshouse(1.46, [(-0.98, -0.44), (-0.24, 0.38)], 1.14, 0.20, pillars=[(-0.34, 0.20)])
+    box("glass_f", (1.26, 0.56, 0.16), (0, 0.66, 1.08), M["glass_lit"], bevel=0.0, rot=(math.radians(-58), 0, 0))
+    chamfered("deck", (1.90, 1.30, 0.28), (0, -1.55, 1.00), M["paint"], cut=True)
+    box("wing", (2.16, 0.42, 0.07), (0, -2.05, 1.52), M["paint"], bevel=0.02)
+    box("wing_lp", (0.10, 0.30, 0.56), (-0.82, -2.02, 1.22), M["trim"], bevel=0.0)
+    box("wing_rp", (0.10, 0.30, 0.56), (0.82, -2.02, 1.22), M["trim"], bevel=0.0)
+    box("wing_el", (0.06, 0.44, 0.24), (-1.10, -2.05, 1.52), M["paint"], bevel=0.0)
+    box("wing_er", (0.06, 0.44, 0.24), (1.10, -2.05, 1.52), M["paint"], bevel=0.0)
+    for x in (-1.0, 1.0):
+        chamfered("arch_f", (0.32, 1.24, 0.62), (x * 1.02, 1.30, ride + 0.31), M["paint"], bevel=0.12, cut=True)
+        chamfered("arch_r", (0.36, 1.38, 0.72), (x * 1.04, -1.25, ride + 0.36), M["paint"], bevel=0.12, cut=True)
+        box("sill", (0.12, 2.10, 0.12), (x * 1.04, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+    livery(1.03, 0.05, 1.24, ride + 0.29, height=0.52)
+    box("splitter", (2.02, 0.34, 0.08), (0, 2.12, ride - 0.06), M["trim"], bevel=0.02)
+    box("bumper_r", (1.76, 0.18, 0.22), (0, -2.22, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (0.90, 0.05, 0.14), (0, 2.18, 0.66), M["ink"], bevel=0.0, rot=(math.radians(10), 0, 0))
+    lamps_front(2.19, 0.70, 0.62, w=0.42, h=0.18)
+    tail_bar(-2.23, 1.08, w=1.70, h=0.32)
+    plate(-2.24, 0.86, h=0.24)
+    roundels(1.03, 0.00, ride + 0.29, r=0.29)
+    arches((-1.16, 1.16), (1.30,), 0.46, ride)
+    arches((-1.20, 1.20), (-1.25,), 0.51, ride)
+    wheels((-1.16, 1.16), (1.30,), 0.46, w=0.36)
+    wheels((-1.20, 1.20), (-1.25,), 0.51, w=0.42)
+    contact_shadow(1.30, 2.40)
+
+
+def body_saloon():
+    """Three-box saloon: longest overhangs, a boot that is its own box under
+    a low wide rear window, a chrome bar over a wide low tail bar, the
+    smallest arches. Wheelbase 2.85, ride 0.46, tyre 0.40."""
+    ride, r = 0.54, 0.45
+    # 0.20 shorter and 0.04 narrower than it was, with a cabin 0.06 taller:
+    # the other half of making the coupe's "wider and lower" true on the stall
+    # camera, and the shape a three-box saloon actually has.
+    chamfered("body", (1.70, 4.50, 0.56), (0, 0.0, ride + 0.28), M["paint"], cut=True)
+    chamfered("bonnet", (1.64, 1.34, 0.26), (0, 1.45, ride + 0.62), M["paint"], cut=True)
+    chamfered("cabin", (1.38, 1.90, 0.62), (0, -0.05, ride + 0.89), M["paint"], bevel=0.12)
+    beltline(1.44, -1.00, 0.90, ride + 0.80)
+    glasshouse(1.42, [(-0.78, -0.22), (-0.02, 0.78)], ride + 0.95, 0.26, pillars=[(-0.12, 0.20)])
+    box("glass_f", (1.18, 0.34, 0.22), (0, 0.95, ride + 0.91), M["glass_lit"], bevel=0.0, rot=(math.radians(-40), 0, 0))
+    box("glass_r", (1.30, 0.36, 0.16), (0, -1.12, ride + 0.87), M["glass"], bevel=0.0, rot=(math.radians(54), 0, 0))
+    chamfered("boot", (1.62, 1.24, 0.44), (0, -1.60, ride + 0.62), M["paint"], cut=True)
+    box("lip", (1.30, 0.18, 0.05), (0, -2.18, ride + 0.86), M["paint"], bevel=0.0)
+    for x in (-1.0, 1.0):
+        chamfered("arch_f", (0.26, 1.14, 0.56), (x * 0.86, 1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
+        chamfered("arch_r", (0.26, 1.14, 0.56), (x * 0.86, -1.42, ride + 0.28), M["paint"], bevel=0.08, cut=True)
+        box("sill", (0.12, 2.50, 0.12), (x * 0.88, 0.0, ride + 0.06), M["stripe"], bevel=0.02, cut=True)
+        box("trimline", (0.04, 4.20, 0.05), (x * 0.865, 0.0, ride + 0.48), M["trim"], bevel=0.0, cut=True)
+    livery(0.885, 0.0, 1.58, ride + 0.28, height=0.50)
+    box("bumper_f", (1.76, 0.20, 0.22), (0, 2.28, ride + 0.11), M["trim"], bevel=0.04)
+    box("bumper_r", (1.56, 0.20, 0.22), (0, -2.28, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (1.00, 0.05, 0.18), (0, 2.29, ride + 0.36), M["ink"], bevel=0.0)
+    lamps_front(2.31, ride + 0.36, 0.56, w=0.34, h=0.22)
+    box("chrome", (1.58, 0.07, 0.08), (0, -2.27, ride + 0.80), M["chrome"], bevel=0.0)
+    tail_bar(-2.28, ride + 0.62, w=1.50, h=0.26)
+    plate(-2.28, ride + 0.38)
+    roundels(0.885, -0.05, ride + 0.28, r=0.30)
+    arches((-1.00, 1.00), (1.42, -1.42), r, ride)
+    wheels((-1.00, 1.00), (1.42, -1.42), r, w=0.34)
+    contact_shadow(1.16, 2.45)
+
+
+def body_buggy():
+    """Open-frame buggy: a short tub, roll cage, exposed suspension, big
+    knobbly tyres on a wide track. The cage and bumpers are painted, the
+    floor and the arms are the paint's own shadow step, so a green buggy is
+    green and the swatch is its most common tone. Wheelbase 2.4, ride 0.60,
+    tyre 0.55."""
+    box("tub", (1.30, 2.60, 0.50), (0, 0.10, 0.85), M["paint"], bevel=0.07)
+    box("nose", (1.16, 0.80, 0.30), (0, 1.60, 0.80), M["paint"], bevel=0.06, rot=(math.radians(14), 0, 0))
+    box("floor", (1.40, 3.20, 0.10), (0, 0.10, 0.62), M["shade"], bevel=0.02)
+    box("seat_l", (0.40, 0.50, 0.42), (-0.30, -0.30, 1.28), M["ink"], bevel=0.03)
+    box("seat_r", (0.40, 0.50, 0.42), (0.30, -0.30, 1.28), M["ink"], bevel=0.03)
+    box("dash", (1.20, 0.30, 0.20), (0, 0.55, 1.18), M["trim"], bevel=0.02)
+    box("screen", (1.10, 0.06, 0.36), (0, 0.80, 1.34), M["glass_lit"], bevel=0.0, rot=(math.radians(-22), 0, 0))
+    # roll cage: four posts, two rails, two hoops
+    for x in (-0.58, 0.58):
+        box("post_r", (0.10, 0.10, 0.96), (x, -0.50, 1.56), M["paint"], bevel=0.0)
+        box("post_f", (0.10, 0.10, 0.96), (x, 0.62, 1.52), M["paint"], bevel=0.0, rot=(math.radians(-12), 0, 0))
+        box("rail", (0.10, 1.20, 0.10), (x, 0.06, 2.02), M["paint"], bevel=0.0)
+    box("hoop_r", (1.25, 0.10, 0.10), (0, -0.50, 2.02), M["paint"], bevel=0.0)
+    box("hoop_f", (1.25, 0.10, 0.10), (0, 0.62, 1.98), M["paint"], bevel=0.0)
+    box("brace", (0.10, 0.10, 0.80), (0.0, -1.00, 1.60), M["paint"], bevel=0.0, rot=(math.radians(30), 0, 0))
+    # exposed suspension: an arm out to each wheel and a spring above it
+    for y in (1.20, -1.20):
+        for x in (-1, 1):
+            box("arm", (0.60, 0.12, 0.08), (x * 0.72, y, 0.56), M["shade"], bevel=0.0)
+            box("spring", (0.12, 0.12, 0.50), (x * 0.86, y, 0.84), M["rim"], bevel=0.0, rot=(0, math.radians(x * -22), 0))
+    livery(0.675, 0.05, 1.60, 0.85, height=0.46)
+    box("bumper_f", (1.60, 0.12, 0.12), (0, 2.02, 0.66), M["paint"], bevel=0.0)
+    box("bumper_r", (1.60, 0.12, 0.12), (0, -1.60, 0.66), M["paint"], bevel=0.0)
+    box("head_l", (0.30, 0.16, 0.30), (-0.38, 1.98, 1.02), M["head"], bevel=0.02)
+    box("head_r", (0.30, 0.16, 0.30), (0.38, 1.98, 1.02), M["head"], bevel=0.02)
+    box("rear_panel", (1.28, 0.10, 0.56), (0, -1.22, 0.92), M["paint"], bevel=0.03)
+    tail_bar(-1.28, 1.12, w=1.10, h=0.28)
+    plate(-1.29, 0.84, w=0.80, h=0.28)
+    roundels(0.675, -0.25, 0.85, r=0.26)
+    wheels((-1.00, 1.00), (1.20, -1.20), 0.55, w=0.40, knobbly=True)
+    contact_shadow(1.40, 2.05)
+
+
+def body_pickup():
+    """Cab-forward pickup: short bonnet, open bed with a roll bar, high
+    stance, the longest wheelbase. Wheelbase 2.9, ride 0.54, tyre 0.48."""
+    ride, r = 0.58, 0.50
+    chamfered("chassis", (1.90, 4.60, 0.52), (0, -0.10, ride + 0.26), M["paint"], cut=True)
+    chamfered("cab", (1.72, 1.60, 0.72), (0, 0.95, 1.28), M["paint"], bevel=0.12)
+    chamfered("bonnet", (1.82, 0.60, 0.28), (0, 2.05, 1.06), M["paint"], cut=True)
+    beltline(1.78, 0.15, 1.75, 1.20)
+    glasshouse(1.76, [(0.30, 0.86), (1.06, 1.62)], 1.38, 0.24, pillars=[(0.96, 0.20)])
+    box("glass_f", (1.40, 0.30, 0.24), (0, 1.74, 1.38), M["glass_lit"], bevel=0.0, rot=(math.radians(-34), 0, 0))
+    box("glass_r", (1.34, 0.10, 0.26), (0, 0.15, 1.40), M["glass"], bevel=0.0)
+    box("bed_l", (0.12, 2.20, 0.44), (-0.89, -1.10, 1.18), M["paint"], bevel=0.03)
+    box("bed_r", (0.12, 2.20, 0.44), (0.89, -1.10, 1.18), M["paint"], bevel=0.03)
+    box("tailgate", (1.74, 0.12, 0.44), (0, -2.14, 1.18), M["paint"], bevel=0.03)
+    box("bed_floor", (1.66, 2.10, 0.06), (0, -1.10, 0.94), M["trim"], bevel=0.0)
+    for x in (-0.74, 0.74):
+        box("bar_post", (0.10, 0.10, 0.84), (x, -0.05, 1.52), M["cage"], bevel=0.0)
+    box("bar_top", (1.58, 0.10, 0.10), (0, -0.05, 1.98), M["cage"], bevel=0.0)
+    for x in (-1.0, 1.0):
+        chamfered("arch_f", (0.30, 1.32, 0.64), (x * 0.98, 1.25, ride + 0.32), M["paint"], bevel=0.12, cut=True)
+        chamfered("arch_r", (0.30, 1.32, 0.64), (x * 0.98, -1.65, ride + 0.32), M["paint"], bevel=0.12, cut=True)
+        box("step", (0.14, 1.40, 0.10), (x * 0.98, -0.20, ride + 0.05), M["trim"], bevel=0.02, cut=True)
+    livery(0.965, -0.20, 1.54, 0.84, height=0.48)
+    box("bumper_f", (1.96, 0.22, 0.24), (0, 2.34, ride + 0.12), M["trim"], bevel=0.04)
+    box("bumper_r", (1.66, 0.22, 0.24), (0, -2.34, ride + 0.11), M["trim"], bevel=0.04)
+    box("grille", (1.10, 0.05, 0.22), (0, 2.36, 0.86), M["ink"], bevel=0.0)
+    lamps_front(2.38, 0.90, 0.62, w=0.36, h=0.24)
+    tail_bar(-2.21, 0.91, w=1.66, h=0.32)
+    plate(-2.22, 1.16, h=0.28)
+    roundels(0.965, -0.30, 0.84, r=0.26)
+    arches((-1.14, 1.14), (1.25, -1.65), r, ride)
+    wheels((-1.14, 1.14), (1.25, -1.65), r, w=0.38)
+    contact_shadow(1.30, 2.50, y0=-0.15)
+
+
+BODIES = {
+    "coupe": body_coupe, "hatch": body_hatch, "wedge": body_wedge,
+    "saloon": body_saloon, "buggy": body_buggy, "pickup": body_pickup,
+}
+if BODY not in BODIES:
+    raise SystemExit(f"unknown body {BODY}; one of {', '.join(BODIES)}")
+BODIES[BODY]()
+cut_arches()
+
+
+def parts():
+    """Rendered parts: every child of the car but the cutters."""
+    return [o for o in root.children if not o.hide_render]
+
+
+# ------------------------------------------------------------------ light
+def sun(name, color, energy, direction):
+    L = bpy.data.lights.new(name, "SUN")
+    L.energy = energy
+    L.color = color[:3]
+    L.angle = math.radians(6)
+    o = bpy.data.objects.new(name, L)
+    sc.collection.objects.link(o)
+    dx, dy, dz = direction  # from the light toward the car
+    o.rotation_euler = (math.atan2(math.hypot(dx, dy), -dz), 0, math.atan2(dy, dx) - math.pi / 2)
+    return o
+
+
+if not SILHOUETTE:
+    # key: the low sun, behind-right of the car (car faces +Y; behind-right = -Y, +X).
+    # Strength is calibrated to the swatch. A Lambertian face under a sun of
+    # strength S renders at albedo * S * cos / pi, so S = 5.2 puts the roof and the
+    # flanks that face the sun (cos 0.5-0.6) at about 0.85-1.0 of the swatch. The
+    # warm rim is the paint material's own term (RIM_DIR), not the key: a lit red
+    # face clips at red and snaps back to the swatch, so brightness alone never
+    # reached the ramp's highlight step.
+    # The key is only faintly warm: a warmer one (the prototype's ffe3c4) tinted
+    # the white paint to cream and the blue toward grey-blue, and both then
+    # snapped to the wrong palette entries. Warmth belongs in the ramp's rim step.
+    sun("key", rgb("fff0dc"), 5.2, (-0.55, 0.65, -0.62))
+    # fill: cool purple from the front-left, weak.
+    sun("fill", rgb("9a5ce6"), 1.2, (0.6, -0.6, -0.5))
+
+
+# ------------------------------------------------------------------ cameras
+def camera(name, loc, aim_z, lens):
+    aim = bpy.data.objects.new(name + "_aim", None)
+    sc.collection.objects.link(aim)
+    aim.location = (0, 0, aim_z)
+    cd = bpy.data.cameras.new(name)
+    cd.lens = lens
+    cd.sensor_fit = "HORIZONTAL"
+    o = bpy.data.objects.new(name, cd)
+    sc.collection.objects.link(o)
+    o.location = loc
+    tr = o.constraints.new("TRACK_TO")
+    tr.target = aim
+    tr.track_axis = "TRACK_NEGATIVE_Z"
+    tr.up_axis = "UP_Y"
+    return o
+
+
+CAMERAS = {
+    # above and off the rear-right shoulder: the garage stall, roster, countdown
+    "stall": camera("stall", (5.6, -6.4, 2.0), 0.72, 46),
+    # directly behind, slightly above: the track
+    "road": camera("road", (0.0, -9.4, 1.8), 0.66, 54),
+}
+
+
+def project(cam, p):
+    v = world_to_camera_view(sc, cam, Vector(p))
+    return v.x, v.y
+
+
+def frame_ground(cam, ground):
+    """Shift the lens so the world origin lands at `ground`. Camera shift is in
+    units of the sensor width, so a few Newton steps settle it exactly."""
+    bpy.context.view_layer.update()
+    for _ in range(6):
+        u, v = project(cam, (0, 0, 0))
+        du, dv = ground[0] - u, ground[1] - v
+        if abs(du) < 1e-6 and abs(dv) < 1e-6:
+            break
+        cam.data.shift_x -= du
+        cam.data.shift_y -= dv * CELL_H / CELL_W
+        bpy.context.view_layer.update()
+
+
+for cname, c in CAMERAS.items():
+    frame_ground(c, GROUND[cname])
+
+
+# ------------------------------------------------------------------ meta
+def bbox_world(o):
+    return [o.matrix_world @ Vector(c) for c in o.bound_box]
+
+
+def rect_of(cam, o, shrink=(1.0, 1.0)):
+    us, vs = zip(*(project(cam, p) for p in bbox_world(o)))
+    x0, x1 = min(us) * CELL_W, max(us) * CELL_W
+    y0, y1 = (1 - max(vs)) * CELL_H, (1 - min(vs)) * CELL_H
+    w, h = (x1 - x0) * shrink[0], (y1 - y0) * shrink[1]
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return {"x": round(cx - w / 2, 1), "y": round(cy - h / 2, 1), "w": round(w, 1), "h": round(h, 1)}
+
+
+def facing(cam, o, normal_local):
+    """cos of the angle between the panel's outward normal and the line to the
+    camera; > 0 means the panel faces the lens."""
+    n = (o.matrix_world.to_3x3() @ Vector(normal_local)).normalized()
+    to_cam = (cam.matrix_world.translation - o.matrix_world.translation).normalized()
+    return n.dot(to_cam)
+
+
+def in_view(cam, o, normal_local):
+    """True when a ray from the lens to the panel's centre reaches the panel:
+    nothing of the car (cutters excepted, they are not rendered) in front of
+    it. A door roundel behind a blistered arch, or a plate under a wing, is
+    hidden even when its normal says it faces the lens."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    n = (o.matrix_world.to_3x3() @ Vector(normal_local)).normalized()
+    target = o.matrix_world.translation + n * 0.03
+    origin = cam.matrix_world.translation
+    direction = (target - origin).normalized()
+    for _ in range(8):
+        hit, loc, _nrm, _idx, obj, _m = sc.ray_cast(dg, origin, direction)
+        if not hit:
+            return True
+        if obj.name == o.name:
+            return True
+        if obj.hide_render or obj.name.startswith("shadow"):
+            origin = loc + direction * 0.01
+            continue
+        return (loc - target).length < 0.05
+    return False
+
+
+def tilt(cam, o, axis_local):
+    """Screen tilt, in degrees, of the panel's baseline axis: the text angle."""
+    c = o.matrix_world.translation
+    a = o.matrix_world.to_3x3() @ Vector(axis_local)
+    u0, v0 = project(cam, c)
+    u1, v1 = project(cam, c + a * 0.5)
+    dx, dy = (u1 - u0) * CELL_W, -(v1 - v0) * CELL_H
+    ang = math.degrees(math.atan2(dy, dx))
+    if ang > 90:
+        ang -= 180
+    if ang <= -90:
+        ang += 180
+    return round(ang, 1)
+
+
+# A panel seen at more than 60 degrees off-axis, or projecting narrower than
+# 11 cell px at scale 1.0, is a sliver two digits do not fit: the stall
+# camera's own plate at yaw 0 faces it at 0.55 and is 19 px wide (visible);
+# the door roundel at stall yaw 4 faces it at 0.53 but is 10 px wide (hidden).
+FACING_MIN, WIDTH_MIN = 0.50, 11
+
+
+def number_rect(cam):
+    """The best-facing blank panel for this yaw: a door roundel or the rear
+    plate. Both roundel cylinders were rotated pi/2 about Y, so local +Z is
+    world +X before the yaw: outward for the right door, INWARD for the left,
+    whose outward normal is therefore local -Z. The plate box's outward
+    normal is local -Y. Visible only when it faces the lens AND is not
+    behind another part of the car."""
+    best = None
+    for name, normal, axis, shrink in (
+        ("roundel_L", (0, 0, -1), (0, 1, 0), (0.80, 0.70)),
+        ("roundel_R", (0, 0, 1), (0, 1, 0), (0.80, 0.70)),
+        ("plate", (0, -1, 0), (1, 0, 0), (0.90, 0.80)),
+    ):
+        o = bpy.data.objects[name]
+        f = facing(cam, o, normal)
+        r = rect_of(cam, o, shrink)
+        visible = f > FACING_MIN and r["w"] >= WIDTH_MIN and r["h"] >= 5 and in_view(cam, o, normal)
+        score = (visible, f)
+        if best is None or score > best[0]:
+            best = (score, name, o, axis, r, visible)
+    _score, name, o, axis, r, visible = best
+    r["angle"] = tilt(cam, o, axis) if visible else 0
+    r["visible"] = visible
+    r["on"] = "door" if name.startswith("roundel") else "plate"
+    return r
+
+
+def tail_lamps(cam):
+    """Tail-lamp centres: the two ends of a bar, or the centres of two
+    blocks. `visible` when the lamp face is toward the lens."""
+    names = [n for n in ("tail", "tail_l", "tail_r") if n in bpy.data.objects]
+    pts = []
+    for name in names:
+        o = bpy.data.objects[name]
+        m = o.matrix_world
+        if name == "tail":
+            for s in (-1, 1):
+                u, v = project(cam, m @ Vector((s * 0.4, 0, 0)))
+                pts.append([round(u * CELL_W, 1), round((1 - v) * CELL_H, 1)])
+        else:
+            u, v = project(cam, m @ Vector((0, 0, 0)))
+            pts.append([round(u * CELL_W, 1), round((1 - v) * CELL_H, 1)])
+    o = bpy.data.objects[names[0]]
+    return {"tail": pts, "visible": facing(cam, o, (0, -1, 0)) > 0.1}
+
+
+EXTENT = {}
+
+
+def extent(cam, label):
+    """Track the projected bounds of every part's bounding box over the yaws;
+    a body that leaves its cell fails the bake -- it is a bug, not a crop."""
+    e = EXTENT.setdefault(label, [1.0, 0.0, 1.0, 0.0])
+    for o in parts():
+        m = o.matrix_world
+        for vert in o.data.vertices:
+            u, v = project(cam, m @ vert.co)
+            e[0], e[1], e[2], e[3] = min(e[0], u), max(e[1], u), min(e[2], v), max(e[3], v)
+
+
+def assert_fits():
+    bad = []
+    for label, (u0, u1, v0, v1) in EXTENT.items():
+        span = f"x {u0 * CELL_W:.1f}..{u1 * CELL_W:.1f} y {(1 - v1) * CELL_H:.1f}..{(1 - v0) * CELL_H:.1f}"
+        print(f"EXTENT {label} {span}")
+        if u0 < 0 or u1 > 1 or v0 < 0 or v1 > 1:
+            bad.append(f"{BODY} leaves the {label} cell: {span}")
+    if bad:
+        raise SystemExit("\n".join(bad))
+
+
+# ------------------------------------------------------------------ render
+wanted = None
+if ONLY:
+    wanted = {(t.split(":")[0], int(t.split(":")[1])) for t in ONLY.split(",")}
+
+meta = {
+    "body": BODY,
+    "cell": [[CELL_W, CELL_H], [CELL_W // 2, CELL_H // 2], [CELL_W // 4, CELL_H // 4]],
+    "yaws": YAWS,
+    "anchor": "bottom-center",
+    "ground": {k: [round(g[0] * CELL_W, 1), round((1 - g[1]) * CELL_H, 1)] for k, g in GROUND.items()},
+    "rects": "top-left origin, cell px at scale 1.0",
+    "number": {"stall": [], "road": []},
+    "lamps": {"stall": [], "road": []},
+}
+for cname, cam in CAMERAS.items():
+    for i in range(YAWS):
+        root.rotation_euler = (0, 0, math.radians(360.0 * i / YAWS))
+        bpy.context.view_layer.update()
+        extent(cam, cname)
+        meta["number"][cname].append(number_rect(cam))
+        meta["lamps"][cname].append(tail_lamps(cam))
+assert_fits()
+
+for cname, cam in CAMERAS.items():
+    sc.camera = cam
+    for i in range(YAWS):
+        root.rotation_euler = (0, 0, math.radians(360.0 * i / YAWS))
+        bpy.context.view_layer.update()
+        if wanted is not None and (cname, i) not in wanted:
+            continue
+        sc.render.filepath = os.path.join(OUT, f"{cname}-{i}.png")
+        bpy.ops.render.render(write_still=True)
+        print("BAKED", sc.render.filepath)
+
+with open(os.path.join(OUT, "meta.json"), "w") as f:
+    json.dump(meta, f, indent=1, sort_keys=True)
+    f.write("\n")
+print("META", os.path.join(OUT, "meta.json"), "parts", len(parts()))

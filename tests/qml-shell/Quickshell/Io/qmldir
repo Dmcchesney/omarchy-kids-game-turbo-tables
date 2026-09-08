@@ -1,0 +1,4 @@
+module Quickshell.Io
+singleton FileViewError 1.0 FileViewError.qml
+singleton FakeFs 1.0 FakeFs.qml
+FileView 1.0 FileView.qml
