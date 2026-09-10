@@ -603,6 +603,11 @@ var HAND = {
   slamMs: 160,
   // the other two flip face down and fly off
   flyMs: 260,
+  // ISSUE #5: the highlighted card stands proud of its neighbours. It rises
+  // over this; the card that loses the highlight sits down on the frame it
+  // loses it, so the eye is pulled to where the highlight WENT rather than
+  // watching two cards trade places.
+  liftMs: 140,
 }
 
 // The whole life of a card's sequence, telegraph through impact, in ms. Used

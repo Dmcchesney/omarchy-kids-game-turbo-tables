@@ -1264,11 +1264,62 @@ Item {
         names += String(cards[c].cardLabel) + " "
       }
       // Three cards side by side, not three rows down a panel.
+      //
+      // ISSUE #5 TOOK THE EXACT EQUALITY AWAY, ON PURPOSE. The highlighted card
+      // now stands proud of its neighbours -- a lift and a 6% growth, because a
+      // border tone and an 11 x 21 px arrow could not be found from across a
+      // room by an eight-year-old whose eyes are on the fact. So their tops no
+      // longer agree to the pixel, and asserting that they do would be
+      // asserting the defect back.
+      //
+      // The claim this case was written to make survives intact and is made
+      // here properly: side by side. Three rows down a panel would put a whole
+      // card's height between them; a raised card puts a fraction of one. And
+      // the lift itself is now guarded -- exactly one card is raised, and it is
+      // the highlighted one -- so a change that quietly stopped raising it, or
+      // started raising all three, fails here.
+      // MEASURED AT REST, AFTER A REAL LAYOUT PASS, AND NOT INSIDE THE FRAME
+      // LOOP ABOVE. `race.stepClock()` advances the screen's own clock; it does
+      // not run Qt's polish phase, so a Row that has just been repopulated by
+      // the deal has positioned nothing and every card still reports x = 0. The
+      // old case compared only the y values -- which come from each card's own
+      // binding and were therefore real -- so it never noticed. `wait()` gives
+      // the positioner its pass, and by now the deal (672 ms) is long over, so
+      // this is the hand as a child sees it.
+      wait(60)
+      var settled = []
+      root.walk(race, function (item) {
+        if (String(item.objectName) === "handCard" && root.drawn(item))
+          settled.push(item)
+      })
+      compare(settled.length, 3, "the three cards are still on screen at rest")
       var ys = []
-      for (var d = 0; d < cards.length; d++)
-        ys.push(Math.round(cards[d].mapToItem(root, 0, 0).y))
-      compare(ys[0], ys[1], "the three cards are on one line, not stacked")
-      compare(ys[1], ys[2], "the three cards are on one line, not stacked")
+      var xs = []
+      for (var d = 0; d < settled.length; d++) {
+        ys.push(Math.round(settled[d].mapToItem(root, 0, 0).y))
+        xs.push(Math.round(settled[d].mapToItem(root, 0, 0).x))
+      }
+      xs.sort(function (a, b) { return a - b })
+      var top = Math.min(ys[0], Math.min(ys[1], ys[2]))
+      var foot = Math.max(ys[0], Math.max(ys[1], ys[2]))
+      verify(foot - top < cards[0].height * 0.25,
+             "the three cards are on one line, not stacked -- tops at "
+             + JSON.stringify(ys) + ", a spread of " + (foot - top)
+             + " px against a card " + Math.round(cards[0].height) + " px tall")
+      verify(xs[1] - xs[0] >= cards[0].width * 0.8
+             && xs[2] - xs[1] >= cards[0].width * 0.8,
+             "and they are three across, a card's width apart, at "
+             + JSON.stringify(xs))
+      var raised = 0
+      for (var e = 0; e < ys.length; e++)
+        if (ys[e] === top)
+          raised += 1
+      compare(raised, 1,
+              "exactly one card stands proud of the other two (issue #5) -- tops "
+              + JSON.stringify(ys))
+      verify(foot - top >= 4,
+             "and it is raised by something a child can see across a room: "
+             + (foot - top) + " px, plus the growth")
       console.log("FX-HAND|" + Math.round(cards[0].width) + "x"
                   + Math.round(cards[0].height) + " each, name type "
                   + cards[0].labelSize + "px|" + names.trim())
