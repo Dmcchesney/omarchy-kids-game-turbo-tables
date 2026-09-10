@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import qs.Commons
 import "../../ui"
+import "../../ui/parts/FactLine.js" as FactLine
 import "../../engine/engine.mjs" as Engine
 
 // The countdown: the four beats, and the type that must not cross the gantry.
@@ -196,21 +197,57 @@ Item {
       countdown.beat = 0
     }
 
-    // Design, Race format: "the first fact readable behind GO". Readable means
-    // clear of the only other words in the picture -- and the fact is now drawn
-    // where `ui/Race.qml` draws it, so this is also the guard on the claim that
-    // the fact does not move across the cut: it clears the board's top edge
-    // there for the same reason and by the same arithmetic.
-    function test_02_the_first_fact_never_crosses_the_board() {
+    // Design, Race format: "the first fact readable behind GO".
+    //
+    // ISSUE #4 CHANGED WHAT READABLE COSTS, AND THIS IS WHERE THE NEW PRICE IS
+    // PAID. Until the line's geometry was shared, this screen drew the fact at
+    // its own `px(118)` and the race drew it at `px(232)`, so the thing the
+    // child is told to type on fell 114 px at GO -- and the reason the two had
+    // drifted is exactly the clearance this test used to assert: `px(118)` was
+    // tuned to sit the fact ABOVE the arch's board, and the race's placement is
+    // tuned to sit it BELOW the minimap panel. Measured on the shipped frames,
+    // the two are mutually exclusive by 107 px at 1920 x 1080, 76 at 1366 x 768
+    // and 54 at 1024 x 600: there is no y that clears both.
+    //
+    // The race's placement won, because it is the one with a reason that
+    // outlives this screen, and readable is bought with the GROUND instead --
+    // `factPlate`, which the race already carries for the frames its own gantry
+    // sweeps behind the line, made solid here because on a held start line the
+    // arch is behind the line on every frame. So the claim is no longer "they
+    // never meet". It is: the plate CONTAINS the ink, and it is OPAQUE. Both
+    // are measured, and test_06 photographs the second one.
+    function test_02_the_fact_is_carried_on_a_ground_that_hides_the_board() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
         countdown.beat = 3
+        tc.wait(300)
         var label = tc.sizes[s].w + "x" + tc.sizes[s].h
-        verify(countdown.factInkBottomY + countdown.factShadowDrop
-               <= countdown.gantryBoardTopY,
-               label + ": the fact's ink and shadow end at "
-               + Math.round(countdown.factInkBottomY + countdown.factShadowDrop)
-               + ", the board starts at " + Math.round(countdown.gantryBoardTopY))
+        var plate = countdown.factPlateRect
+        var ink = countdown.factInkRect
+        verify(countdown.factPlateOpacity >= 0.999,
+               label + ": the ground is solid -- effective alpha "
+               + countdown.factPlateOpacity.toFixed(3)
+               + ". A yielding 0.80 let the board's own lettering read between"
+               + " the fact's glyphs.")
+        verify(plate.x <= ink.x && plate.x + plate.width >= ink.x + ink.width,
+               label + ": the ground contains the ink across -- plate "
+               + Math.round(plate.x) + ".." + Math.round(plate.x + plate.width)
+               + ", ink " + Math.round(ink.x) + ".."
+               + Math.round(ink.x + ink.width))
+        verify(plate.y <= ink.y
+               && plate.y + plate.height
+                  >= countdown.factInkBottomY + countdown.factShadowDrop,
+               label + ": and down, shadow included -- plate "
+               + Math.round(plate.y) + ".." + Math.round(plate.y + plate.height)
+               + ", ink and shadow " + Math.round(ink.y) + ".."
+               + Math.round(countdown.factInkBottomY + countdown.factShadowDrop))
+        // AND IT IS STILL THE RACE'S LINE. The whole point of moving it was
+        // that the ink does not travel at the cut, so the placement is asserted
+        // here against the one file both screens now ask.
+        compare(Math.round(countdown.factTopY),
+                FactLine.topY(tc.sizes[s].w, tc.sizes[s].h),
+                label + ": the line is where ui/parts/FactLine.js puts it, which"
+                + " is where ui/Race.qml puts it")
         // The two words on the GO beat stand in two different parts of the
         // frame now -- GO in the sky column, the fact in the middle -- so what
         // has to hold is that they do not overlap each other.
@@ -559,6 +596,29 @@ Item {
                           Theme.cream, 14).count
     }
 
+    // ISSUE #4. The same window, narrowed to where the fact's own ground plate
+    // crosses it. Everything the plate covers is the fact standing on its own
+    // ink-coloured board; everything outside it is the arch's bare art, and
+    // cream there is the defect this file was written for.
+    function boardOverlapRect() {
+      var p = countdown.factPlateRect
+      var x0 = Math.max(Math.round(countdown.gantryBoardLeftX), Math.round(p.x))
+      var y0 = Math.max(Math.round(countdown.gantryBoardTopY), Math.round(p.y))
+      var x1 = Math.min(Math.round(countdown.gantryBoardRightX),
+                        Math.round(p.x + p.width))
+      var y1 = Math.min(Math.round(countdown.gantryBoardBottomY),
+                        Math.round(p.y + p.height))
+      return Qt.rect(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0))
+    }
+
+    function creamOnThePlate(img) {
+      var r = tc.boardOverlapRect()
+      if (r.width <= 0 || r.height <= 0)
+        return 0
+      return tc.countTone(img, r.x, r.y, r.x + r.width, r.y + r.height,
+                          Theme.cream, 14).count
+    }
+
     function test_06_no_cream_of_the_type_falls_inside_the_board() {
       for (var s = 0; s < tc.sizes.length; s++) {
         tc.sizeTo(tc.sizes[s].w, tc.sizes[s].h)
@@ -567,14 +627,65 @@ Item {
           // The fact fades in over 220 ms on GO and a half-faded fact would
           // make this pass for the wrong reason.
           tc.wait(b === 3 ? 300 : 20)
-          var cream = tc.creamInsideTheBoard(grabImage(countdown))
-          compare(cream, 0,
+          var img = grabImage(countdown)
+          // ISSUE #4: the fact now stands ON the board, on its own solid
+          // ground, so the count that has to be zero is the cream OFF that
+          // ground. On the three counted beats no plate is drawn at all and
+          // `onPlate` is zero, which makes this the original assertion
+          // unchanged; on GO it is the same claim about the art the plate does
+          // not cover. Cream on the bare board is still the defect, and a fact
+          // that slipped off its ground by one glyph would still be caught --
+          // it is `total - onPlate` that has to be zero, not `total`.
+          var total = tc.creamInsideTheBoard(img)
+          var onPlate = tc.creamOnThePlate(img)
+          compare(total - onPlate, 0,
                   tc.sizes[s].w + "x" + tc.sizes[s].h + " beat " + countdown.beatWord
-                  + ": " + cream + " cream pixels inside the board's rows "
+                  + ": " + (total - onPlate) + " of " + total
+                  + " cream pixels inside the board's rows "
                   + Math.round(countdown.gantryBoardTopY) + ".."
-                  + (Math.round(countdown.gantryBoardBottomY) - 1))
+                  + (Math.round(countdown.gantryBoardBottomY) - 1)
+                  + " are not on the fact's own ground")
         }
       }
+
+      // ISSUE #4, THE OTHER HALF: THE FACT IS READABLE WHERE IT CROSSES THE
+      // BOARD.
+      //
+      // "Nothing of the board reads through the ground" cannot be photographed
+      // here, and the reason is worth writing down so nobody spends an evening
+      // on it again: the board's lit FACE is `#3c142c` and the fact's ground is
+      // `#3c122a`, three units apart on one channel. They are that close on
+      // purpose -- the ground is the ink the whole picture is drawn in -- so no
+      // tolerance separates them, and a count of the face inside the plate
+      // returns the plate. That claim is proved where it can be, in test_02,
+      // from the plate's own effective alpha: an opaque rectangle cannot pass
+      // anything, and 0.80 was the whole defect.
+      //
+      // What a photograph CAN prove, and what the design actually asks for, is
+      // that the fact reads there. So: the cream is present in quantity, and it
+      // stands on the ground at the contrast the design's floor demands.
+      tc.sizeTo(1920, 1080)
+      tc.holdTheBeat(3)
+      tc.wait(300)
+      var goImg = grabImage(countdown)
+      var over = tc.boardOverlapRect()
+      verify(over.width > 40 && over.height > 8,
+             "the ground really does cross the board -- overlap "
+             + Math.round(over.width) + " x " + Math.round(over.height)
+             + " px, so a count inside it means something")
+      var factCream = tc.creamOnThePlate(goImg)
+      verify(factCream > 400,
+             "the fact is drawn where it crosses the board -- " + factCream
+             + " px of its cream inside the overlap")
+      // The ground's own colour, read off the shipped frame at a corner of the
+      // overlap rather than off the source constant, so this measures what was
+      // painted.
+      var ground = goImg.pixel(Math.round(over.x + 3), Math.round(over.y + 3))
+      var ratio = tc.contrastOf(Theme.cream, ground)
+      verify(ratio >= 4.5,
+             "and it stands on that ground at " + ratio.toFixed(2) + ":1 (cream "
+             + Theme.cream + " on " + ground + "). WCAG AA for normal text is"
+             + " 4.5:1, and the fact is the largest type in the frame.")
 
       // Part B: the same count, photographed right across the pulse.
       //

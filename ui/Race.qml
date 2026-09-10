@@ -2,6 +2,7 @@ import QtQuick
 import "parts"
 import "parts/Circuit.js" as Circuit
 import "parts/CardFx.js" as CardFx
+import "parts/FactLine.js" as FactLine
 import "../engine/engine.mjs" as Engine
 
 // The race.
@@ -1681,13 +1682,17 @@ FocusScope {
     id: rightHud
     anchors.right: parent.right
     anchors.rightMargin: race.px(30)
-    y: race.px(24)
+    // ISSUE #4: the panel's own top and height come from
+    // `ui/parts/FactLine.js`, because the line's placement is measured off
+    // them. They were the source of that placement and a literal here; now
+    // there is one copy and both readers have it.
+    y: race.px(FactLine.HUD_TOP)
     spacing: race.px(14)
 
     Rectangle {
       id: mapPanel
       width: race.px(300)
-      height: race.px(196)
+      height: race.px(FactLine.MAP_HEIGHT)
       radius: Theme.cornerRadius
       color: Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.86)
       border.width: 1
@@ -1790,22 +1795,18 @@ FocusScope {
     id: inkProbe
     font.family: Theme.mono
     font.bold: true
-    font.pixelSize: 200
-    text: "12 × 12 = 144"
+    font.pixelSize: FactLine.PROBE_SIZE
+    text: FactLine.PROBE_TEXT
   }
   readonly property real factInkRatio: inkProbe.tightBoundingRect.height > 0
-                                       ? inkProbe.tightBoundingRect.height / 200
+                                       ? inkProbe.tightBoundingRect.height / FactLine.PROBE_SIZE
                                        : 0.73
-  readonly property int factPixelSize: {
-    // A tenth of the screen height in ink, with a hair over it so rounding
-    // never lands under the floor.
-    var wanted = Math.ceil((race.height * 0.105) / Math.max(0.25, race.factInkRatio))
-    // ... and never so wide that the widest line runs off the screen.
-    var widest = inkProbe.advanceWidth > 0
-                 ? Math.floor((race.width - race.px(120)) * 200 / inkProbe.advanceWidth)
-                 : wanted
-    return Math.max(race.fs(100), Math.min(wanted, widest))
-  }
+  // ISSUE #4: the size, like the placement, is `ui/parts/FactLine.js`'s and not
+  // this screen's, so the glyphs on either side of the cut are the same glyphs
+  // at every window size rather than only at the three that were measured.
+  readonly property int factPixelSize: FactLine.pixelSize(race.width, race.height,
+                                                          race.factInkRatio,
+                                                          inkProbe.advanceWidth)
 
   // The fact's ink AS IT IS ON THE SCREEN NOW: the tight bounding box of the
   // glyphs currently drawn, in this screen's own coordinates. `factGround`
@@ -1956,7 +1957,10 @@ FocusScope {
     // the track and therefore over every effect in it.
     objectName: "factColumn"
     anchors.horizontalCenter: parent.horizontalCenter
-    y: rightHud.y + mapPanel.height + race.px(12)
+    // ISSUE #4: THE ONE PLACEMENT, WHICH `ui/Countdown.qml` ALSO READS. It used
+    // to be `rightHud.y + mapPanel.height + race.px(12)` here and a literal
+    // `px(118)` there, and the two had drifted 114 px apart.
+    y: FactLine.topY(race.width, race.height)
     spacing: race.px(28)
 
     // THE FACT IS DRAWN THE WAY THE COUNTDOWN DRAWS IT, AND IT IS THE SAME

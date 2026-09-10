@@ -1,6 +1,7 @@
 import QtQuick
 import "parts"
 import "parts/Circuit.js" as Circuit
+import "parts/FactLine.js" as FactLine
 import "../engine/engine.mjs" as Engine
 
 // PROTOTYPE (proto/golden-hour): the readout below is now a start-line scene
@@ -542,23 +543,16 @@ FocusScope {
     id: factWidest
     font.family: Theme.mono
     font.bold: true
-    font.pixelSize: 200
-    text: "12 × 12 = 144"
+    font.pixelSize: FactLine.PROBE_SIZE
+    text: FactLine.PROBE_TEXT
   }
   readonly property real factInkRatio: factWidest.tightBoundingRect.height > 0
-                                       ? factWidest.tightBoundingRect.height / 200
+                                       ? factWidest.tightBoundingRect.height / FactLine.PROBE_SIZE
                                        : 0.73
-  readonly property int factPixelSize: {
-    // A tenth of the screen height in ink, with a hair over it so rounding
-    // never lands under the floor.
-    var wanted = Math.ceil((countdown.height * 0.105) / Math.max(0.25, countdown.factInkRatio))
-    // ... and never so wide that the widest fact runs off the screen.
-    var widest = factWidest.advanceWidth > 0
-                 ? Math.floor((countdown.width - countdown.px(120)) * 200 / factWidest.advanceWidth)
-                 : wanted
-    return Math.max(countdown.fs(118), Math.min(wanted, widest))
-  }
-  readonly property int factTopY: countdown.px(118)
+  readonly property int factPixelSize: FactLine.pixelSize(countdown.width, countdown.height,
+                                                          countdown.factInkRatio,
+                                                          factWidest.advanceWidth)
+  readonly property int factTopY: FactLine.topY(countdown.width, countdown.height)
 
   // The fact's ink as it is on the screen now, in this screen's coordinates.
   // `tightBoundingRect` is measured from the BASELINE, so its `y` is negative
@@ -593,6 +587,16 @@ FocusScope {
                                                 (factGlyph.x + line.x + answerSlot.x + answerSlot.width)
                                                 - countdown.factInkRect.x,
                                                 countdown.factInkRect.height)
+  // ISSUE #4: THE GROUND UNDER THE LINE, PUBLISHED, BECAUSE IT IS NOW LOAD
+  // BEARING. The line sits across the arch's board on this screen (see
+  // `factPlate` below), so "the first fact is readable" is a claim about the
+  // PLATE -- that it contains the ink and that nothing of the board reads
+  // through it -- and not, any more, a claim that the two never meet.
+  // `tests/qml/tst_countdown_board.qml` test_02 and test_06 measure both.
+  readonly property rect factPlateRect: Qt.rect(factPlate.x, factPlate.y,
+                                                factPlate.width, factPlate.height)
+  readonly property real factPlateOpacity: factPlate.opacity * factPlate.color.a
+
   // THE LINE, AS IT READS: `7 × 8 = ▮` on the GO beat, `7 × 8 = 5▮` once a
   // digit has been typed ahead. The same construction as `Race.lineText`, so
   // the line the child is told to TYPE THE ANSWER on is the line they type on.
@@ -794,11 +798,23 @@ FocusScope {
     id: factPlate
     z: 3
     visible: opacity > 0.004
-    // The same expression `ui/Race.qml`'s `factGround` uses for the same
-    // reason, driven by the same view: the arch's crossbar is a cream-and-ink
-    // chequer and the fact is cream, so for the frames a crossbar is behind the
-    // ink the fact gets a ground.
-    opacity: (countdown.go ? 1 : 0) * place.factYield * 0.86
+    // ISSUE #4: ON THIS SCREEN THE GROUND IS SOLID, BECAUSE THE ARCH IS ALWAYS
+    // BEHIND THE LINE.
+    //
+    // The race's `factGround` fades with `factYield` -- the view's own
+    // measurement of how much of the line's box a road-spanning prop covers --
+    // because in the race the gantry SWEEPS PAST: the ground is wanted for the
+    // handful of frames a crossbar is behind the ink and is unwanted either
+    // side of them. This screen is the start line held still, so the arch is
+    // behind the line on every frame of the beat, and a yielding, 0.80-alpha
+    // plate let the banner's own lettering read straight through the fact --
+    // `BO TABL` between the 6 and the =, and a mast through the multiplication
+    // sign. See the issue for the frame.
+    //
+    // Solid, it reads as the arch's board carrying the first fact, which is
+    // what the board is for. The design's line is "the first fact readable
+    // behind GO", and readable is the requirement the alpha was failing.
+    opacity: (countdown.go ? 1 : 0)
     Behavior on opacity {
       enabled: !countdown.reducedMotion
       NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
@@ -808,7 +824,9 @@ FocusScope {
     width: countdown.lineInkRect.width + countdown.px(44)
     height: countdown.lineInkRect.height + countdown.px(28)
     radius: Theme.cornerRadiusSmall
-    color: Qt.rgba(0.235, 0.071, 0.157, 0.80)
+    // Opaque. `tst_countdown_board` test_06 measures that nothing of the arch
+    // reads through it.
+    color: Qt.rgba(0.235, 0.071, 0.157, 1.0)
   }
 
   // ROUND 8: THE LINE, NOT THE FACT. Round 7 drew `7 × 8` here with no
