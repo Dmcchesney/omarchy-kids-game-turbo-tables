@@ -275,6 +275,18 @@ FocusScope {
   property int highlighted: 0
   property int targetIndex: 0
 
+  // ISSUE #5. THE FOURTH BEAT: THE HIGHLIGHTED CARD STANDS PROUD.
+  //
+  // On the panel's own clock like the other three, and for the same reason --
+  // `fxNow` is the effect clock the host drives, so a frame strip catches the
+  // lift on the very frames it catches the road, and a strip written twice is
+  // still the same bytes. A `Behavior` here would have been a wall-clock
+  // animation inside a screen whose whole determinism rests on there not being
+  // one.
+  property real liftBorn: -1e9
+  onHighlightedChanged: picker.liftBorn = picker.fxNow
+  readonly property real liftT: picker.fxNow - picker.liftBorn
+
   readonly property string highlightedCard: (picker.hand.length > 0
                                              && picker.highlighted >= 0
                                              && picker.highlighted < picker.hand.length)
@@ -555,14 +567,61 @@ FocusScope {
 
       // THREE ACROSS, NOT THREE DOWN. `ui/parts/HandCard.qml` draws a portrait
       // card in playing-card proportions; this is the hand it is laid out in.
+      //
+      // ISSUE #5: the bay is the row plus the room the raised card needs above
+      // it. The Column above must leave that room whether or not a card is
+      // currently raised, or the panel would breathe every time the highlight
+      // moved -- so the reserve is in the LAYOUT and the lift is in the paint.
+      Item {
+        id: handBay
+        width: parent.width
+        height: handRow.height + handRow.liftHeadroom
+
       Row {
         // NOT `id: hand`: a file-scope id beats the root object's own property
         // in QML's unqualified lookup, and that shadowing once disabled every
         // targeted card in the deck for a whole round.
         id: handRow
+        y: handRow.liftHeadroom
         width: parent.width
         spacing: picker.px(9)
         readonly property real cardWidth: Math.floor((width - spacing * 2) / 3)
+
+        // ISSUE #3. EVERY CARD IN A HAND IS THE SAME HEIGHT: THE TALLEST ONE'S.
+        //
+        // `ui/parts/HandCard.qml` is now as tall as its own words need once the
+        // type hits its legibility floors, which at 1024 x 600 makes a two-line
+        // `Pothole / ADD 8 TO ONE RIVAL` shorter than a three-line
+        // `Roll Cage / BLOCK THE NEXT ATTACK` -- and a hand of cards with a
+        // ragged foot is not a hand of cards. `childrenRect` is the bounding
+        // box of the SLOTS, and a slot is exactly one card's natural height, so
+        // this is the maximum of the three for free.
+        //
+        // IT DOES NOT READ BACK, WHICH IS WHY IT IS NOT A LOOP. A slot's height
+        // is its card's `implicitHeight`, and a card's `implicitHeight` is a
+        // function of its words, its width and its type sizes -- never of the
+        // height it is handed. The cards are then DRAWN at the maximum; only
+        // the invisible slot under a short card stays short.
+        readonly property int cardHeight: Math.ceil(childrenRect.height)
+
+        // ISSUE #5. THE HIGHLIGHTED CARD LIFTS AND GROWS.
+        //
+        // It used to differ from its neighbours by a border tone and an
+        // 11 x 21 px arrow in its band, and the question the issue asks is
+        // whether an eight-year-old with their eyes on the fact can find that
+        // from across the room. A tone cannot: it is the first thing lost to
+        // peripheral vision, to a washed-out panel and to a child who does not
+        // yet know which tone means what. A card standing proud of its
+        // neighbours is a SILHOUETTE, and a silhouette survives all three.
+        //
+        // The lift needs somewhere to go, or the raised card would push up into
+        // `USING ONE SPENDS ALL THREE` above it, so the row reserves the room
+        // it takes: the lift itself, plus the half of the growth that happens
+        // above the card's own top edge.
+        readonly property int liftBy: picker.px(10)
+        readonly property real liftGrow: 0.06
+        readonly property int liftHeadroom: handRow.liftBy
+                                            + Math.ceil(handRow.cardHeight * handRow.liftGrow / 2)
 
       Repeater {
         model: picker.shownHand
@@ -595,11 +654,34 @@ FocusScope {
                                           / picker.slamSpan
 
           width: handRow.cardWidth
+          // NATURAL, not uniform: this is the measurement `handRow.cardHeight`
+          // takes the maximum of, so it must not read that maximum back.
           height: card.implicitHeight
+
+          // ISSUE #5. How raised this card is, 0 to 1. A card is raised when it
+          // is the highlighted one and the hand is sitting still -- never while
+          // the hand is being dealt or flying off, both of which own the card's
+          // y and scale for their own beat.
+          //
+          // REDUCED MOTION TAKES IT AS A CUT, NOT AS A LOSS. The card still
+          // stands proud of its neighbours; it simply arrives there on the
+          // frame the highlight moves instead of over 140 ms. Turning the
+          // animation off must never turn the STATE off, which is the whole
+          // difference between reduced motion and no feedback. Nothing here
+          // repeats, so the 3 Hz cap has nothing to say about it.
+          readonly property bool raised: cardSlot.isChosen && !picker.slamming
+                                         && !picker.dealing
+          readonly property real liftU: !cardSlot.raised ? 0
+                                        : (picker.reducedMotion ? 1
+                                           : CardFx.easeOut(Math.max(0, Math.min(1,
+                                               picker.liftT / CardFx.HAND.liftMs))))
 
           HandCard {
             id: card
             width: handRow.cardWidth
+            // ISSUE #3: every card in the hand is drawn at the tallest one's
+            // height, so the hand has one foot. See `handRow.cardHeight`.
+            height: Math.max(card.implicitHeight, handRow.cardHeight)
             cardId: String(modelData)
             index: cardSlot.slot + 1
             selected: cardSlot.isChosen && !picker.slamming
@@ -637,9 +719,11 @@ FocusScope {
             // screen the moment it is shown and found exactly that.
             enabled: !picker.dealing
 
-            // The deal: up from the bottom right.
-            y: picker.reducedMotion ? 0
-               : (1 - CardFx.easeOut(cardSlot.dealU)) * picker.dockWidth * 0.30
+            // The deal: up from the bottom right. ISSUE #5 subtracts the lift,
+            // so a highlighted card sits above the row's own line.
+            y: (picker.reducedMotion ? 0
+                : (1 - CardFx.easeOut(cardSlot.dealU)) * picker.dockWidth * 0.30)
+               - cardSlot.liftU * handRow.liftBy
             opacity: Math.min(1, cardSlot.dealU * 2.4)
                      * (cardSlot.slamU < 0 ? 1
                         : (cardSlot.isChosen
@@ -648,16 +732,19 @@ FocusScope {
                                     / Math.max(0.001, 1 - cardSlot.slamEnd))
                            : Math.max(0, 1 - cardSlot.slamU / Math.max(0.001, cardSlot.slamEnd + 0.35))))
             transformOrigin: Item.Center
-            // The fired card: enlarge, then slam.
-            scale: (picker.reducedMotion || cardSlot.slamU < 0) ? 1
-                   : (cardSlot.isChosen
-                      ? (cardSlot.slamU < cardSlot.enlargeEnd
-                         ? 1 + 0.16 * CardFx.easeOut(cardSlot.slamU / cardSlot.enlargeEnd)
-                         : (cardSlot.slamU < cardSlot.slamEnd
-                            ? 1.16 - 0.30 * CardFx.easeIn((cardSlot.slamU - cardSlot.enlargeEnd)
-                                                          / Math.max(0.001, cardSlot.slamEnd - cardSlot.enlargeEnd))
-                            : 0.86))
-                      : 1)
+            // The fired card: enlarge, then slam. ISSUE #5's growth multiplies
+            // in rather than replacing: the slam is a beat that happens TO the
+            // highlighted card, so it must start from the size that card is.
+            scale: ((picker.reducedMotion || cardSlot.slamU < 0) ? 1
+                    : (cardSlot.isChosen
+                       ? (cardSlot.slamU < cardSlot.enlargeEnd
+                          ? 1 + 0.16 * CardFx.easeOut(cardSlot.slamU / cardSlot.enlargeEnd)
+                          : (cardSlot.slamU < cardSlot.slamEnd
+                             ? 1.16 - 0.30 * CardFx.easeIn((cardSlot.slamU - cardSlot.enlargeEnd)
+                                                           / Math.max(0.001, cardSlot.slamEnd - cardSlot.enlargeEnd))
+                             : 0.86))
+                       : 1))
+                   * (1 + cardSlot.liftU * handRow.liftGrow)
             // The other two: flip face down, then fly off to the right.
             transform: [
               Scale {
@@ -677,6 +764,7 @@ FocusScope {
             ]
           }
         }
+      }
       }
       }
 

@@ -107,7 +107,37 @@ Item {
   // A PORTRAIT CARD, IN THE PROPORTIONS OF A PLAYING CARD. Poker stock is 1.4
   // times as tall as it is wide and the eye knows the shape before it reads a
   // word of it, which is the whole reason for drawing one.
-  implicitHeight: Math.round(width * 1.4)
+  //
+  // ISSUE #3 -- THE RATIO IS A FLOOR, NOT A CEILING.
+  //
+  // It used to be the whole of the height, and at 1024 x 600 that put the
+  // effect line through the rarity word: `ADD 8 TO ONE RIVAL` over RARE,
+  // `BLOCK THE NEXT ATTACK` past the bottom edge, `ADD 15 TO ONE RIVAL` over
+  // LEGENDARY. The cause is that the TYPE has floors and the BOX did not.
+  // `ui/Picker.qml` sets `labelSize: fsFloor(22, 18)` and
+  // `detailSize: fsFloor(14, 13)`, so below about a 0.82 scale the words stop
+  // shrinking -- deliberately, because 9 px is under every legibility floor in
+  // the design -- while `width * 1.4` kept shrinking underneath them. Two more
+  // wrapped lines then had nowhere to go but through the rarity word.
+  //
+  // So the card is as tall as the taller of the two: the playing-card ratio,
+  // or exactly what the band, the text block and the rarity word need with
+  // their own margins. The band, the body and the rarity word each get a row
+  // of their own and NEVER share one, at any size, not only at the three that
+  // were checked. The consequence is honest and visible: at 1024 x 600 the
+  // card is a little taller than poker stock, because the words a seven-year-
+  // old has to read do not fit on poker stock at that scale. The dock is
+  // anchored to the bottom right and `ui/Race.qml` stacks the charge bar off
+  // `dockHeight`, so the panel grows upward into the sky and nothing below it
+  // moves.
+  readonly property int bandHeight: Math.round(card.labelSize * 1.6)
+  // The gap over and under the text block, and the rarity word's own margin.
+  readonly property int bodyGap: Math.max(3, card.px(6))
+  readonly property int tierMargin: card.px(7)
+  readonly property int contentHeight: 3 + card.bandHeight + card.bodyGap
+                                       + Math.ceil(body.height) + card.bodyGap
+                                       + Math.ceil(tierWord.height) + card.tierMargin
+  implicitHeight: Math.max(Math.round(width * 1.4), card.contentHeight)
 
   // PIECE M: a Button, because it is one now. It was StaticText while the only
   // way to reach it was a key the picker's own handler read, and the enumeration
@@ -171,7 +201,7 @@ Item {
     x: face.border.width
     y: face.border.width
     width: parent.width - face.border.width * 2
-    height: Math.round(card.labelSize * 1.6)
+    height: card.bandHeight
     radius: Theme.cornerRadiusSmall
     color: Qt.rgba(card.tierColor.r, card.tierColor.g, card.tierColor.b,
                    card.selected ? 0.42 : 0.26)
@@ -227,8 +257,14 @@ Item {
     // have taken theirs, so a one-line effect and a two-line one both sit in
     // the middle of the card rather than hanging off the top of it.
     readonly property real fieldTop: band.y + band.height
-    readonly property real fieldBottom: card.height - card.px(7) - card.detailSize * 1.4
-    y: Math.max(fieldTop + card.px(4),
+    // ISSUE #3: the rarity word's OWN measured height, not a ratio of the
+    // detail size. The word is drawn at `max(12, detailSize * 0.86)` -- that
+    // floor is why the two numbers part company at small scales -- so a
+    // reserve computed from `detailSize` was reserving for a word of a
+    // different size than the one on the card. This asks the word.
+    readonly property real fieldBottom: card.height - card.tierMargin
+                                        - Math.ceil(tierWord.height) - card.bodyGap
+    y: Math.max(fieldTop + card.bodyGap,
                 fieldTop + (fieldBottom - fieldTop - height) / 2)
     spacing: card.px(6)
 
@@ -259,9 +295,10 @@ Item {
 
   // The rarity, spelled out, along the foot of the card.
   Text {
+    id: tierWord
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    anchors.bottomMargin: card.px(7)
+    anchors.bottomMargin: card.tierMargin
     textFormat: Text.PlainText
     text: card.tier.toUpperCase()
     color: card.tierColor
